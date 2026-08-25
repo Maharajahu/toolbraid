@@ -1,0 +1,18 @@
+{
+  "name": "toolbraid",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A human-approved semantic orchestration layer for WebMCP tools.",
+  "scripts": {
+    "dev": "node scripts/serve.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "test:e2e": "${E2E_PYTHON:-python3} scripts/e2e.py",
+    "check": "node scripts/check-project.mjs",
+    "validate": "npm run check && npm test && npm run test:e2e"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT"
+}

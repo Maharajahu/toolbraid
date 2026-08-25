@@ -1,0 +1,10 @@
+{
+  "name": "ToolBraid",
+  "short_name": "ToolBraid",
+  "description": "WebMCP semantic mission control",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#071014",
+  "theme_color": "#071014",
+  "icons": [{ "src": "./assets/favicon.svg", "sizes": "any", "type": "image/svg+xml" }]
+}

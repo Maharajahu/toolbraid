@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#071014">
+  <meta name="description" content="ToolBraid dynamically discovers, normalizes, plans, and executes WebMCP capabilities with human approval.">
+  <title>ToolBraid · WebMCP mission control</title>
+  <link rel="icon" href="./assets/favicon.svg" type="image/svg+xml">
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <div class="noise" aria-hidden="true"></div>
+  <header class="topbar">
+    <a class="brand" href="./" aria-label="ToolBraid home">
+      <svg class="brand-mark" viewBox="0 0 52 52" role="img" aria-label="Three capability paths braided together">
+        <rect x="1" y="1" width="50" height="50" rx="14" fill="none" stroke="currentColor" stroke-opacity=".12"/>
+        <path d="M10 12c16 0 16 28 32 28" class="strand strand-a"/>
+        <path d="M10 26c16 0 16-14 32-14" class="strand strand-b"/>
+        <path d="M10 40c16 0 16-14 32-14" class="strand strand-c"/>
+      </svg>
+      <span><strong>ToolBraid</strong><small>WebMCP mission control</small></span>
+    </a>
+    <div class="topbar-status" aria-label="Runtime status">
+      <span class="status-pill" id="runtime-pill"><i></i><span data-runtime-label>Detecting WebMCP</span></span>
+      <span class="status-pill"><b data-provider-count>0</b> provider sites</span>
+      <span class="status-pill"><b data-tool-count>0</b> discovered tools</span>
+    </div>
+    <button class="ghost-button compact" type="button" data-action="reset">Reset mission</button>
+  </header>
+
+  <main class="app-shell">
+    <section class="mission-panel surface" aria-labelledby="mission-title">
+      <div class="section-heading">
+        <div><p class="eyebrow">01 · Human intent</p><h1 id="mission-title">Give the web a goal, not a click path.</h1></div>
+        <span class="human-badge">Human controlled</span>
+      </div>
+
+      <label class="field-label" for="goal">Mission</label>
+      <textarea id="goal" data-field="goal" rows="5">Find transport from Coventry to London tomorrow, find a hotel near Amazon LHR16, keep the total under £250, compare the options, and ask me before holding anything.</textarea>
+
+      <div class="constraint-grid">
+        <label><span>Origin</span><input data-field="origin" value="Coventry" autocomplete="off"></label>
+        <label><span>Destination</span><input data-field="destination" value="London" autocomplete="off"></label>
+        <label class="span-2"><span>Final destination</span><input data-field="destinationAddress" value="1 Principal Place, London EC2A 2FA" autocomplete="off"></label>
+        <label><span>Travel date</span><input data-field="date" type="date"></label>
+        <label><span>Total budget</span><span class="money-field"><b>£</b><input data-field="budget" type="number" min="1" value="250"></span></label>
+      </div>
+
+      <div class="mission-actions">
+        <button class="primary-button" type="button" data-action="plan"><span>Build capability plan</span><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 10h11m-4-4 4 4-4 4"/></svg></button>
+        <button class="secondary-button" type="button" data-action="run-safe" disabled>Run safe steps</button>
+      </div>
+
+      <div class="agent-contract">
+        <div class="agent-contract-head"><span class="mini-icon">⌘</span><strong>Agent contract</strong></div>
+        <p>The page exposes orchestration tools through <code>document.modelContext</code>. Read-only work can run automatically. External state changes remain blocked until a person approves them in this UI.</p>
+        <div class="contract-tools"><code>toolbraid.plan_mission</code><code>toolbraid.execute_safe_steps</code><code>toolbraid.execute_approved_actions</code></div>
+      </div>
+
+      <div class="mission-metrics" aria-label="Mission metrics">
+        <div><span>Capabilities</span><strong data-metric="capabilities">0</strong></div>
+        <div><span>Quarantined</span><strong data-metric="quarantined">0</strong></div>
+        <div><span>Approval gates</span><strong data-metric="approvals">0</strong></div>
+      </div>
+    </section>
+
+    <section class="orchestration-panel surface" aria-labelledby="graph-title">
+      <div class="orchestration-header">
+        <div><p class="eyebrow">02 · Capability braid</p><h2 id="graph-title">Cross-site execution graph</h2></div>
+        <div class="phase-chip" data-phase-chip="idle"><span></span><b data-phase-label>Waiting for mission</b></div>
+      </div>
+      <div class="progress-shell" aria-label="Plan progress">
+        <div class="progress-copy"><span data-progress-copy>No plan created</span><b data-progress-percent>0%</b></div>
+        <div class="progress-track"><span data-progress-bar></span></div>
+      </div>
+
+      <div class="empty-graph" data-empty-graph>
+        <div class="empty-orbit" aria-hidden="true"><span class="orbit orbit-a"></span><span class="orbit orbit-b"></span><span class="orbit orbit-c"></span><svg viewBox="0 0 52 52"><path d="M10 12c16 0 16 28 32 28"/><path d="M10 26c16 0 16-14 32-14"/><path d="M10 40c16 0 16-14 32-14"/></svg></div>
+        <h3>One intent. Many websites. One accountable plan.</h3>
+        <p>ToolBraid will discover each provider's WebMCP tools, map incompatible names and schemas into common capabilities, then build a dependency-aware plan.</p>
+      </div>
+      <div class="execution-graph" data-graph hidden></div>
+
+      <article class="recommendation-card" data-recommendation hidden>
+        <div class="recommendation-top"><div><p class="eyebrow">Selected mission</p><h3>Best feasible combination</h3></div><span class="recommendation-total" data-recommendation-total>£0</span></div>
+        <div class="recommendation-grid">
+          <div><span>Rail</span><strong data-recommendation-rail>—</strong><small data-recommendation-times>—</small></div>
+          <div><span>Stay</span><strong data-recommendation-stay>—</strong><small data-recommendation-address>—</small></div>
+          <div><span>Access</span><strong data-recommendation-walk>—</strong><small data-recommendation-distance>—</small></div>
+          <div><span>Budget remaining</span><strong data-recommendation-savings>—</strong><small>before payment or final booking</small></div>
+        </div>
+      </article>
+
+      <article class="completion-card" data-completion hidden>
+        <div class="completion-icon">✓</div>
+        <div><p class="eyebrow">Mission staged</p><h3>Both reversible holds were created.</h3><p data-completion-copy>No purchase was made. The user retains the final checkout decision on each provider site.</p></div>
+      </article>
+    </section>
+
+    <aside class="inspector-panel surface" aria-labelledby="inspector-title">
+      <div class="inspector-header"><div><p class="eyebrow">03 · Evidence</p><h2 id="inspector-title">Why each action exists</h2></div><span class="live-dot">Live</span></div>
+      <div class="tabs" role="tablist" aria-label="Inspector views">
+        <button class="tab active" type="button" role="tab" aria-selected="true" data-tab="mappings">Mappings</button>
+        <button class="tab" type="button" role="tab" aria-selected="false" data-tab="audit">Audit</button>
+        <button class="tab" type="button" role="tab" aria-selected="false" data-tab="state">State</button>
+      </div>
+      <div class="tab-panel active" data-panel="mappings"><div class="inspector-empty" data-mappings-empty><span>∿</span><p>Tool mappings will appear after discovery.</p></div><div class="mapping-list" data-mapping-list></div></div>
+      <div class="tab-panel" data-panel="audit"><div class="audit-list" data-audit-list><div class="inspector-empty"><span>◷</span><p>The execution trace is empty.</p></div></div></div>
+      <div class="tab-panel" data-panel="state"><pre class="state-view" data-state-view>{ "phase": "booting" }</pre></div>
+    </aside>
+
+    <section class="provider-network surface" aria-labelledby="providers-title">
+      <div class="provider-network-head">
+        <div><p class="eyebrow">04 · Independent capability providers</p><h2 id="providers-title">Live websites inside the same browser context</h2></div>
+        <p>Each frame owns its UI, state, schemas, and WebMCP tool implementations. ToolBraid does not call private provider APIs.</p>
+      </div>
+      <div class="provider-grid">
+        <article class="provider-frame-card" data-provider-card="vectorrail"><div class="provider-card-head"><span class="provider-color rail"></span><strong>Transport</strong><i data-provider-status="vectorrail">Connecting</i></div><iframe src="./providers/rail.html" title="VectorRail WebMCP provider" allow="tools"></iframe></article>
+        <article class="provider-frame-card" data-provider-card="nestsquare"><div class="provider-card-head"><span class="provider-color stay"></span><strong>Accommodation</strong><i data-provider-status="nestsquare">Connecting</i></div><iframe src="./providers/stay.html" title="NestSquare WebMCP provider" allow="tools"></iframe></article>
+        <article class="provider-frame-card" data-provider-card="walkmesh"><div class="provider-card-head"><span class="provider-color geo"></span><strong>Location</strong><i data-provider-status="walkmesh">Connecting</i></div><iframe src="./providers/geo.html" title="WalkMesh WebMCP provider" allow="tools"></iframe></article>
+        <article class="provider-frame-card adversarial" data-provider-card="mirage"><div class="provider-card-head"><span class="provider-color rogue"></span><strong>Adversarial fixture</strong><i data-provider-status="mirage">Connecting</i></div><iframe src="./providers/rogue.html" title="Mirage adversarial WebMCP fixture" allow="tools"></iframe></article>
+      </div>
+    </section>
+  </main>
+
+  <div class="approved-actionbar" data-approved-actionbar hidden>
+    <div><span>✓</span><p><strong>Human approval recorded</strong><small>Only selected reversible actions can execute.</small></p></div>
+    <button class="primary-button" type="button" data-action="run-approved">Execute approved actions</button>
+  </div>
+
+  <div class="approval-backdrop" data-approval-backdrop hidden></div>
+  <section class="approval-drawer" data-approval-drawer hidden role="dialog" aria-modal="true" aria-labelledby="approval-title">
+    <div class="drawer-grip" aria-hidden="true"></div>
+    <button class="drawer-close" type="button" data-action="close-approval" aria-label="Close approval dialog">×</button>
+    <p class="eyebrow">Human checkpoint</p>
+    <h2 id="approval-title">Review external state changes</h2>
+    <p class="drawer-copy">Search and comparison are complete. These reversible actions cannot execute until a person approves them.</p>
+    <div class="approval-actions" data-approval-actions></div>
+    <div class="approval-footer">
+      <div class="approval-note"><span>🔒</span><p><strong>No payment and no final booking.</strong><small>Only temporary holds will be created.</small></p></div>
+      <div class="approval-buttons"><button class="ghost-button" type="button" data-action="decline">Decline</button><button class="primary-button" type="button" data-action="approve">Approve selected actions</button></div>
+    </div>
+  </section>
+
+  <div class="toast-region" data-toast-region aria-live="polite"></div>
+  <script type="module" src="./js/app.js"></script>
+</body>
+</html>

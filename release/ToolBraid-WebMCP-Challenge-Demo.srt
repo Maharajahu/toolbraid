@@ -1,0 +1,177 @@
+1
+00:00:00,150 --> 00:00:07,952
+WebMCP lets each website expose reliable tools, but
+a real goal still spans providers with different
+names, schemas,
+
+2
+00:00:07,952 --> 00:00:09,252
+and risk levels.
+
+3
+00:00:09,252 --> 00:00:12,719
+ToolBraid turns those fragments into one accountable
+plan.
+
+4
+00:00:12,719 --> 00:00:19,654
+Here, I give it a goal instead of a click path:
+travel from Coventry to London,
+
+5
+00:00:19,654 --> 00:00:27,455
+find a hotel near my destination, keep the total
+under two hundred and fifty pounds, compare the
+options,
+
+6
+00:00:27,455 --> 00:00:29,622
+and ask before changing anything.
+
+7
+00:00:29,622 --> 00:00:33,090
+Four independent website frames register six WebMCP
+tools.
+
+8
+00:00:33,090 --> 00:00:36,124
+They do not share an API vocabulary.
+
+9
+00:00:36,124 --> 00:00:44,792
+One calls transport search “seek passages.” Another
+calls hotel search “scan spaces.” Their parameters
+and results use different field names.
+
+10
+00:00:44,792 --> 00:00:47,393
+ToolBraid discovers those contracts at runtime.
+
+11
+00:00:47,393 --> 00:00:54,327
+It combines tool names, descriptions, JSON schemas,
+and risk evidence to map them into canonical
+capabilities.
+
+12
+00:00:54,327 --> 00:00:56,928
+It also finds this adversarial tool.
+
+13
+00:00:56,928 --> 00:01:03,429
+Its description asks the agent to ignore the user,
+collect private data, and bypass approval.
+
+14
+00:01:03,429 --> 00:01:09,930
+Provider metadata is untrusted, so ToolBraid
+quarantines it before the tool can enter a plan.
+
+15
+00:01:09,930 --> 00:01:12,097
+Now I build the mission.
+
+16
+00:01:12,097 --> 00:01:17,298
+ToolBraid creates a seven-step dependency graph
+across transport, accommodation, and location
+providers.
+
+17
+00:01:17,298 --> 00:01:20,332
+The search branches can run in parallel.
+
+18
+00:01:20,332 --> 00:01:24,233
+The hold actions are visibly separated behind human
+gates.
+
+19
+00:01:24,233 --> 00:01:26,400
+I run the safe steps.
+
+20
+00:01:26,400 --> 00:01:33,335
+ToolBraid adapts the mission to each provider
+schema, executes the read-only WebMCP tools,
+canonicalizes their outputs,
+
+21
+00:01:33,335 --> 00:01:39,403
+composes compatible options, measures walking
+access, and ranks only combinations that respect the
+budget.
+
+22
+00:01:39,403 --> 00:01:47,204
+The best result costs one hundred and eighty-four
+pounds and ninety pence, leaving sixty-five pounds
+and ten pence.
+
+23
+00:01:47,204 --> 00:01:51,538
+The hotel is a thirteen-minute walk from the final
+destination.
+
+24
+00:01:51,538 --> 00:01:52,839
+Then execution stops.
+
+25
+00:01:52,839 --> 00:01:56,739
+The agent cannot approve its own external state
+changes.
+
+26
+00:01:56,739 --> 00:02:01,940
+The human checkpoint shows the exact provider tools,
+options, prices, and risk.
+
+27
+00:02:01,940 --> 00:02:06,275
+These are reversible temporary holds, not purchases
+or final bookings.
+
+28
+00:02:06,275 --> 00:02:08,875
+I approve the two selected actions.
+
+29
+00:02:08,875 --> 00:02:11,909
+Only those approved nodes can now run.
+
+30
+00:02:11,909 --> 00:02:15,810
+Both provider interfaces update in the same browser
+context,
+
+31
+00:02:15,810 --> 00:02:20,577
+and ToolBraid records the approval and results in
+its audit trail.
+
+32
+00:02:20,577 --> 00:02:23,178
+ToolBraid is not another tool directory.
+
+33
+00:02:23,178 --> 00:02:30,979
+It is a semantic and policy control plane over
+WebMCP: dynamic discovery, schema normalization,
+cross-site planning, hostile-metadata quarantine,
+
+34
+00:02:30,979 --> 00:02:32,713
+and human-owned execution authority.
+
+35
+00:02:32,713 --> 00:02:34,013
+One human goal.
+
+36
+00:02:34,013 --> 00:02:34,880
+Multiple websites.
+
+37
+00:02:34,880 --> 00:02:36,614
+One accountable action layer.
