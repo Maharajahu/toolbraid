@@ -1,87 +1,58 @@
-# Testing Guide
+# Testing Strategy
 
-## Commands
+ToolBraid is validated at three artifact levels.
 
-```bash
-npm test
-```
+## 1. Modular source
 
-Runs all pure Node unit and contract tests.
+`npm run validate:ci` checks required assets, unfinished markers, JavaScript syntax and all unit/security tests.
 
-```bash
-python3 -m pip install -r requirements-e2e.txt
-python3 -m playwright install chromium
-npm run test:e2e
-```
+Coverage includes:
 
-Runs the complete browser mission and writes screenshots.
+- semantic tool mapping
+- hostile metadata quarantine
+- risk classification
+- DAG construction
+- ranked alternatives
+- input schema validation
+- canonical output validation
+- read-only fallback
+- no automatic mutation fallback
+- plan-bound approval
+- option/provider/price binding
+- tamper detection
+- single-use approval and replay rejection
 
-An existing browser binary can be selected with:
+## 2. Generated standalone artifact
 
-```bash
-E2E_CHROMIUM=/usr/bin/chromium npm run test:e2e
-```
+`npm run build` creates `dist/index.html` with all application and provider code embedded. `npm run e2e:standalone` serves that exact file and executes the full mission at 1440×1050 and 390×844.
 
-A non-default Python can be selected with:
+Assertions include:
 
-```bash
-E2E_PYTHON=/path/to/python npm run test:e2e
-```
+- 4 providers
+- 6 discovered tools
+- 1 quarantined tool
+- 7 plan nodes
+- 5 safe completed nodes before approval
+- £184.90 recommendation
+- 13-minute walking result
+- agent self-approval blocked
+- human approval source
+- 64-character SHA-256 plan fingerprint
+- two action fingerprints
+- two hold IDs
+- approval consumption
+- replay rejection
+- zero material browser errors
+- no mobile horizontal overflow
 
-## Coverage map
+## 3. Production release
 
-| Behavior | Unit/contract | Browser E2E |
-|---|---:|---:|
-| Natural-language mission extraction | ✓ | ✓ |
-| Structured override precedence | ✓ | ✓ |
-| Unknown tool-name normalization | ✓ | ✓ |
-| Low-signal rejection | ✓ | Indirect |
-| Metadata quarantine | ✓ | ✓ |
-| Required-capability failure | ✓ | Indirect |
-| Seven-node DAG | ✓ | ✓ |
-| Approval dependency blocking | ✓ | ✓ |
-| Agent self-approval rejection | ✓ | ✓ |
-| Provider-independent output composition | ✓ | ✓ |
-| Budget-aware ranking | ✓ | ✓ |
-| Provider iframe registration |  | ✓ |
-| Visible approval workflow |  | ✓ |
-| Reversible hold execution |  | ✓ |
-| Browser console errors |  | ✓ |
-| Desktop screenshot evidence |  | ✓ |
-| 390 px responsive layout and no horizontal overflow |  | ✓ |
+`release/index.html` is the audited single-file production build. `npm run check:release` verifies the WebMCP surface, security controls and disclosure text. `npm run e2e:release` runs the same complete browser flow.
 
-## Current result
+## 4. Deployment transport
 
-Validated on 25 August 2026 with:
+`npm run build:deploy` compresses the standalone build into a small loader plus eight chunks. The loader is tested as a served artifact, including decompression and document replacement.
 
-- Node.js 22.16.0
-- Chromium 144.0.7559.96
-- Playwright 1.57.0
+## Browser environment
 
-Result:
-
-```text
-11 tests passed
-0 tests failed
-E2E PASS
-Mobile responsive smoke PASS
-Agent self-approval guard PASS
-```
-
-E2E output:
-
-```json
-{
-  "providers": 4,
-  "discoveredTools": 6,
-  "quarantined": 1,
-  "planNodes": 7,
-  "selectedTotal": 184.90,
-  "humanApprovalNodes": 2,
-  "mobileViewportWidth": 390
-}
-```
-
-## Environmental note
-
-The build environment's managed Chromium initially blocked all URLs through an enterprise `URLBlocklist`. For isolated local validation only, that policy was temporarily removed while the E2E process ran and then restored immediately afterward. No policy modification exists in the repository or product code.
+The automated tests use headless Chromium. If native WebMCP is unavailable, ToolBraid uses its compatibility runtime. Native registration remains present and is contract-checked in the production release.

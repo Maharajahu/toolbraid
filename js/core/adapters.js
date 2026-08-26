@@ -51,6 +51,61 @@ export function buildToolInput(capabilityId, schema, context) {
   return input;
 }
 
+function typeMatches(value, type) {
+  if (type === 'array') return Array.isArray(value);
+  if (type === 'object') return value !== null && typeof value === 'object' && !Array.isArray(value);
+  if (type === 'integer') return Number.isInteger(value);
+  if (type === 'number') return typeof value === 'number' && Number.isFinite(value);
+  if (type === 'string') return typeof value === 'string';
+  if (type === 'boolean') return typeof value === 'boolean';
+  if (type === 'null') return value === null;
+  return true;
+}
+
+function validationError(message, details = {}) {
+  const error = new Error(message);
+  error.code = 'SCHEMA_VALIDATION_FAILED';
+  error.details = details;
+  return error;
+}
+
+export function validateToolInput(schema = {}, input = {}) {
+  if (!typeMatches(input, schema.type ?? 'object')) {
+    throw validationError(`Tool input must be ${schema.type ?? 'object'}.`, { expected: schema.type ?? 'object' });
+  }
+  for (const required of schema.required ?? []) {
+    if (!(required in input) || input[required] === undefined || input[required] === null || input[required] === '') {
+      throw validationError(`Missing required tool input field: ${required}`, { field: required });
+    }
+  }
+  for (const [name, value] of Object.entries(input)) {
+    const definition = schema.properties?.[name];
+    if (!definition) continue;
+    if (definition.type && !typeMatches(value, definition.type)) {
+      throw validationError(`Invalid type for ${name}: expected ${definition.type}.`, { field: name, expected: definition.type });
+    }
+    if (definition.enum && !definition.enum.includes(value)) {
+      throw validationError(`Invalid value for ${name}.`, { field: name, allowed: definition.enum });
+    }
+    if (typeof value === 'number') {
+      if (definition.minimum !== undefined && value < definition.minimum) {
+        throw validationError(`${name} must be at least ${definition.minimum}.`, { field: name, minimum: definition.minimum });
+      }
+      if (definition.maximum !== undefined && value > definition.maximum) {
+        throw validationError(`${name} must not exceed ${definition.maximum}.`, { field: name, maximum: definition.maximum });
+      }
+    }
+    if (Array.isArray(value) && definition.items?.type) {
+      value.forEach((item, index) => {
+        if (!typeMatches(item, definition.items.type)) {
+          throw validationError(`Invalid item type for ${name}[${index}].`, { field: name, index, expected: definition.items.type });
+        }
+      });
+    }
+  }
+  return input;
+}
+
 function findArray(payload) {
   if (Array.isArray(payload)) return payload;
   if (!payload || typeof payload !== 'object') return [];
@@ -99,11 +154,37 @@ export function canonicalizeToolOutput(capabilityId, payload) {
   }
   if (capabilityId.endsWith('.hold')) {
     return {
-      holdId: String(getByAliases(payload, OUTPUT_ALIASES.holdId, 'hold-created')),
+      holdId: String(getByAliases(payload, OUTPUT_ALIASES.holdId, '')),
       expiresAt: String(getByAliases(payload, OUTPUT_ALIASES.expiresAt, '')),
       status: String(getByAliases(payload, ['status'], 'held')),
       raw: payload,
     };
   }
   return payload;
+}
+
+export function validateCanonicalOutput(capabilityId, output) {
+  const fail = (message, details = {}) => {
+    const error = validationError(message, { capabilityId, ...details });
+    error.code = 'OUTPUT_VALIDATION_FAILED';
+    throw error;
+  };
+
+  if (['travel.search', 'accommodation.search', 'location.distance'].includes(capabilityId)) {
+    if (!Array.isArray(output)) fail(`Canonical output for ${capabilityId} must be an array.`);
+    output.forEach((item, index) => {
+      if (!item || typeof item !== 'object' || !item.id) fail(`Canonical ${capabilityId} item ${index} is missing an id.`, { index });
+      if (capabilityId !== 'location.distance' && (!Number.isFinite(item.price) || item.price < 0)) {
+        fail(`Canonical ${capabilityId} item ${index} has an invalid price.`, { index });
+      }
+      if (capabilityId === 'location.distance' && (!Number.isFinite(item.walkingMinutes) || !Number.isFinite(item.distanceKm))) {
+        fail(`Canonical location item ${index} has invalid distance data.`, { index });
+      }
+    });
+  } else if (capabilityId.endsWith('.hold')) {
+    if (!output || typeof output !== 'object' || !output.holdId || output.status !== 'held') {
+      fail(`Canonical output for ${capabilityId} must contain a held holdId.`);
+    }
+  }
+  return output;
 }

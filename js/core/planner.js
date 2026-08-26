@@ -1,13 +1,15 @@
 import { requiresApproval } from './risk.js';
-import { selectBestTools } from './normalizer.js';
+import { rankToolsByCapability } from './normalizer.js';
 
-function toolNode(id, label, capabilityId, mapping, dependencies = []) {
+function toolNode(id, label, capabilityId, mappings, dependencies = []) {
+  const [mapping, ...alternatives] = mappings;
   return {
     id,
     type: 'tool',
     label,
     capabilityId,
     mapping,
+    alternatives,
     dependencies,
     risk: mapping.risk,
     approvalRequired: requiresApproval(mapping.risk),
@@ -33,9 +35,9 @@ function localNode(id, label, operation, dependencies = []) {
 }
 
 export function buildTripPlan(mission, mappings) {
-  const selected = selectBestTools(mappings);
   const required = ['travel.search', 'accommodation.search', 'location.distance', 'travel.hold', 'accommodation.hold'];
-  const missing = required.filter((id) => !selected.has(id));
+  const ranked = new Map(required.map((id) => [id, rankToolsByCapability(mappings, id)]));
+  const missing = required.filter((id) => !ranked.get(id)?.length);
   if (missing.length) {
     const error = new Error(`Missing required capabilities: ${missing.join(', ')}`);
     error.code = 'CAPABILITY_GAP';
@@ -44,13 +46,13 @@ export function buildTripPlan(mission, mappings) {
   }
 
   const nodes = [
-    toolNode('travel-search', `Search transport from ${mission.origin}`, 'travel.search', selected.get('travel.search')),
-    toolNode('stay-search', `Search stays near ${mission.destination}`, 'accommodation.search', selected.get('accommodation.search')),
+    toolNode('travel-search', `Search transport from ${mission.origin}`, 'travel.search', ranked.get('travel.search')),
+    toolNode('stay-search', `Search stays near ${mission.destination}`, 'accommodation.search', ranked.get('accommodation.search')),
     localNode('candidate-weave', 'Compose compatible transport + stay pairs', 'composeCandidates', ['travel-search', 'stay-search']),
-    toolNode('access-check', 'Measure walking access for shortlisted stays', 'location.distance', selected.get('location.distance'), ['candidate-weave']),
+    toolNode('access-check', 'Measure walking access for shortlisted stays', 'location.distance', ranked.get('location.distance'), ['candidate-weave']),
     localNode('recommendation', `Select the best mission under ${mission.currency} ${mission.budget}`, 'rankRecommendation', ['candidate-weave', 'access-check']),
-    toolNode('travel-hold', 'Place a reversible fare hold', 'travel.hold', selected.get('travel.hold'), ['recommendation']),
-    toolNode('stay-hold', 'Place a reversible room hold', 'accommodation.hold', selected.get('accommodation.hold'), ['recommendation']),
+    toolNode('travel-hold', 'Place a reversible fare hold', 'travel.hold', ranked.get('travel.hold'), ['recommendation']),
+    toolNode('stay-hold', 'Place a reversible room hold', 'accommodation.hold', ranked.get('accommodation.hold'), ['recommendation']),
   ];
 
   return {

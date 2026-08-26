@@ -9,7 +9,12 @@
     "test": "node --test tests/*.test.mjs",
     "test:e2e": "${E2E_PYTHON:-python3} scripts/e2e.py",
     "check": "node scripts/check-project.mjs",
-    "validate": "npm run check && npm test && npm run test:e2e"
+    "validate": "npm run check && npm test && npm run test:e2e",
+    "smoke": "node scripts/smoke.mjs",
+    "build": "node scripts/build-standalone.mjs",
+    "build:deploy": "node scripts/build-deploy-bootstrap.mjs",
+    "e2e:standalone": "${E2E_PYTHON:-python3} scripts/e2e-standalone.py",
+    "validate:ci": "npm run check && npm test && npm run smoke && npm run build"
   },
   "engines": {
     "node": ">=20"

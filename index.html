@@ -24,7 +24,7 @@
     </a>
     <div class="topbar-status" aria-label="Runtime status">
       <span class="status-pill" id="runtime-pill"><i></i><span data-runtime-label>Detecting WebMCP</span></span>
-      <span class="status-pill"><b data-provider-count>0</b> provider sites</span>
+      <span class="status-pill"><b data-provider-count>0</b> provider documents</span>
       <span class="status-pill"><b data-tool-count>0</b> discovered tools</span>
     </div>
     <button class="ghost-button compact" type="button" data-action="reset">Reset mission</button>
@@ -68,7 +68,7 @@
 
     <section class="orchestration-panel surface" aria-labelledby="graph-title">
       <div class="orchestration-header">
-        <div><p class="eyebrow">02 · Capability braid</p><h2 id="graph-title">Cross-site execution graph</h2></div>
+        <div><p class="eyebrow">02 · Capability braid</p><h2 id="graph-title">Multi-provider execution graph</h2></div>
         <div class="phase-chip" data-phase-chip="idle"><span></span><b data-phase-label>Waiting for mission</b></div>
       </div>
       <div class="progress-shell" aria-label="Plan progress">
@@ -78,7 +78,7 @@
 
       <div class="empty-graph" data-empty-graph>
         <div class="empty-orbit" aria-hidden="true"><span class="orbit orbit-a"></span><span class="orbit orbit-b"></span><span class="orbit orbit-c"></span><svg viewBox="0 0 52 52"><path d="M10 12c16 0 16 28 32 28"/><path d="M10 26c16 0 16-14 32-14"/><path d="M10 40c16 0 16-14 32-14"/></svg></div>
-        <h3>One intent. Many websites. One accountable plan.</h3>
+        <h3>One intent. Many provider capabilities. One accountable plan.</h3>
         <p>ToolBraid will discover each provider's WebMCP tools, map incompatible names and schemas into common capabilities, then build a dependency-aware plan.</p>
       </div>
       <div class="execution-graph" data-graph hidden></div>
@@ -113,8 +113,8 @@
 
     <section class="provider-network surface" aria-labelledby="providers-title">
       <div class="provider-network-head">
-        <div><p class="eyebrow">04 · Independent capability providers</p><h2 id="providers-title">Live websites inside the same browser context</h2></div>
-        <p>Each frame owns its UI, state, schemas, and WebMCP tool implementations. ToolBraid does not call private provider APIs.</p>
+        <div><p class="eyebrow">04 · Independent capability providers</p><h2 id="providers-title">Live provider documents inside one browser context</h2></div>
+        <p>Each frame owns its UI, state, schemas, and WebMCP tool implementations. The deterministic challenge deployment uses same-origin provider documents; the runtime also implements origin-aware WebMCP discovery rules. ToolBraid does not call private provider APIs.</p>
       </div>
       <div class="provider-grid">
         <article class="provider-frame-card" data-provider-card="vectorrail"><div class="provider-card-head"><span class="provider-color rail"></span><strong>Transport</strong><i data-provider-status="vectorrail">Connecting</i></div><iframe src="./providers/rail.html" title="VectorRail WebMCP provider" allow="tools"></iframe></article>

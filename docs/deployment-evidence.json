@@ -1,0 +1,10 @@
+{
+  "provider": "Vercel",
+  "project": "toolbraid",
+  "target": "production",
+  "statusReportedByDeploymentAPI": "READY",
+  "publicAlias": "https://toolbraid-dumitrescu91dan-7167.vercel.app/",
+  "deploymentId": "dpl_8W9ezTo6WAaAs2vpgZVMfzmvWEpt",
+  "deploymentSpecificUrl": "https://toolbraid-egcbwhlm4-dumitrescu91dan-7167.vercel.app",
+  "note": "The public alias was exercised end-to-end during the deployment run. A later sandbox re-fetch encountered upstream egress errors; local exact-release E2E evidence is stored separately."
+}

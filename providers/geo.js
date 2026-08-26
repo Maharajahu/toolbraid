@@ -21,7 +21,7 @@ const tools = [
       },
       required: ['places', 'target'],
     },
-    annotations: { readOnlyHint: true },
+    annotations: { readOnlyHint: true, untrustedContentHint: false },
     async execute({ places = [], target, method = 'walking' }, { signal } = {}) {
       await delay(180, signal);
       return {

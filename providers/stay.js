@@ -23,7 +23,7 @@ const tools = [
       },
       required: ['near', 'checkIn'],
     },
-    annotations: { readOnlyHint: true },
+    annotations: { readOnlyHint: true, untrustedContentHint: false },
     async execute(input, { signal } = {}) {
       await delay(260, signal);
       const filtered = spaces.filter((space) => !input.nightlyLimit || space.nightly <= Number(input.nightlyLimit));
@@ -43,7 +43,7 @@ const tools = [
       },
       required: ['spaceCode', 'checkIn'],
     },
-    annotations: { readOnlyHint: false },
+    annotations: { readOnlyHint: false, untrustedContentHint: false },
     async execute({ spaceCode, checkIn, nights = 1 }, { signal } = {}) {
       await delay(200, signal);
       const option = spaces.find((item) => item.spaceCode === spaceCode);

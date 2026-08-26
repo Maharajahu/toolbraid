@@ -42,6 +42,9 @@ const server = http.createServer(async (request, response) => {
       'Content-Length': body.byteLength,
       'Cache-Control': 'no-store',
       'Cross-Origin-Opener-Policy': 'same-origin-allow-popups',
+      'Permissions-Policy': 'tools=(self)',
+      'Referrer-Policy': 'no-referrer',
+      'X-Content-Type-Options': 'nosniff',
     });
     response.end(body);
   } catch (error) {

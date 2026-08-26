@@ -5,6 +5,7 @@ import { approvePlanActions, buildTripPlan, planProgress } from './core/planner.
 import { riskLabel } from './core/risk.js';
 import { runPlanUntilBlocked } from './core/executor.js';
 import { createWebMcpRuntime } from './core/webmcp-runtime.js';
+import { createApprovalRecord, consumeApprovalRecord, verifyApprovalRecord } from './core/approval.js';
 
 const runtime = createWebMcpRuntime();
 const audit = new AuditLog();
@@ -281,38 +282,42 @@ function selectedApprovalNodeIds() {
   return [...elements.approvalActions.querySelectorAll('input[type="checkbox"]:checked')].map((input) => input.value);
 }
 
-function approveSelectedActions(source = 'human-ui') {
+async function approveSelectedActions(source = 'human-ui') {
   if (!state.plan) return publicSnapshot();
-  const pending = state.plan.nodes.filter((node) => node.approvalRequired && node.status === 'pending');
   const selected = selectedApprovalNodeIds();
   if (!selected.length) {
     toast('Select at least one reversible action to approve.', 'error');
     return publicSnapshot();
   }
+  const recommendation = state.results.get('recommendation');
+  if (!recommendation) throw new Error('A recommendation must exist before actions can be approved.');
 
+  const approval = await createApprovalRecord({ plan: state.plan, recommendation, actionIds: selected, channel: source });
   approvePlanActions(state.plan, selected);
-  state.humanApproval = {
-    source: 'human',
-    channel: source,
-    actionIds: [...selected],
-    approvedAt: new Date().toISOString(),
-  };
+  state.humanApproval = approval;
   state.phase = 'approved';
   audit.add('approval.recorded', {
     channel: source,
     actionIds: selected,
-    policy: 'human-ui-only',
+    policy: 'human-ui-only; plan-bound; option-bound; single-use',
+    planFingerprint: approval.planFingerprint,
+    recordFingerprint: approval.recordFingerprint,
   });
   hideApproval();
   elements.approvedActionbar.hidden = false;
   elements.approvedButton.textContent = `Execute ${selected.length} approved action${selected.length === 1 ? '' : 's'}`;
-  toast(`${selected.length} reversible action${selected.length === 1 ? '' : 's'} approved by a human.`);
+  toast(`${selected.length} reversible action${selected.length === 1 ? '' : 's'} approved and bound to this exact plan.`);
   renderAll();
   return publicSnapshot();
 }
 
 async function runApprovedActions(source = 'human-ui') {
   try {
+    if (state.humanApproval?.consumedAt) {
+      audit.add('execution.approved_blocked', { source, reason: 'Approval replay blocked.', consumedAt: state.humanApproval.consumedAt });
+      renderAll();
+      return { status: 'approval_replay_blocked', ...publicSnapshot() };
+    }
     const approvedNodes = state.plan?.nodes.filter((node) => node.approvalRequired && node.status === 'approved') ?? [];
     if (!state.plan || !state.humanApproval || !approvedNodes.length) {
       audit.add('execution.approved_blocked', { source, reason: 'No valid human approval record.' });
@@ -320,14 +325,13 @@ async function runApprovedActions(source = 'human-ui') {
       renderAll();
       return { status: 'approval_required', ...publicSnapshot() };
     }
-
-    const approvedSet = new Set(state.humanApproval.actionIds);
-    if (approvedNodes.some((node) => !approvedSet.has(node.id))) {
-      throw new Error('Approved plan state does not match the human approval record.');
-    }
+    const actionIds = approvedNodes.map((node) => node.id);
+    const approvalContext = { plan: state.plan, recommendation: state.results.get('recommendation'), expectedActionIds: actionIds };
+    await verifyApprovalRecord(state.humanApproval, approvalContext);
+    state.humanApproval = await consumeApprovalRecord(state.humanApproval, approvalContext);
 
     state.phase = 'running';
-    audit.add('execution.approved_started', { source, actionIds: approvedNodes.map((node) => node.id) });
+    audit.add('execution.approved_started', { source, actionIds, approvalFingerprint: state.humanApproval.recordFingerprint, consumedAt: state.humanApproval.consumedAt });
     renderAll();
     const result = await runPlanUntilBlocked(state.plan, executionContext(), { includeApproval: true });
     state.phase = result.complete ? 'completed' : result.status;
@@ -629,7 +633,11 @@ function publicSnapshot() {
       travel: state.results.get('travel-hold') ?? null,
       stay: state.results.get('stay-hold') ?? null,
     },
-    humanApproval: state.humanApproval ? { ...state.humanApproval, actionIds: [...state.humanApproval.actionIds] } : null,
+    humanApproval: state.humanApproval ? {
+      ...state.humanApproval,
+      actionIds: [...state.humanApproval.actionIds],
+      actionFingerprints: state.humanApproval.actionFingerprints.map((entry) => ({ ...entry, binding: structuredClone(entry.binding) })),
+    } : null,
     auditCount: audit.entries().length,
     lastError: state.lastError,
   };
@@ -662,7 +670,7 @@ async function registerOrchestratorTools() {
   const tools = [
     {
       name: 'toolbraid.plan_mission',
-      title: 'Plan a cross-site mission',
+      title: 'Plan a multi-provider mission',
       description: 'Parse a user goal, discover live WebMCP provider tools, normalize incompatible semantics, and build an explainable dependency-aware plan. This does not execute external actions.',
       inputSchema: {
         type: 'object',
@@ -677,7 +685,7 @@ async function registerOrchestratorTools() {
         },
         required: ['goal'],
       },
-      annotations: { readOnlyHint: false, idempotentHint: true },
+      annotations: { readOnlyHint: false, idempotentHint: true, untrustedContentHint: false },
       execute: (input) => planMission(input, 'webmcp-agent'),
     },
     {
@@ -685,7 +693,7 @@ async function registerOrchestratorTools() {
       title: 'Execute read-only mission steps',
       description: 'Execute only read-only provider calls and local comparison steps. Stop before every external state change and surface the human approval checkpoint in the page.',
       inputSchema: { type: 'object', properties: {} },
-      annotations: { readOnlyHint: true, idempotentHint: true },
+      annotations: { readOnlyHint: true, idempotentHint: true, untrustedContentHint: false },
       execute: () => runSafeSteps('webmcp-agent'),
     },
     {
@@ -693,7 +701,7 @@ async function registerOrchestratorTools() {
       title: 'Execute human-approved mission actions',
       description: 'Execute only reversible actions that a person has already selected and approved in the ToolBraid UI. Calling this tool cannot create its own approval record.',
       inputSchema: { type: 'object', properties: {} },
-      annotations: { readOnlyHint: false, idempotentHint: false },
+      annotations: { readOnlyHint: false, idempotentHint: false, untrustedContentHint: false },
       execute: () => runApprovedActions('webmcp-agent'),
     },
     {
@@ -701,7 +709,7 @@ async function registerOrchestratorTools() {
       title: 'Inspect orchestration state',
       description: 'Return the current mission, semantic mappings, execution graph, approval state, results, and audit summary without changing anything.',
       inputSchema: { type: 'object', properties: {} },
-      annotations: { readOnlyHint: true, idempotentHint: true },
+      annotations: { readOnlyHint: true, idempotentHint: true, untrustedContentHint: false },
       execute: () => publicSnapshot(),
     },
   ];
@@ -713,7 +721,7 @@ function bindEvents() {
     const action = event.target.closest('[data-action]')?.dataset.action;
     if (action === 'plan') handleAsync(() => planMission({}, 'human-ui'), 'Planning failed');
     if (action === 'run-safe') handleAsync(() => runSafeSteps('human-ui'), 'Safe execution failed');
-    if (action === 'approve') approveSelectedActions('human-ui');
+    if (action === 'approve') handleAsync(() => approveSelectedActions('human-ui'), 'Approval failed');
     if (action === 'decline') declineApproval();
     if (action === 'run-approved') handleAsync(() => runApprovedActions('human-ui'), 'Approved execution failed');
     if (action === 'reset') resetMission();
@@ -777,7 +785,7 @@ async function initialize() {
   renderAll();
 
   const autoDemo = new URLSearchParams(location.search).get('autodemo');
-  if (autoDemo === 'safe' || autoDemo === 'complete') {
+  if (autoDemo === 'safe') {
     await planMission({}, 'autodemo');
     await runSafeSteps('autodemo');
   }

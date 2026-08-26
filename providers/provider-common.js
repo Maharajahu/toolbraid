@@ -18,6 +18,11 @@ export async function delay(ms, signal) {
   });
 }
 
+function messageOrigin() {
+  if (location.origin !== 'null') return location.origin;
+  try { const origin = parent.location.origin; return origin === 'null' ? '*' : origin; } catch { return '*'; }
+}
+
 export async function bootProvider({ id, label, tools, initialMessage = 'Waiting for an agent call.' }) {
   const runtime = createWebMcpRuntime();
   const toolList = document.querySelector('[data-tools]');
@@ -32,11 +37,11 @@ export async function bootProvider({ id, label, tools, initialMessage = 'Waiting
         setProviderEvent('Executing', tool.title ?? tool.name, input);
         const result = await tool.execute(input, options);
         setProviderEvent('Completed', tool.title ?? tool.name, result);
-        parent.postMessage({ type: 'toolbraid:provider-event', provider: id, tool: tool.name, result }, location.origin === 'null' ? '*' : location.origin);
+        parent.postMessage({ type: 'toolbraid:provider-event', provider: id, tool: tool.name, result }, messageOrigin());
         return result;
       },
     };
-    await runtime.registerTool(wrapped, { exposedTo: [location.origin] });
+    await runtime.registerTool(wrapped, { exposedTo: [messageOrigin()] });
   }
 
   parent.postMessage({
@@ -45,7 +50,7 @@ export async function bootProvider({ id, label, tools, initialMessage = 'Waiting
     label,
     mode: runtime.mode,
     tools: tools.map((tool) => tool.name),
-  }, location.origin === 'null' ? '*' : location.origin);
+  }, messageOrigin());
 }
 
 export function setProviderEvent(title, meta, payload = null) {

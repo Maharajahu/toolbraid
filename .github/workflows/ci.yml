@@ -1,0 +1,31 @@
+name: ToolBraid CI
+on:
+  push:
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install browser test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install playwright
+          playwright install --with-deps chromium
+      - name: Validate source and tests
+        run: npm run validate:ci
+      - name: Build standalone artifacts
+        run: npm run build:deploy
+      - name: Test modular standalone
+        run: E2E_REPORT=docs/ci-e2e-modular.json python scripts/e2e-standalone.py dist/index.html
+      - name: Test production release
+        run: E2E_REPORT=docs/ci-e2e-release.json python scripts/e2e-standalone.py release/index.html
+      - name: Test deployment bootstrap
+        run: E2E_REPORT=docs/ci-e2e-deploy.json python scripts/e2e-standalone.py deploy/index.html

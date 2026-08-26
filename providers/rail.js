@@ -21,7 +21,7 @@ const tools = [
       },
       required: ['leaving', 'arriving', 'day'],
     },
-    annotations: { readOnlyHint: true },
+    annotations: { readOnlyHint: true, untrustedContentHint: false },
     async execute(input, { signal } = {}) {
       await delay(220, signal);
       return { query: input, journeys };
@@ -36,7 +36,7 @@ const tools = [
       properties: { quoteId: { type: 'string', description: 'Selected fare quote identifier.' } },
       required: ['quoteId'],
     },
-    annotations: { readOnlyHint: false },
+    annotations: { readOnlyHint: false, untrustedContentHint: false },
     async execute({ quoteId }, { signal } = {}) {
       await delay(180, signal);
       const option = journeys.find((item) => item.quoteId === quoteId);

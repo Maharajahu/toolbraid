@@ -1,0 +1,72 @@
+{
+  "status": "PASS",
+  "artifact": "/mnt/data/toolbraid-repo/release/index.html",
+  "artifactBytes": 25635,
+  "runtimeMode": "compatibility-runtime",
+  "providers": 4,
+  "discoveredTools": 6,
+  "quarantinedTools": 1,
+  "planNodes": 7,
+  "completedNodes": 7,
+  "recommendation": {
+    "route": {
+      "id": "SR-0712",
+      "provider": "SwiftRail",
+      "depart": "07:12",
+      "arrive": "08:14",
+      "price": 39.9,
+      "duration": "1h 02m"
+    },
+    "hotel": {
+      "id": "NS-POINT-A",
+      "name": "Point A Liverpool Street",
+      "price": 145,
+      "distanceKm": 1
+    },
+    "total": 184.9,
+    "budget": 250,
+    "remaining": 65.1,
+    "walkingMinutes": 13,
+    "distanceKm": 1,
+    "selectedTools": {
+      "travel": {
+        "providerId": "swiftrail",
+        "tool": "journey_lookup"
+      },
+      "stay": {
+        "providerId": "northstay",
+        "tool": "rooms_lookup"
+      }
+    }
+  },
+  "holds": {
+    "travel": {
+      "holdId": "VR-HOLD-MTA2LNKC",
+      "expiresInMinutes": 15,
+      "routeId": "SR-0712",
+      "price": 39.9
+    },
+    "stay": {
+      "holdId": "NS-HOLD-MTA2LNKC",
+      "expiresInMinutes": 15,
+      "propertyId": "NS-POINT-A",
+      "price": 145
+    }
+  },
+  "approval": {
+    "source": "human",
+    "planFingerprint": "f315d758f315d758f315d758f315d758f315d758f315d758f315d758f315d758",
+    "actionFingerprintCount": 2,
+    "consumedAt": "2026-08-26T12:28:49.163Z",
+    "replayBlocked": true
+  },
+  "desktopViewport": {
+    "width": 1600,
+    "height": 1100
+  },
+  "mobileViewport": {
+    "width": 390,
+    "height": 844
+  },
+  "browserErrors": 0
+}

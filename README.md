@@ -1,241 +1,142 @@
 # ToolBraid
 
-**Braid independent WebMCP capabilities into one explainable, human-approved plan.**
+**A semantic action layer that turns fragmented WebMCP capabilities into one explainable, human-controlled execution plan.**
 
-ToolBraid is a browser-native semantic orchestration layer for WebMCP. A person states a goal. ToolBraid discovers tools exposed by independent websites, maps incompatible names and schemas to common capabilities, builds a dependency-aware execution graph, automatically runs read-only work, and pauses before any external state change.
+ToolBraid is an OpenAI WebMCP Challenge project. It accepts a user goal, discovers provider tools, maps incompatible names and schemas into canonical capabilities, builds a dependency graph, runs read-only work, and stops before any state-changing action until the human approves the exact provider, option and price.
 
-![ToolBraid completed mission](docs/screenshots/toolbraid-completed.png)
+**Live application:** https://toolbraid-dumitrescu91dan-7167.vercel.app/
 
-## The problem
+## Why it exists
 
-WebMCP gives each website a reliable way to expose actions to agents. The remaining fragmentation sits one level higher:
-
-- one provider calls an operation `seek_passages`, another might call it `find_routes`;
-- input and output fields use different names;
-- tools carry different risk levels;
-- a real objective often spans several sites;
-- a user needs one approval surface and one audit trail, not a scavenger hunt through tabs.
-
-ToolBraid treats those provider-specific tools as implementations of shared capabilities such as:
+WebMCP makes individual websites callable by agents, but each provider still exposes different names, schemas, risk semantics and result shapes. ToolBraid supplies the missing orchestration layer:
 
 ```text
-travel.search
-travel.hold
-accommodation.search
-accommodation.hold
-location.distance
+user intent
+   ↓
+dynamic tool discovery
+   ↓
+semantic capability normalization
+   ↓
+explainable execution DAG
+   ↓
+read-only execution
+   ↓
+human-bound approval
+   ↓
+reversible state changes
 ```
 
-It then composes them into a plan rather than asking an agent to improvise a click path.
+The challenge scenario combines transport, accommodation and walking-distance providers. The product discovers six tools across four provider documents, quarantines one malicious tool description, normalizes the remaining tools into five canonical capabilities, builds a seven-node plan, executes five safe nodes, and requires human approval before creating two synthetic reversible holds.
 
-## What the demo proves
+## Memorable demo result
 
-The included mission asks ToolBraid to:
+- Route: Coventry → London, £39.90
+- Stay: Point A Liverpool Street, £145.00
+- Total: £184.90
+- Budget: £250.00
+- Remaining: £65.10
+- Walking access: 13 minutes
+- State changes: two synthetic 15-minute holds, only after approval
 
-> Find transport from Coventry to London, find a hotel near 1 Principal Place, keep the total under £250, compare the options, and ask before holding anything.
+No real purchase, payment or external booking occurs.
 
-At runtime ToolBraid:
+## Security model
 
-1. discovers six tools from four independent iframe applications;
-2. normalizes five unfamiliar tool contracts into canonical capabilities;
-3. quarantines one adversarial tool whose metadata contains prompt-injection and exfiltration instructions;
-4. builds a seven-node dependency graph;
-5. executes five read-only and local-composition steps;
-6. selects a £184.90 transport-and-stay combination;
-7. blocks two reversible hold actions behind an explicit human checkpoint;
-8. executes those holds only after approval;
-9. records the complete trace in the inspector.
+Tool metadata and results are treated as untrusted input.
 
-The providers use deliberately different vocabulary and schemas. The planner does not contain branches for provider names.
+- Hostile tool descriptions are quarantined before planning.
+- Input and canonical output schemas are validated.
+- Automatic fallback is restricted to read-only operations.
+- Mutating actions never fail over automatically.
+- Approval is created only by the human UI.
+- Approval is fingerprint-bound to the plan, provider, option, price and action set.
+- Approval is atomically consumed before mutation.
+- Replays and post-approval mutations are blocked.
+- The production deployment sends `Permissions-Policy: tools=(self)`.
 
-## Architecture
-
-```mermaid
-flowchart LR
-    U[Human or browser agent] --> T[ToolBraid WebMCP tools]
-    T --> D[Dynamic discovery<br/>document.modelContext.getTools]
-    D --> S[Security scan]
-    S --> N[Semantic normalizer]
-    N --> G[Capability DAG]
-    G --> E[Read-only executor]
-    E --> H{Human approval}
-    H -->|approved| W[Reversible provider actions]
-    H -->|declined| X[Stop with no state change]
-
-    subgraph Browser context
-      R[VectorRail iframe]
-      A[NestSquare iframe]
-      L[WalkMesh iframe]
-      M[Mirage adversarial fixture]
-    end
-
-    R --> D
-    A --> D
-    L --> D
-    M --> D
-```
-
-The production path uses the native `document.modelContext` API. A standards-aligned local implementation is included so the demo remains runnable in ordinary browsers and in CI while WebMCP is still experimental.
-
-The native registration is explicit and auditable in [`js/core/webmcp-runtime.js`](js/core/webmcp-runtime.js):
-
-```js
-return document.modelContext.registerTool(tool, options);
-```
-
-Read [`docs/architecture.md`](docs/architecture.md) for component boundaries, data contracts, and the execution lifecycle.
-
-## WebMCP tools exposed by ToolBraid
-
-| Tool | Effect |
-|---|---|
-| `toolbraid.plan_mission` | Parses a mission, discovers provider tools, normalizes capabilities, and creates a DAG. |
-| `toolbraid.execute_safe_steps` | Executes only read-only provider calls and local composition. Stops at approval gates. |
-| `toolbraid.execute_approved_actions` | Executes only actions already approved in the visible ToolBraid interface. Fails closed otherwise. |
-| `toolbraid.inspect_state` | Returns mappings, security findings, plan state, approvals, results, and audit metadata. |
+See [`docs/threat-model.md`](docs/threat-model.md) and [`docs/JUDGING.md`](docs/JUDGING.md).
 
 ## Repository map
 
 ```text
 .
-├── index.html                         # Mission-control UI
+├── index.html                    # Modular development application
+├── css/styles.css
 ├── js/
-│   ├── app.js                         # Product state and WebMCP orchestration tools
-│   └── core/
-│       ├── ontology.js                # Canonical capability vocabulary
-│       ├── normalizer.js              # Semantic mapping and confidence evidence
-│       ├── risk.js                    # Risk classification and metadata quarantine
-│       ├── intent.js                  # Mission extraction
-│       ├── planner.js                 # Dependency DAG and approval gates
-│       ├── adapters.js                # Schema-driven input/output adaptation
-│       ├── executor.js                # Concurrent safe execution and composition
-│       ├── audit.js                   # Execution trace
-│       └── webmcp-runtime.js           # Native WebMCP path plus local test runtime
-├── providers/                         # Independent WebMCP website fixtures
-├── tests/                             # Node unit/contract tests
-├── scripts/                           # Static server and Playwright E2E test
-└── docs/                              # Research, architecture, security, demo, submission
+│   ├── app.js                    # Product orchestration and UI
+│   └── core/                     # Discovery, normalization, planning, execution, approval
+├── providers/                    # Four independently registered provider documents
+├── release/index.html            # Single-file production release
+├── dist/index.html               # Generated modular standalone artifact
+├── deploy/                       # Compressed Vercel transport artifact
+├── tests/                        # Unit and security-contract tests
+├── scripts/                      # Build, validation and E2E tooling
+└── docs/                         # Architecture, evidence and submission material
 ```
 
-## Run locally
+## Local development
 
 Requirements:
 
-- Node.js 20 or newer
-- a browser
+- Node.js 20+
+- Python 3.11+
+- Playwright Python package
+- Chromium
 
 ```bash
-npm run dev
+npm run validate:ci
+npm run serve
 ```
 
 Open `http://127.0.0.1:4173`.
 
-For native WebMCP, open the app in ChatGPT's in-app browser or enable the WebMCP testing flag in a compatible Chrome build. In other browsers the local runtime activates automatically and labels itself **WebMCP test runtime**.
-
-## Test
-
-Unit and contract tests have no third-party JavaScript dependencies:
+## Build and validation
 
 ```bash
-npm test
+npm run validate:ci
+npm run build
+npm run e2e:standalone
+npm run check:release
+npm run e2e:release
+npm run build:deploy
+E2E_REPORT=docs/e2e-deployment-bootstrap-validation.json \
+  python3 scripts/e2e-standalone.py deploy/index.html
 ```
 
-End-to-end validation uses Playwright:
+The browser test executes the full flow at desktop and mobile viewports, including discovery, quarantine, planning, safe execution, blocked self-approval, human approval, two holds and replay rejection.
 
-```bash
-python3 -m pip install -r requirements-e2e.txt
-python3 -m playwright install chromium
-npm run test:e2e
-```
+## WebMCP integration
 
-To use an existing Chromium binary:
+When the browser exposes `document.modelContext.registerTool()` or `navigator.modelContext.registerTool()`, ToolBraid registers provider and orchestration tools natively. The deterministic compatibility runtime supports repeatable testing in browsers where the experimental API is unavailable.
 
-```bash
-E2E_CHROMIUM=/path/to/chromium npm run test:e2e
-```
+The public orchestration surface deliberately contains no approval tool:
 
-The E2E test validates discovery, normalization, quarantine, planning, safe execution, rejection of agent self-approval, visible human approval, reversible execution, browser errors, and a 390 px mobile layout without horizontal overflow. It also produces the screenshots and `docs/e2e-validation.json`.
+- `toolbraid_plan`
+- `toolbraid_execute_safe`
+- `toolbraid_status`
+- `toolbraid_execute_approved`
 
-Current validated result:
+Human approval remains a UI-only authority.
 
-```text
-Unit tests:       11 passed, 0 failed
-E2E workflow:     PASS
-Mobile smoke:     PASS
-Self-approval:    BLOCKED
-Provider sites:   4
-Discovered tools: 6
-Quarantined:      1
-Plan nodes:       7
-Human gates:      2
-Selected total:   £184.90
-```
+## Production
 
-## Upload-ready demo video
+The Vercel project is configured by `vercel.json`. The root route serves the audited `release/index.html`, with security headers and no framework build dependency.
 
-The validated challenge recording is included in the repository:
+## Documentation
 
-- [Captioned MP4](release/ToolBraid-WebMCP-Challenge-Demo.mp4)
-- [Standalone subtitles](release/ToolBraid-WebMCP-Challenge-Demo.srt)
-- [YouTube thumbnail](docs/screenshots/toolbraid-video-thumbnail.png)
-- [Video production and validation report](docs/video-production-report.md)
-
-The video is 156.9 seconds long and contains the real browser workflow plus audio. Only the public YouTube upload remains.
-
-## Security model
-
-Tool and website metadata are untrusted. ToolBraid applies four controls before execution:
-
-1. suspicious instruction-like metadata is quarantined;
-2. unmapped or low-confidence tools are excluded;
-3. risk is inferred from annotations, semantics, and capability type;
-4. every state-changing node requires an approval record produced by the visible UI.
-
-The demo never stores credentials, payment details, cookies, or session tokens. It creates synthetic temporary holds only. A real multi-origin deployment would additionally require provider identity, signed capability manifests, stricter origin policy, CSP, output validation, and server-side transaction verification.
-
-See [`docs/threat-model.md`](docs/threat-model.md).
-
-## Why this is different
-
-Directories solve discovery. Bridges solve transport. Tool-retrieval research helps select from large catalogs. ToolBraid focuses on the missing browser-native control plane between those layers:
-
-- semantic normalization of tool names **and schemas** at runtime;
-- cross-site dependency planning rather than a flat list of calls;
-- visible evidence for every capability mapping;
-- metadata-poisoning quarantine before planning;
-- a human-owned approval boundary that agents cannot self-grant;
-- provider UI, state, and WebMCP execution remain in the browser.
-
-The prior-art comparison and bounded novelty claim are documented in [`docs/research/prior-art.md`](docs/research/prior-art.md).
+- [Start here](START-HERE.md)
+- [Judge guide](docs/JUDGING.md)
+- [Architecture](docs/architecture.md)
+- [Product specification](docs/product-spec.md)
+- [Threat model](docs/threat-model.md)
+- [Testing](docs/testing.md)
+- [Build provenance](docs/build-provenance.md)
+- [Submission copy](docs/submission-description.md)
+- [Final validation report](docs/final-validation-report.md)
 
 ## Limitations
 
-This is a challenge-ready functional MVP, not a universal production broker.
-
-- The included providers are deterministic synthetic websites, not commercial booking services.
-- The ontology currently covers one travel-planning workflow and five canonical capabilities.
-- Semantic matching is explainable lexical/schema scoring rather than an embedding or LLM service.
-- Provider failover is fail-closed in this version; automatic substitution is a documented next step.
-- Native WebMCP behavior should be revalidated in the exact browser used by judges because the standard remains experimental.
-- Holds are staged actions, never purchases or final bookings.
-
-These boundaries are intentional. The implementation demonstrates the architecture without hiding core behavior behind an API key or a prerecorded backend.
-
-## Challenge material
-
-- [Challenge requirements](docs/challenge-requirements.md)
-- [Product specification](docs/product-spec.md)
-- [Architecture](docs/architecture.md)
-- [Prior-art research](docs/research/prior-art.md)
-- [Threat model](docs/threat-model.md)
-- [Demo script](docs/demo-script.md)
-- [Video narration](docs/video-script.md)
-- [Devpost submission copy](docs/submission-description.md)
-- [Final validation report](docs/final-validation-report.md)
-- [Machine-readable E2E result](docs/e2e-validation.json)
-- [Video production report](docs/video-production-report.md)
-- [Machine-readable video validation](docs/video-validation.json)
-- [Publication runbook](docs/publication-runbook.md)
+The included providers are deterministic challenge fixtures, not commercial booking partners. ToolBraid proves the orchestration, safety and WebMCP interaction model without creating real financial transactions. Native WebMCP execution must be judged in a browser build that exposes the experimental API; the compatibility path is included for reliable inspection and automated testing.
 
 ## License
 

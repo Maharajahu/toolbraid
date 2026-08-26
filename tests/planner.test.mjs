@@ -40,3 +40,20 @@ test('fails closed when a required capability is absent', () => {
     (error) => error.code === 'CAPABILITY_GAP' && error.missing.includes('location.distance'),
   );
 });
+
+test('retains lower-ranked compatible providers as read-only failover candidates', () => {
+  const primary = mapping('travel.search');
+  primary.tool.name = 'primary.travel_search';
+  primary.confidence = 0.96;
+  const fallback = mapping('travel.search');
+  fallback.tool.name = 'fallback.find_routes';
+  fallback.confidence = 0.81;
+  const mappings = [
+    primary, fallback, mapping('accommodation.search'), mapping('location.distance'),
+    mapping('travel.hold'), mapping('accommodation.hold'),
+  ];
+  const plan = buildTripPlan(mission, mappings);
+  const travelNode = plan.nodes.find((node) => node.id === 'travel-search');
+  assert.equal(travelNode.mapping.tool.name, 'primary.travel_search');
+  assert.deepEqual(travelNode.alternatives.map((item) => item.tool.name), ['fallback.find_routes']);
+});

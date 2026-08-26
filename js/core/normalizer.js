@@ -75,13 +75,17 @@ export function normalizeTools(tools, options = {}) {
   return tools.map((tool) => normalizeTool(tool, options));
 }
 
+export function rankToolsByCapability(mappings, capabilityId) {
+  return mappings
+    .filter((mapping) => mapping.capability?.id === capabilityId && !mapping.quarantined)
+    .sort((a, b) => b.confidence - a.confidence || String(a.tool.name).localeCompare(String(b.tool.name)));
+}
+
 export function selectBestTools(mappings) {
   const selected = new Map();
-  for (const mapping of mappings) {
-    if (!mapping.capability || mapping.quarantined) continue;
-    const id = mapping.capability.id;
-    const current = selected.get(id);
-    if (!current || mapping.confidence > current.confidence) selected.set(id, mapping);
+  for (const capability of CAPABILITIES) {
+    const [best] = rankToolsByCapability(mappings, capability.id);
+    if (best) selected.set(capability.id, best);
   }
   return selected;
 }
