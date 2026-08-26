@@ -77,8 +77,10 @@ test('runtime source does not introduce direct code or shell execution', async (
   const files = await javascriptFiles(SOURCE);
   const source = (await Promise.all(files.map((file) => readFile(file, 'utf8')))).join('\n');
   assert.doesNotMatch(source, /from\s+['"]node:(?:child_process|vm)['"]/u);
-  assert.doesNotMatch(source, /\b(?:eval|Function)\s*\(/u);
-  assert.doesNotMatch(source, /\b(?:exec|execFile|execSync|spawn|spawnSync|fork)\s*\(/u);
+  // Ignore harmless property calls such as RegExp.prototype.exec; only a
+  // bare global-style invocation is prohibited by this release assertion.
+  assert.doesNotMatch(source, /(?<![\w.$])(?:eval|Function)\s*\(/u);
+  assert.doesNotMatch(source, /(?<![\w.$])(?:exec|execFile|execSync|spawn|spawnSync|fork)\s*\(/u);
 });
 
 test('container baseline is non-root and does not install runtime packages', async () => {

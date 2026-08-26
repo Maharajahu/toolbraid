@@ -11,7 +11,7 @@ From the repository root, run with Node.js 20+:
 ```sh
 npm test
 npm run check
-node --test test/release
+node --test test/release/*.test.js
 ```
 
 Review failures as defects. The release suite validates syntax and selected

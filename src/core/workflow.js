@@ -198,12 +198,8 @@ export class WorkflowStore {
     if (!node) throw new CoreError('NODE_NOT_FOUND', 'Workflow node was not found');
     if (node.readOnly) throw new CoreError('APPROVAL_NOT_REQUIRED', 'Read-only nodes cannot await mutation approval');
     const current = record.nodeStates[nodeId];
-    if (!['pending', 'running'].includes(current.state)) throw new CoreError('NODE_STATE', 'Node is not awaiting execution');
-    if (current.state === 'running') {
-      current.state = 'awaiting_approval';
-    } else {
-      current.state = 'awaiting_approval';
-    }
+    if (!['pending', 'running', 'awaiting_approval'].includes(current.state)) throw new CoreError('NODE_STATE', 'Node is not awaiting execution');
+    current.state = 'awaiting_approval';
     record.awaitingApproval = {
       nodeId,
       ...(operation.request === undefined ? {} : jsonClone(operation.request)),

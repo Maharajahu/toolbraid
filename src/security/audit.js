@@ -81,7 +81,7 @@ export class AuditLog {
         // corrupt the append-only local record.
       }
     }
-    return cloneCanonical(record);
+    return deepFreeze(cloneCanonical(record));
   }
 
   get length() {
@@ -94,7 +94,7 @@ export class AuditLog {
 
   /** Return detached records so callers cannot mutate the internal log. */
   entries() {
-    return this.#entries.map((entry) => cloneCanonical(entry));
+    return this.#entries.map((entry) => deepFreeze(cloneCanonical(entry)));
   }
 
   /** Alias for integrations that use a snapshot terminology. */
@@ -159,4 +159,3 @@ function deepFreeze(value) {
   }
   return value;
 }
-

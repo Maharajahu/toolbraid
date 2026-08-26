@@ -38,4 +38,4 @@ jobs:
         run: npm run check
 
       - name: Run release validation
-        run: node --test test/release
+        run: node --test test/release/*.test.js

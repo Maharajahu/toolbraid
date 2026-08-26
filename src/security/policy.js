@@ -117,7 +117,10 @@ export class PolicyEngine {
         return result;
       }
       const approval = this.#credential(request);
-      const verified = this.#approvalAuthority.verify(binding, approval);
+      // Recompute argsHash inside the authority from the original request;
+      // passing only the normalized hash here would allow a caller to present
+      // a hash-only binding that the authority cannot independently validate.
+      const verified = this.#approvalAuthority.verify(request, approval);
       if (!verified || verified.ok !== true) {
         const result = denial(verified?.code ?? "APPROVAL_INVALID", "Trusted approval is missing or invalid.");
         this.#auditDecision(normalized, result);
@@ -154,7 +157,9 @@ export class PolicyEngine {
     const normalized = normalizeRequest(request);
     if (!normalized.mutation) return { ...preflight, authorized: true };
 
-    const consumed = this.#approvalAuthority.consume(normalized.binding, this.#credential(request));
+    // As above, hand the authority the original argument object so the
+    // canonical hash is recomputed at the trust boundary.
+    const consumed = this.#approvalAuthority.consume(request, this.#credential(request));
     if (!consumed || consumed.ok !== true || consumed.consumed !== true) {
       const result = denial(consumed?.code ?? "APPROVAL_INVALID", "Trusted approval could not be consumed.");
       this.#auditDecision(normalized, result);
@@ -325,4 +330,3 @@ function denial(code, message, ruleId) {
     ...(ruleId === undefined ? {} : { ruleId }),
   };
 }
-

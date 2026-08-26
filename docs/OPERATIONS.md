@@ -14,7 +14,7 @@ run:
 ```sh
 npm test
 npm run check
-node --test test/release
+node --test test/release/*.test.js
 ```
 
 The first two commands are the repository's normal gates. The release suite
@@ -99,7 +99,7 @@ the process is healthy again.
 ## Release evidence
 
 The release record should include the exact commit SHA, Node versions tested,
-the output of `npm test`, `npm run check`, and `node --test test/release`, plus
+the output of `npm test`, `npm run check`, and `node --test test/release/*.test.js`, plus
 the container image digest and vulnerability-scan result when a container is
 published. Keep this evidence with the deployment change; a green local run
 without a persisted commit is not a release.

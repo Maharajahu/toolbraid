@@ -61,7 +61,7 @@ function normalizeCapability({ descriptor, kind }) {
   }
   const name = validateCapabilityName({ name: descriptor.name ?? descriptor.id });
   const readOnly = descriptor.readOnly === undefined ? descriptor.mutates !== true : descriptor.readOnly === true;
-  if (descriptor.mutates !== undefined && descriptor.mutates !== !readOnly) {
+  if (descriptor.mutates !== undefined && descriptor.readOnly !== undefined && descriptor.mutates === readOnly) {
     throw new AdapterContractError({ code: 'ADAPTER_CAPABILITY_INVALID', message: `Capability ${name} has contradictory mutates/readOnly flags.` });
   }
   const inputSchema = firstSchema({ descriptor, names: ['inputSchema', 'argsSchema', 'input'], fallback: defaultSchema({ readOnly }) });
@@ -405,4 +405,3 @@ export function createAdapter(spec = {}) {
     getCapability,
   });
 }
-
