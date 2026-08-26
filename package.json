@@ -10,8 +10,9 @@
   "scripts": {
     "start": "node src/server.js",
     "test": "node --test",
-    "test:unit": "node --test test/unit",
-    "test:integration": "node --test test/integration",
+    "test:unit": "node --test test/adapters/*.test.js test/core/*.test.js test/protocol/*.test.js test/security/*.test.js",
+    "test:integration": "node --test test/integration/*.test.js test/http/*.test.js test/acceptance/*.test.js",
+    "test:release": "node --test test/release/*.test.js",
     "check": "node --check src/server.js && node --test",
     "smoke": "node scripts/smoke.mjs"
   }

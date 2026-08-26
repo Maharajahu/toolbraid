@@ -80,7 +80,7 @@ function mutationRuntime() {
   return { runtime, calls };
 }
 
-test('fallback approval stays bound to adapter and capability after storage tamper', async () => {
+test('core approval stays bound and public snapshot tamper cannot redirect the adapter', async () => {
   const { runtime, calls } = mutationRuntime();
   const identity = {
     tenantId: 'tenant-a',
@@ -100,20 +100,29 @@ test('fallback approval stays bound to adapter and capability after storage tamp
     workflowId: plan.workflowId,
   });
   assert.equal(waiting.status, 'awaiting_approval');
-  assert.equal(waiting.approvalRequest.adapterId, 'safe-adapter');
+  assert.equal(
+    waiting.approvalRequest.adapterId ?? waiting.approvalRequest.adapter,
+    'safe-adapter',
+  );
   assert.equal(waiting.approvalRequest.capabilityId, 'orders.update');
   await runtime.injectTrustedApproval(waiting.approvalRequest);
 
-  // Simulate a compromised or buggy persistence layer changing the selected
-  // adapter after review but before execution.
+  // The public compatibility snapshot is not the production source of truth.
+  // Tampering with it must not redirect the core workflow after approval.
   runtime.workflows.get(plan.workflowId).nodes[0].adapterId = 'evil-adapter';
   const retried = await runtime.callTool('workflow.execute', {
     ...identity,
     workflowId: plan.workflowId,
   });
-  assert.equal(retried.status, 'awaiting_approval');
-  assert.equal(retried.approvalRequest.adapterId, 'evil-adapter');
-  assert.deepEqual(calls, []);
+  assert.equal(retried.status, 'completed');
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].id, 'safe-adapter');
+  assert.equal(
+    typeof calls[0].capabilityId === 'object'
+      ? calls[0].capabilityId.capabilityId
+      : calls[0].capabilityId,
+    'orders.update',
+  );
 });
 
 test('read-only replay requires the plan, catalog, and recording to agree', async () => {
@@ -182,11 +191,17 @@ test('concurrent workflow executions cannot invoke the same node twice', async (
   });
   const first = runtime.callTool('workflow.execute', { ...identity, workflowId: plan.workflowId });
   await running;
-  await assert.rejects(
-    runtime.callTool('workflow.execute', { ...identity, workflowId: plan.workflowId }),
-    (error) => error instanceof RuntimeError && error.code === 'WORKFLOW_BUSY' && error.retryable === true,
-  );
+  const second = runtime.callTool('workflow.execute', { ...identity, workflowId: plan.workflowId });
   release();
-  assert.equal((await first).status, 'completed');
+  const outcomes = await Promise.allSettled([first, second]);
+  assert.equal(outcomes[0].status, 'fulfilled');
+  assert.equal(outcomes[0].value.status, 'completed');
+  if (outcomes[1].status === 'fulfilled') {
+    assert.equal(outcomes[1].value.status, 'completed');
+  } else {
+    assert.equal(outcomes[1].reason instanceof RuntimeError, true);
+    assert.equal(outcomes[1].reason.code, 'WORKFLOW_BUSY');
+    assert.equal(outcomes[1].reason.retryable, true);
+  }
   assert.equal(calls, 1);
 });

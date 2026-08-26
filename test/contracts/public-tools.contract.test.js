@@ -261,6 +261,177 @@ test('schema-declared fields are accepted by the corresponding runtime handler',
   assert.equal(replay.readOnly, true);
 });
 
+test('fallback capability search honors kind, adapter, tags, readOnly, limit, and cursor', async () => {
+  const identity = { tenantId: 'tenant-a', subjectId: 'subject-a' };
+  const runtime = createCompositionRoot({
+    identity,
+    capabilities: [
+      { id: 'read.alpha', version: '1', readOnly: true, adapter: 'adapter-a', tags: ['mail', 'read'] },
+      { id: 'read.beta', version: '1', readOnly: true, adapter: 'adapter-b', tags: ['mail'] },
+      { id: 'write.gamma', version: '1', readOnly: false, adapter: 'adapter-a', tags: ['mail', 'write'] },
+    ],
+  });
+
+  const filtered = await runtime.callTool('capabilities.search', {
+    ...identity,
+    kind: 'read',
+    adapter: 'adapter-a',
+    tags: ['mail'],
+    readOnly: true,
+    limit: 1,
+  });
+  assert.deepEqual(filtered.capabilities.map(({ id }) => id), ['read.alpha']);
+  assert.equal(filtered.nextCursor, null);
+
+  const firstPage = await runtime.callTool('capabilities.search', {
+    ...identity,
+    tags: ['mail'],
+    limit: 1,
+  });
+  assert.deepEqual(firstPage.capabilities.map(({ id }) => id), ['read.alpha']);
+  assert.equal(firstPage.total, 3);
+  assert.equal(firstPage.nextCursor, '1');
+
+  const secondPage = await runtime.callTool('capabilities.search', {
+    ...identity,
+    tags: ['mail'],
+    limit: 1,
+    cursor: firstPage.nextCursor,
+  });
+  assert.deepEqual(secondPage.capabilities.map(({ id }) => id), ['read.beta']);
+  assert.equal(secondPage.nextCursor, '2');
+
+  const mutation = await runtime.callTool('capabilities.search', {
+    ...identity,
+    kind: 'mutation',
+    readOnly: false,
+  });
+  assert.deepEqual(mutation.capabilities.map(({ id }) => id), ['write.gamma']);
+});
+
+test('capabilities.describe honors versioned fallback records and the core catalog object contract', async () => {
+  const identity = { tenantId: 'tenant-a', subjectId: 'subject-a' };
+  const runtime = createCompositionRoot({
+    identity,
+    capabilities: [
+      { id: 'safe.lookup', version: '1', readOnly: true, description: 'v1' },
+      { id: 'safe.lookup', version: '2', readOnly: true, description: 'v2' },
+    ],
+  });
+  const v1 = await runtime.callTool('capabilities.describe', {
+    ...identity,
+    capabilityId: 'safe.lookup',
+    version: '1',
+  });
+  const v2 = await runtime.callTool('capabilities.describe', {
+    ...identity,
+    capabilityId: 'safe.lookup',
+    version: '2',
+  });
+  assert.equal(v1.version, '1');
+  assert.equal(v1.description, 'v1');
+  assert.equal(v2.version, '2');
+  assert.equal(v2.description, 'v2');
+  await assert.rejects(
+    runtime.callTool('capabilities.describe', {
+      ...identity,
+      capabilityId: 'safe.lookup',
+      version: 'missing',
+    }),
+    (error) => error?.code === 'CAPABILITY_NOT_FOUND',
+  );
+
+  const coreRuntime = createCompositionRoot({
+    withCore: true,
+    identity,
+    capabilities: [{ id: 'safe.lookup', version: '1', readOnly: true, description: 'core' }],
+  });
+  const coreDescription = await coreRuntime.callTool('capabilities.describe', {
+    ...identity,
+    capabilityId: 'safe.lookup',
+    version: '1',
+  });
+  assert.equal(coreDescription.description, 'core');
+  assert.equal(coreDescription.version, '1');
+});
+
+test('fallback plans preserve top-level goal, workflowId, and revision semantics', async () => {
+  const identity = { tenantId: 'tenant-acme', subjectId: 'user-alice' };
+  const runtime = createFixtureRuntime();
+  const plan = await runtime.callTool('plan.propose', {
+    ...identity,
+    request: { action: 'read' },
+    goal: 'Read the cart for review',
+    workflowId: 'contract-plan-42',
+    revision: 3,
+  });
+  assert.equal(plan.workflowId, 'contract-plan-42');
+  assert.equal(plan.revision, 3);
+  assert.equal(plan.goal, 'Read the cart for review');
+  assert.equal(plan.request.goal, 'Read the cart for review');
+
+  const status = await runtime.callTool('workflow.status', {
+    ...identity,
+    workflowId: plan.workflowId,
+    revision: plan.revision,
+  });
+  assert.equal(status.workflowId, plan.workflowId);
+  assert.equal(status.revision, plan.revision);
+});
+
+test('unsafe capability IDs are rejected and unsafe or secret descriptor metadata is redacted', async () => {
+  const identity = { tenantId: 'tenant-a', subjectId: 'subject-a' };
+  const unsafeIds = [
+    'approval.grant',
+    'approval.issue',
+    'approval.inject',
+    'dom.evaluate',
+    'page.evaluate',
+    'browser.evaluate',
+    'shell.exec',
+    'raw.click',
+    'cookie.read',
+    'filesystem.read',
+  ];
+  for (const id of unsafeIds) {
+    assert.throws(
+      () => createCompositionRoot({ identity, capabilities: [{ id, readOnly: true }] }),
+      (error) => error?.code === 'CAPABILITY_NOT_ALLOWED',
+      `${id} must not be accepted as a semantic capability`,
+    );
+  }
+
+  const runtime = createCompositionRoot({
+    identity,
+    capabilities: [{
+      id: 'safe.read',
+      readOnly: true,
+      command: 'must-not-leak',
+      shell: 'must-not-leak',
+      metadata: {
+        apiToken: 'secret-token',
+        nested: { password: 'secret-password', shell: 'must-not-leak' },
+      },
+      providerMetadata: { cookie: 'secret-cookie' },
+    }],
+  });
+  const described = await runtime.callTool('capabilities.describe', { ...identity, capabilityId: 'safe.read' });
+  const searched = await runtime.callTool('capabilities.search', identity);
+  for (const value of [described, searched]) {
+    const encoded = JSON.stringify(value);
+    assert.equal(encoded.includes('must-not-leak'), false);
+    assert.equal(encoded.includes('secret-token'), false);
+    assert.equal(encoded.includes('secret-password'), false);
+    assert.equal(encoded.includes('secret-cookie'), false);
+  }
+  assert.equal(described.command, undefined);
+  assert.equal(described.shell, undefined);
+  assert.equal(described.metadata.apiToken, '[REDACTED]');
+  assert.equal(described.metadata.nested.password, '[REDACTED]');
+  assert.equal(described.metadata.nested.shell, undefined);
+  assert.equal(described.providerMetadata.cookie, undefined);
+});
+
 test('configured runtime identity is never a substitute for caller identity', async () => {
   const runtime = createFixtureRuntime();
   const requests = [

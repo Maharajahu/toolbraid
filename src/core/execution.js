@@ -132,10 +132,33 @@ export class ExecutionBroker {
         throw new CoreError('EXECUTION_FAILED', `Node ${nodeId} failed`, { retryable: safe.retryable === true, details: { nodeId, cause: safe }, cause: error });
       }
       workflow = this.store.markNode({ identity, workflowId, revision, nodeId, state: 'completed', output: safeOutput });
-      await this.#audit({ type: 'node_completed', identity, workflowId, revision, nodeId, readOnly: node.readOnly });
+      try {
+        await this.#audit({ type: 'node_completed', identity, workflowId, revision, nodeId, readOnly: node.readOnly });
+      } catch (error) {
+        // The adapter has returned and its normalized output is durably marked
+        // completed.  A failed audit append must not expose a retryable
+        // `running` workflow that could make a caller repeat an ambiguous side
+        // effect.  Persist a terminal reconciliation marker instead.
+        throw this.#terminalizeReconciliation({
+          identity,
+          workflowId,
+          revision,
+          nodeId,
+          phase: 'node_completed',
+          cause: error,
+        });
+      }
     }
     workflow = this.store.complete({ identity, workflowId, revision });
-    await this.#audit({ type: 'workflow_completed', identity, workflowId, revision });
+    try {
+      await this.#audit({ type: 'workflow_completed', identity, workflowId, revision });
+    } catch (error) {
+      // Completion was committed before the audit append.  Keep the terminal
+      // completed state and surface a non-retryable reconciliation signal;
+      // executing again will return the completed snapshot without invoking an
+      // adapter.
+      throw reconciliationError({ phase: 'workflow_completed', cause: error });
+    }
     return executionView(workflow);
   }
 
@@ -362,6 +385,23 @@ export class ExecutionBroker {
     }
   }
 
+  #terminalizeReconciliation({ identity, workflowId, revision, nodeId, phase, cause }) {
+    const error = reconciliationError({ nodeId, phase, cause });
+    try {
+      const current = this.store.get({ identity, workflowId, revision });
+      if (!TERMINAL_WORKFLOW_STATES.has(current.state)) {
+        this.store.fail({ identity, workflowId, revision, error: error.toJSON() });
+      }
+    } catch (terminalizationError) {
+      // Never replace the committed-side-effect signal with a retryable store
+      // or audit error.  The node itself is already completed, so even a
+      // non-standard store that cannot transition the workflow will not cause
+      // this broker to execute that node again.
+      if (terminalizationError !== cause) error.terminalizationCause = terminalizationError;
+    }
+    return error;
+  }
+
   #now() {
     const value = this.clock();
     if (value instanceof Date) return value.toISOString();
@@ -432,6 +472,22 @@ function executionView(workflow, extras = {}) {
 
 function normalizeOutput(value) {
   return value === undefined ? null : jsonClone(value);
+}
+
+function reconciliationError({ nodeId, phase, cause }) {
+  return new CoreError(
+    'RECONCILIATION_REQUIRED',
+    'Execution completed but its audit record could not be appended; manual reconciliation is required',
+    {
+      retryable: false,
+      details: {
+        effectCommitted: true,
+        phase,
+        ...(nodeId === undefined ? {} : { nodeId }),
+      },
+      cause,
+    },
+  );
 }
 
 function requireWorkflowId(value) {

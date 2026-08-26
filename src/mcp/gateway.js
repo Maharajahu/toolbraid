@@ -30,6 +30,7 @@ import {
   hasPublicTool,
 } from './tools.js';
 import { firstValidationMessage, validateJsonSchema } from './validator.js';
+import { isSecretLikeKey } from '../security/redaction.js';
 
 const DEFAULT_SERVER_INFO = Object.freeze({
   name: 'ToolBraid',
@@ -42,6 +43,24 @@ const DEFAULT_INSTRUCTIONS =
 
 const MODERN_RESULT_TYPE = 'complete';
 
+// Tool handlers sit on the provider side of the MCP trust boundary.  Keep
+// their result/error envelopes useful, but bounded enough that a provider
+// cannot turn a single call into an unbounded response or smuggle an exception
+// object/stack onto the wire.
+const MAX_RESULT_DEPTH = 12;
+const MAX_RESULT_ENTRIES = 256;
+const MAX_RESULT_NODES = 4096;
+const MAX_RESULT_STRING_LENGTH = 8192;
+const MAX_ERROR_CODE_LENGTH = 128;
+const MAX_ERROR_MESSAGE_LENGTH = 2048;
+const REDACTED_VALUE = '[REDACTED]';
+const UNSERIALIZABLE_VALUE = '[UNSERIALIZABLE]';
+const OMIT_VALUE = Symbol('omit provider field');
+const OMITTED_PROVIDER_KEYS = new Set(['cause', 'stack', 'stacktrace', 'trace']);
+
+const BEARER_SECRET_PATTERN = /\bBearer\s+[^\s,;]+/giu;
+const KEYED_SECRET_PATTERN = /\b((?:access[_-]?key|access[_-]?token|api[_-]?key|authorization|bearer|client[_-]?secret|cookie|credential|jwt|nonce|oauth|pass(?:word|code|phrase)?|private[_-]?key|refresh[_-]?token|secret(?:[_-]?key)?|session(?:[_-]?id)?|signature|ssn|token|totp))\b(\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s,;]+)/giu;
+
 function idKey(id) {
   return `${typeof id}:${String(id)}`;
 }
@@ -51,14 +70,194 @@ function asSafeString(value, fallback, maxLength = 2048) {
   return value.length > maxLength ? value.slice(0, maxLength) : value;
 }
 
+function ownData(value, key) {
+  if (value === null || (typeof value !== 'object' && typeof value !== 'function')) {
+    return { present: false, value: undefined };
+  }
+  try {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (!descriptor || !Object.prototype.hasOwnProperty.call(descriptor, 'value')) {
+      // Accessors are provider-controlled code.  Treat them as absent rather
+      // than invoking a getter while constructing a response.
+      return { present: false, value: undefined };
+    }
+    return { present: true, value: descriptor.value };
+  } catch {
+    return { present: false, value: undefined };
+  }
+}
+
+function hasOwnData(value, key) {
+  return ownData(value, key).present;
+}
+
+function safePlainObject(value) {
+  try {
+    return isPlainObject(value);
+  } catch {
+    return false;
+  }
+}
+
+function putData(target, key, value) {
+  // Defining a property avoids the special __proto__ setter on ordinary
+  // objects while retaining the familiar object prototype for API callers.
+  Object.defineProperty(target, key, {
+    configurable: true,
+    enumerable: true,
+    writable: true,
+    value,
+  });
+}
+
+function omittedProviderKey(key) {
+  if (typeof key !== 'string') return false;
+  return OMITTED_PROVIDER_KEYS.has(key.toLowerCase().replace(/[^a-z0-9]/gu, ''));
+}
+
+function redactSensitiveText(value, maxLength = MAX_RESULT_STRING_LENGTH) {
+  if (typeof value !== 'string') return '';
+  // Bound before regex processing so a hostile provider cannot make an error
+  // response spend unbounded time scanning an unbounded string.
+  let text = value.length > maxLength ? value.slice(0, maxLength) : value;
+  text = text
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/gu, ' ')
+    .replace(BEARER_SECRET_PATTERN, 'Bearer [REDACTED]')
+    .replace(KEYED_SECRET_PATTERN, '$1$2[REDACTED]');
+  return text.length > maxLength ? text.slice(0, maxLength) : text;
+}
+
+function sanitizeErrorCode(value, fallback = 'tool_execution_error') {
+  if (typeof value !== 'string' || value.length === 0 || value.length > MAX_ERROR_CODE_LENGTH) {
+    return fallback;
+  }
+  // Error codes are useful for clients, but must remain identifier-like so a
+  // provider cannot put a secret, line break, or an arbitrary diagnostic blob
+  // in the stable code field.
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(value)) return fallback;
+  return value;
+}
+
+function sanitizeErrorMessage(value, fallback = 'Tool execution failed') {
+  if (typeof value !== 'string' || value.length === 0) return fallback;
+  const text = redactSensitiveText(value, MAX_ERROR_MESSAGE_LENGTH);
+  return text.length === 0 ? fallback : text;
+}
+
+function sanitizeProviderValue(value, options = {}) {
+  const state = {
+    maxDepth: options.maxDepth ?? MAX_RESULT_DEPTH,
+    maxEntries: options.maxEntries ?? MAX_RESULT_ENTRIES,
+    maxNodes: options.maxNodes ?? MAX_RESULT_NODES,
+    maxStringLength: options.maxStringLength ?? MAX_RESULT_STRING_LENGTH,
+    nodes: 0,
+    seen: new WeakSet(),
+  };
+  const result = walkProviderValue(value, state, 0, undefined);
+  return result === OMIT_VALUE ? UNSERIALIZABLE_VALUE : result;
+}
+
+function sanitizeProviderError(value) {
+  const safe = sanitizeProviderValue(value);
+  if (!safePlainObject(value) || !safePlainObject(safe)) return safe;
+
+  const code = ownData(value, 'code');
+  if (code.present) putData(safe, 'code', sanitizeErrorCode(code.value));
+  const message = ownData(value, 'message');
+  if (message.present) putData(safe, 'message', sanitizeErrorMessage(message.value));
+  const details = ownData(value, 'details');
+  if (details.present) putData(safe, 'details', sanitizeProviderValue(details.value));
+  return safe;
+}
+
+function sanitizeResultPayload(value) {
+  const safe = sanitizeProviderValue(value);
+  if (!safePlainObject(value) || !safePlainObject(safe)) return safe;
+  const error = ownData(value, 'error');
+  if (error.present) putData(safe, 'error', sanitizeProviderError(error.value));
+  return safe;
+}
+
+function walkProviderValue(value, state, depth, key) {
+  if (omittedProviderKey(key)) return OMIT_VALUE;
+  if (isSecretLikeKey(key)) return REDACTED_VALUE;
+  if (depth > state.maxDepth || state.nodes >= state.maxNodes) return UNSERIALIZABLE_VALUE;
+  state.nodes += 1;
+
+  if (value === null) return null;
+  switch (typeof value) {
+    case 'string':
+      return redactSensitiveText(value, state.maxStringLength);
+    case 'boolean':
+      return value;
+    case 'number':
+      return Number.isFinite(value) ? value : UNSERIALIZABLE_VALUE;
+    case 'undefined':
+    case 'bigint':
+    case 'function':
+    case 'symbol':
+      return UNSERIALIZABLE_VALUE;
+    case 'object':
+      break;
+    default:
+      return UNSERIALIZABLE_VALUE;
+  }
+
+  if (state.seen.has(value)) return UNSERIALIZABLE_VALUE;
+  state.seen.add(value);
+  try {
+    if (Array.isArray(value)) {
+      const length = Number.isSafeInteger(value.length) && value.length >= 0 ? value.length : 0;
+      const result = [];
+      const count = Math.min(length, state.maxEntries);
+      for (let index = 0; index < count; index += 1) {
+        const entry = ownData(value, String(index));
+        const child = entry.present
+          ? walkProviderValue(entry.value, state, depth + 1, undefined)
+          : UNSERIALIZABLE_VALUE;
+        result.push(child === OMIT_VALUE ? UNSERIALIZABLE_VALUE : child);
+      }
+      return result;
+    }
+
+    let prototype;
+    let keys;
+    try {
+      prototype = Object.getPrototypeOf(value);
+      keys = Object.keys(value);
+    } catch {
+      return UNSERIALIZABLE_VALUE;
+    }
+    if (prototype !== Object.prototype && prototype !== null) return UNSERIALIZABLE_VALUE;
+
+    const result = {};
+    for (const childKey of keys.slice(0, state.maxEntries)) {
+      const entry = ownData(value, childKey);
+      if (!entry.present) {
+        putData(result, childKey, UNSERIALIZABLE_VALUE);
+        continue;
+      }
+      const child = walkProviderValue(entry.value, state, depth + 1, childKey);
+      if (child !== OMIT_VALUE) putData(result, childKey, child);
+    }
+    return result;
+  } catch {
+    return UNSERIALIZABLE_VALUE;
+  } finally {
+    state.seen.delete(value);
+  }
+}
+
 function textForValue(value) {
-  if (typeof value === 'string') return value;
+  if (typeof value === 'string') return redactSensitiveText(value, MAX_RESULT_STRING_LENGTH);
   if (value === undefined) return '';
   try {
     const encoded = JSON.stringify(value);
-    return encoded === undefined ? String(value) : encoded;
+    return encoded === undefined
+      ? UNSERIALIZABLE_VALUE
+      : redactSensitiveText(encoded, MAX_RESULT_STRING_LENGTH);
   } catch {
-    return '[unserializable tool result]';
+    return UNSERIALIZABLE_VALUE;
   }
 }
 
@@ -105,15 +304,18 @@ function consistentIdentityValues(values) {
 }
 
 function toolExecutionError(code, message, details, modern) {
-  const safeCode = asSafeString(code, 'tool_execution_error', 128);
-  const safeMessage = asSafeString(message, 'Tool execution failed', 2048);
+  const safeCode = sanitizeErrorCode(code);
+  const safeMessage = sanitizeErrorMessage(message);
+  const retryable = ownData(details, 'retryable');
+  const detailValue = ownData(details, 'details');
   const structuredContent = {
     code: safeCode,
     message: safeMessage,
-    retryable: Boolean(details?.retryable),
+    retryable: retryable.present && retryable.value === true,
   };
-  if (details?.details !== undefined && isJsonValue(details.details)) {
-    structuredContent.details = details.details;
+  if (detailValue.present) {
+    const safeDetails = sanitizeProviderValue(detailValue.value);
+    if (safeDetails !== OMIT_VALUE) structuredContent.details = safeDetails;
   }
   const result = {
     content: [{ type: 'text', text: safeMessage }],
@@ -125,7 +327,7 @@ function toolExecutionError(code, message, details, modern) {
 }
 
 function validContentBlock(block) {
-  if (!isPlainObject(block) || typeof block.type !== 'string') return false;
+  if (!safePlainObject(block) || typeof block.type !== 'string') return false;
   switch (block.type) {
     case 'text':
       return typeof block.text === 'string';
@@ -141,48 +343,119 @@ function validContentBlock(block) {
   }
 }
 
+function errorInstance(value) {
+  try {
+    return value instanceof Error;
+  } catch {
+    return false;
+  }
+}
+
+function errorInfo(value) {
+  const code = ownData(value, 'code');
+  const message = ownData(value, 'message');
+  const retryable = ownData(value, 'retryable');
+  const details = ownData(value, 'details');
+  return {
+    code: sanitizeErrorCode(code.present ? code.value : undefined),
+    message: sanitizeErrorMessage(message.present ? message.value : undefined),
+    retryable: retryable.present && retryable.value === true,
+    ...(details.present ? { details: details.value } : {}),
+  };
+}
+
+function failedStatus(value) {
+  const status = ownData(value, 'status');
+  return status.present && status.value === 'failed';
+}
+
+function indicatesFailure(value, structuredValue) {
+  if (failedStatus(value)) return true;
+  if (safePlainObject(structuredValue) && failedStatus(structuredValue)) return true;
+  // Presence is intentional: an explicitly supplied null/empty error is still
+  // a provider assertion that the operation failed, and should fail closed.
+  return hasOwnData(value, 'error');
+}
+
+function normalizedContent(value) {
+  if (!Array.isArray(value)) return undefined;
+  const content = [];
+  let count;
+  try {
+    count = Math.min(value.length, MAX_RESULT_ENTRIES);
+  } catch {
+    return undefined;
+  }
+  for (let index = 0; index < count; index += 1) {
+    const entry = ownData(value, String(index));
+    if (!entry.present) return undefined;
+    const block = sanitizeProviderValue(entry.value, {
+      maxDepth: 6,
+      maxEntries: MAX_RESULT_ENTRIES,
+      maxNodes: MAX_RESULT_NODES,
+      maxStringLength: MAX_RESULT_STRING_LENGTH,
+    });
+    if (!safePlainObject(block) || !validContentBlock(block)) return undefined;
+    content.push(block);
+  }
+  return content;
+}
+
 function normalizeToolResult(value, modern) {
   // A handler may return a complete MCP ToolResult, or an ordinary JSON value
   // which the gateway wraps in structured and text content.
-  let result;
-  if (value instanceof Error) {
-    return toolExecutionError('tool_execution_error', value.message, undefined, modern);
-  }
-  if (
-    isPlainObject(value) &&
-    (hasOwn(value, 'content') || hasOwn(value, 'structuredContent') || hasOwn(value, 'isError'))
-  ) {
-    try {
-      result = cloneJson(value);
-    } catch {
-      return toolExecutionError('invalid_tool_result', 'Tool returned non-JSON data', undefined, modern);
-    }
-  } else {
-    result = {
-      content: [{ type: 'text', text: textForValue(value) }],
-      structuredContent: value === undefined ? null : value,
-      isError: false,
-    };
+  if (errorInstance(value)) {
+    const info = errorInfo(value);
+    return toolExecutionError(info.code, info.message, info, modern);
   }
 
-  if (!isPlainObject(result)) {
+  const complete = safePlainObject(value) && (
+    hasOwnData(value, 'content') ||
+    hasOwnData(value, 'structuredContent') ||
+    hasOwnData(value, 'isError')
+  );
+  if (!complete) {
+    const structuredContent = value === undefined ? null : sanitizeResultPayload(value);
+    return normalizeWrappedResult(structuredContent, indicatesFailure(value, structuredContent), modern);
+  }
+
+  let result = sanitizeResultPayload(value);
+  if (!safePlainObject(result)) {
     return toolExecutionError('invalid_tool_result', 'Tool returned an invalid result', undefined, modern);
   }
-  if (result.content === undefined) {
+
+  const rawContent = ownData(value, 'content');
+  if (rawContent.present) {
+    const content = normalizedContent(rawContent.value);
+    if (content === undefined) {
+      return toolExecutionError('invalid_tool_result', 'Tool returned invalid content', undefined, modern);
+    }
+    putData(result, 'content', content);
+  } else {
+    const rawStructured = ownData(value, 'structuredContent');
+    const textSource = rawStructured.present
+      ? ownData(result, 'structuredContent').value
+      : ownData(result, 'error').value;
     result.content = [
       {
         type: 'text',
-        text: result.structuredContent === undefined ? '' : textForValue(result.structuredContent),
+        text: textSource === undefined ? '' : textForValue(textSource),
       },
     ];
   }
-  if (!Array.isArray(result.content) || !result.content.every(validContentBlock)) {
-    return toolExecutionError('invalid_tool_result', 'Tool returned invalid content', undefined, modern);
+
+  const rawStructured = ownData(value, 'structuredContent');
+  if (rawStructured.present) {
+    putData(result, 'structuredContent', sanitizeResultPayload(rawStructured.value));
   }
-  result.isError = Boolean(result.isError);
+
+  const rawIsError = ownData(value, 'isError');
+  putData(result, 'isError', (rawIsError.present && rawIsError.value === true)
+    || indicatesFailure(value, rawStructured.present ? rawStructured.value : undefined));
   if (modern) {
-    result.resultType = typeof result.resultType === 'string' && result.resultType.length > 0
-      ? result.resultType
+    const resultType = ownData(value, 'resultType');
+    result.resultType = typeof resultType.value === 'string' && resultType.value.length > 0
+      ? redactSensitiveText(resultType.value, 128)
       : MODERN_RESULT_TYPE;
   } else {
     delete result.resultType;
@@ -192,6 +465,16 @@ function normalizeToolResult(value, modern) {
   if (!isJsonValue(result)) {
     return toolExecutionError('invalid_tool_result', 'Tool returned non-JSON data', undefined, modern);
   }
+  return result;
+}
+
+function normalizeWrappedResult(structuredContent, isError, modern) {
+  const result = {
+    content: [{ type: 'text', text: textForValue(structuredContent) }],
+    structuredContent,
+    isError: Boolean(isError),
+  };
+  if (modern) result.resultType = MODERN_RESULT_TYPE;
   return result;
 }
 
@@ -302,11 +585,11 @@ export class McpGateway {
       const value = await handler(args, callContext);
       return normalizeToolResult(value, modern);
     } catch (error) {
-      const details = isPlainObject(error) ? error : undefined;
+      const info = errorInfo(error);
       return toolExecutionError(
-        typeof error?.code === 'string' ? error.code : 'tool_execution_error',
-        typeof error?.message === 'string' ? error.message : 'Tool execution failed',
-        details,
+        info.code,
+        info.message,
+        info,
         modern,
       );
     }

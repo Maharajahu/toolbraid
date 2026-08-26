@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 
+import { validatePlan } from '../core/index.js';
 import { getToolDefinitions } from '../mcp/tools.js';
 import {
   FIXTURE_IDS,
@@ -25,8 +26,16 @@ export const PUBLIC_TOOL_NAMES = Object.freeze([
 export const PUBLIC_TOOL_DEFINITIONS = Object.freeze(getToolDefinitions().map((definition) => deepFreeze(definition)));
 
 const PUBLIC_TOOL_SET = new Set(PUBLIC_TOOL_NAMES);
-const UNSAFE_CAPABILITY_WORDS = /(?:^|[._:/-])(click|shell|exec|execute|javascript|eval|raw|cookie|filesystem|fs)(?:$|[._:/-])/i;
-const SECRET_KEY = /(?:authorization|cookie|password|passwd|secret|token|api[_-]?key|private[_-]?key|credential|session)/i;
+const UNSAFE_CAPABILITY_WORDS = /(?:^|[._:/-])(approval|approve|click|shell|shellcommand|exec|execute|javascript|evaluate|eval|raw|cookie|cookies|filesystem|file|fs|keypress|keystroke|mouse)(?:$|[._:/-])/i;
+const UNSAFE_CAPABILITY_KEYS = new Set([
+  'approval', 'approvalid', 'approvalnonce', 'approvalrecord', 'approvaltoken',
+  'code', 'command', 'cookie', 'cookies', 'eval', 'evaluate', 'exec', 'execute',
+  'filesystem', 'function', 'javascript', 'raw', 'script', 'selector', 'shell',
+  'shellcommand', 'source', 'xpath',
+]);
+const SECRET_KEY = /(?:authorization|bearer|cookie|password|passwd|secret|token|api[_-]?key|private[_-]?key|credential|session|access[_-]?key|refresh[_-]?token)/i;
+const CAPABILITY_VERSION_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._+\-]{0,63}$/;
+const WORKFLOW_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:@/+\-]{0,199}$/;
 
 /**
  * Error type used at the composition boundary.  It deliberately has no stack
@@ -80,10 +89,13 @@ export function createCompositionRoot(options = {}) {
   const now = normalizeClock(source.now);
   const adapters = normalizeAdapters(source.adapters || source.adapter);
   const capabilityIndex = new Map();
+  const capabilityVersions = new Map();
   for (const capability of normalizeCapabilities(source.capabilities, adapters)) {
     if (!capability || !capability.id) continue;
     const normalized = normalizeCapability(capability, source.origin);
     capabilityIndex.set(normalized.id, normalized);
+    if (!capabilityVersions.has(normalized.id)) capabilityVersions.set(normalized.id, new Map());
+    capabilityVersions.get(normalized.id).set(normalized.version, normalized);
   }
 
   const workflows = new Map();
@@ -91,15 +103,21 @@ export function createCompositionRoot(options = {}) {
   const pendingApprovalNonces = new Set();
   const executingWorkflows = new Set();
   const auditRecords = [];
-  const coreServices = source.services || source.coreServices || (source.withCore === true || source.core === true
-    ? createCoreServices({
+  // The core/security graph is the only production execution path.  The
+  // legacy in-memory maps below remain private compatibility state for the
+  // explicit fixture runtime; non-fixture calls delegate to these services and
+  // never fall back to weaker local execution if a service call is undefined.
+  const providedCoreServices = source.services || source.coreServices;
+  const coreServices = fixtureRequested
+    ? null
+    : providedCoreServices || createCoreServices({
       ...source,
       identity,
-      capabilities: source.capabilities || [...capabilityIndex.values()],
+      ...(source.capabilities === undefined ? {} : { capabilities: source.capabilities }),
       adapters,
       clock: now,
-    })
-    : null);
+      approvalCredentialResolver: source.approvalCredentialResolver || ((binding) => findCoreCredential(binding)),
+    });
   const external = {
     catalog: source.catalog || coreServices?.catalog,
     planner: source.planner || coreServices?.planner,
@@ -110,11 +128,16 @@ export function createCompositionRoot(options = {}) {
     audit: source.audit || source.auditLog || coreServices?.audit,
     hasher: source.hasher || source.canonicalHasher,
   };
+  const usingCore = !fixtureRequested;
+  if (usingCore && (!external.catalog || !external.planner || !external.workflow || !external.broker)) {
+    throw new RuntimeError('CORE_SERVICES_INVALID', 'Production runtime requires catalog, planner, workflow store, and execution broker services');
+  }
 
   const runtime = {
     identity,
     adapters,
     capabilityIndex,
+    capabilityVersions,
     workflows,
     trustedApprovals,
     auditRecords,
@@ -186,9 +209,25 @@ export function createCompositionRoot(options = {}) {
     },
 
     getAuditRecords() {
+      if (usingCore && external.audit && typeof external.audit.entries === 'function') {
+        return cloneJson(external.audit.entries());
+      }
       return auditRecords.map((entry) => cloneJson(entry));
     },
     getWorkflow(workflowId) {
+      if (usingCore && external.workflow && typeof external.workflow.get === 'function') {
+        if (!identity.tenantId || !identity.subject) return undefined;
+        try {
+          const result = external.workflow.get({
+            identity: { tenantId: identity.tenantId, subjectId: identity.subject },
+            workflowId: String(workflowId || ''),
+            revision: 1,
+          });
+          return result ? publicCoreWorkflow(result) : undefined;
+        } catch {
+          return undefined;
+        }
+      }
       const record = workflows.get(String(workflowId || ''));
       return record ? publicWorkflow(record) : undefined;
     },
@@ -198,23 +237,77 @@ export function createCompositionRoot(options = {}) {
 
   async function searchCapabilities(input = {}) {
     const request = assertRequestIdentity(input, identity);
-    const query = String(input.query ?? input.q ?? input.text ?? '').trim().toLowerCase();
-    const limit = boundedInteger(input.limit, 100, 1, 100);
+    const query = normalizeSearchQuery(input.query ?? input.q ?? input.text);
+    const kind = normalizeSearchKind(input.kind);
+    const adapter = normalizeSearchAdapter(input.adapter);
+    const tags = normalizeSearchTags(input.tags);
+    const readOnly = normalizeSearchReadOnly(input.readOnly);
+    const limit = normalizeSearchLimit(input.limit);
+    const cursor = normalizeSearchCursor(input.cursor);
     let result;
+
+    if (usingCore) {
+      result = await invokeRequired(external.catalog, ['search', 'find', 'list'], [{
+        ...cloneJson(input),
+        ...request,
+        query,
+        ...(kind === undefined ? {} : { kind }),
+        ...(adapter === undefined ? {} : { adapter }),
+        ...(tags.length === 0 ? {} : { tags }),
+        ...(readOnly === undefined ? {} : { readOnly }),
+        limit,
+        ...(input.cursor === undefined ? {} : { cursor: String(cursor) }),
+      }], 'CAPABILITY_SEARCH_UNAVAILABLE');
+      const payload = normalizeSearchResult(result, query);
+      if (result && result.total === undefined) {
+        payload.total = [...capabilityIndex.values()]
+          .filter((capability) => matchesOrigin(capability, request.origin))
+          .filter((capability) => !query || capabilitySearchText(capability).includes(query))
+          .filter((capability) => matchesSearchKind(capability, kind))
+          .filter((capability) => matchesSearchAdapter(capability, adapter))
+          .filter((capability) => matchesSearchTags(capability, tags))
+          .filter((capability) => readOnly === undefined || capability.readOnly === readOnly)
+          .length;
+      }
+      payload.tenantId = request.tenantId;
+      payload.subject = request.subject;
+      payload.subjectId = request.subjectId;
+      if (request.origin) payload.origin = request.origin;
+      return cloneJson(payload);
+    }
 
     if (external.catalog) {
       result = await invokeFirst(external.catalog, ['search', 'find', 'list'], [
-        { ...cloneJson(input), ...request, query, limit },
+        {
+          ...cloneJson(input),
+          ...request,
+          query,
+          ...(kind === undefined ? {} : { kind }),
+          ...(adapter === undefined ? {} : { adapter }),
+          ...(tags.length === 0 ? {} : { tags }),
+          ...(readOnly === undefined ? {} : { readOnly }),
+          limit,
+          ...(input.cursor === undefined ? {} : { cursor: String(cursor) }),
+        },
       ]);
     }
     if (result === undefined) {
-      const entries = [...capabilityIndex.values()]
+      const candidates = [...capabilityIndex.values()]
         .filter((capability) => matchesOrigin(capability, request.origin))
         .filter((capability) => !query || capabilitySearchText(capability).includes(query))
-        .sort((left, right) => left.id.localeCompare(right.id))
-        .slice(0, limit)
-        .map((capability) => cloneJson(capability));
-      result = { query, capabilities: entries, items: entries, total: entries.length };
+        .filter((capability) => matchesSearchKind(capability, kind))
+        .filter((capability) => matchesSearchAdapter(capability, adapter))
+        .filter((capability) => matchesSearchTags(capability, tags))
+        .filter((capability) => readOnly === undefined || capability.readOnly === readOnly)
+        .sort(compareCapabilities);
+      const entries = candidates.slice(cursor, cursor + limit).map((capability) => cloneJson(capability));
+      result = {
+        query,
+        capabilities: entries,
+        items: entries,
+        total: candidates.length,
+        nextCursor: cursor + entries.length < candidates.length ? String(cursor + entries.length) : null,
+      };
     }
 
     const payload = normalizeSearchResult(result, query);
@@ -233,28 +326,53 @@ export function createCompositionRoot(options = {}) {
         details: { field: 'capabilityId' },
       });
     }
+    const requestedVersion = input.version === undefined
+      ? undefined
+      : normalizeCapabilityVersion(input.version);
     let result;
-    if (external.catalog) {
-      result = await invokeFirst(external.catalog, ['describe', 'get', 'lookup'], [
+    if (usingCore) {
+      const describeInput = {
+        ...cloneJson(input),
+        ...request,
         capabilityId,
-        { ...cloneJson(input), ...request },
-      ]);
-      // Some catalogs use a single options object.
-      if (result === undefined) {
-        result = await invokeFirst(external.catalog, ['describe', 'get', 'lookup'], [{
-          capabilityId,
-          ...cloneJson(input),
-          ...request,
-        }]);
+        ...(requestedVersion === undefined ? {} : { version: requestedVersion }),
+      };
+      result = await invokeRequired(external.catalog, ['describe', 'get', 'lookup'], [describeInput], 'CAPABILITY_DESCRIBE_UNAVAILABLE');
+      return normalizePublicCapability(result, request);
+    }
+    if (external.catalog) {
+      const describeInput = {
+        ...cloneJson(input),
+        ...request,
+        capabilityId,
+        ...(requestedVersion === undefined ? {} : { version: requestedVersion }),
+      };
+      // Catalog methods use the same one-object contract as the rest of the
+      // composition boundary.  In particular, CapabilityCatalog.describe
+      // expects `{ capabilityId, identity... }`, not positional arguments.
+      result = await invokeCatalogDescribe(external.catalog, capabilityId, describeInput);
+    }
+    if (result === undefined) {
+      if (requestedVersion === undefined) {
+        result = capabilityIndex.get(capabilityId);
+      } else {
+        result = capabilityVersions.get(capabilityId)?.get(requestedVersion);
       }
     }
-    if (result === undefined) result = capabilityIndex.get(capabilityId);
     if (result === undefined || result === null) {
       throw new RuntimeError('CAPABILITY_NOT_FOUND', `Capability not found: ${capabilityId}`, {
-        details: { capabilityId },
+        details: {
+          capabilityId,
+          ...(requestedVersion === undefined ? {} : { version: requestedVersion }),
+        },
       });
     }
     const normalized = normalizeCapability(result, request.origin);
+    if (requestedVersion !== undefined && normalized.version !== requestedVersion) {
+      throw new RuntimeError('CAPABILITY_NOT_FOUND', `Capability not found: ${capabilityId}@${requestedVersion}`, {
+        details: { capabilityId, version: requestedVersion },
+      });
+    }
     if (!matchesOrigin(normalized, request.origin)) {
       throw new RuntimeError('CAPABILITY_ORIGIN_MISMATCH', 'Capability is not available at the requested origin', {
         details: { capabilityId, origin: request.origin },
@@ -272,6 +390,7 @@ export function createCompositionRoot(options = {}) {
   async function proposePlan(input = {}) {
     const requestIdentity = assertRequestIdentity(input, identity);
     const request = normalizePlanRequest(input);
+    if (usingCore) return proposeCorePlan(input, requestIdentity, request);
     let proposed;
     if (external.planner) {
       proposed = await invokeFirst(external.planner, ['propose', 'plan', 'createPlan'], [{
@@ -295,8 +414,175 @@ export function createCompositionRoot(options = {}) {
     return publicWorkflow(record);
   }
 
+  async function proposeCorePlan(input, requestIdentity, request) {
+    const identityForCore = {
+      tenantId: requestIdentity.tenantId,
+      subjectId: requestIdentity.subjectId,
+    };
+    const rawNodes = request.nodes || request.steps || buildFallbackPlan(request, requestIdentity).nodes;
+    if (!Array.isArray(rawNodes) || rawNodes.length === 0) {
+      throw new RuntimeError('INVALID_PLAN', 'A workflow plan must contain at least one node');
+    }
+    const nodes = rawNodes.map((node, index) => {
+      const candidate = node && typeof node === 'object' && !Array.isArray(node)
+        ? cloneJson(node)
+        : { capabilityId: node };
+      if (candidate.id === undefined && candidate.nodeId === undefined) candidate.id = `node-${index + 1}`;
+      return candidate;
+    });
+    const plannerInput = {
+      ...cloneJson(request),
+      identity: identityForCore,
+      nodes,
+      ...(requestIdentity.origin ? { origin: requestIdentity.origin } : {}),
+    };
+    const proposedValue = await invokeRequired(
+      external.planner,
+      ['propose', 'plan', 'build', 'createPlan'],
+      [plannerInput],
+      'PLAN_PROPOSAL_UNAVAILABLE',
+    );
+    const proposed = proposedValue?.plan && typeof proposedValue.plan === 'object'
+      ? proposedValue.plan
+      : proposedValue;
+    let plan;
+    try {
+      plan = validatePlan({ identity: identityForCore, plan: proposed });
+    } catch (error) {
+      throw toRuntimeError(error, 'INVALID_PLAN', 'Planner returned an invalid plan');
+    }
+    if (requestIdentity.origin && plan.nodes.some((node) => node.origin !== requestIdentity.origin)) {
+      throw new RuntimeError('CAPABILITY_ORIGIN_MISMATCH', 'Planned capability origin does not match the requested origin');
+    }
+    const workflowId = plan.workflowId;
+    const revision = plan.revision;
+    const stored = await invokeRequired(
+      external.workflow,
+      ['create', 'propose', 'save', 'put'],
+      [{ identity: identityForCore, workflowId, revision, plan }],
+      'WORKFLOW_STORE_UNAVAILABLE',
+    );
+    const publicValue = publicCoreWorkflow(stored, plan, request);
+    await appendAudit({
+      event: 'workflow.plan.proposed',
+      tenantId: plan.tenantId,
+      subject: plan.subjectId,
+      workflowId,
+      revision,
+      nodeCount: plan.nodes.length,
+    });
+    // Keep an isolated compatibility snapshot for hosts that inspect the
+    // runtime object; it is never used as the production source of truth.
+    workflows.set(workflowId, cloneJson(publicValue));
+    return publicValue;
+  }
+
+  async function executeCoreWorkflow(input, requestIdentity) {
+    rejectUntrustedApproval(input);
+    const workflowId = String(input.workflowId || input.id || '').trim();
+    if (!workflowId) throw new RuntimeError('INVALID_ARGUMENT', 'workflowId is required', { details: { field: 'workflowId' } });
+    const revision = input.revision === undefined ? 1 : requestedRevision(input.revision);
+    const identityForCore = {
+      tenantId: requestIdentity.tenantId,
+      subjectId: requestIdentity.subject,
+    };
+    let result;
+    try {
+      result = await invokeRequired(
+        external.broker,
+        ['execute', 'run', 'invoke'],
+        [{
+          identity: identityForCore,
+          workflowId,
+          revision,
+          ...(requestIdentity.origin ? { origin: requestIdentity.origin } : {}),
+        }],
+        'WORKFLOW_EXECUTION_UNAVAILABLE',
+      );
+    } catch (error) {
+      // If an audit sink fails after the adapter has committed a side effect,
+      // the core broker may leave a completed node in a running workflow.  A
+      // reconciliation pass closes that state without invoking the node again.
+      const reconciled = await reconcileCoreWorkflow(identityForCore, workflowId, revision);
+      if (reconciled) return publicCoreExecution(reconciled);
+      throw error;
+    }
+    const publicValue = publicCoreExecution(result);
+    workflows.set(workflowId, cloneJson(publicValue));
+    return publicValue;
+  }
+
+  async function statusCoreWorkflow(input, requestIdentity) {
+    const workflowId = String(input.workflowId || input.id || '').trim();
+    if (!workflowId) throw new RuntimeError('INVALID_ARGUMENT', 'workflowId is required', { details: { field: 'workflowId' } });
+    const revision = input.revision === undefined ? 1 : requestedRevision(input.revision);
+    const identityForCore = { tenantId: requestIdentity.tenantId, subjectId: requestIdentity.subject };
+    let result;
+    if (external.broker && typeof external.broker.status === 'function') {
+      result = await external.broker.status({ identity: identityForCore, workflowId, revision });
+    } else {
+      result = await invokeRequired(external.workflow, ['get', 'status', 'read'], [{ identity: identityForCore, workflowId, revision }], 'WORKFLOW_STORE_UNAVAILABLE');
+    }
+    const publicValue = publicCoreWorkflow(result);
+    workflows.set(workflowId, cloneJson(publicValue));
+    return publicValue;
+  }
+
+  async function reconcileCoreWorkflow(coreIdentity, workflowId, revision) {
+    if (!external.workflow || typeof external.workflow.get !== 'function') return undefined;
+    let workflow;
+    try {
+      workflow = await external.workflow.get({ identity: coreIdentity, workflowId, revision });
+    } catch {
+      return undefined;
+    }
+    if (!workflow || workflow.state !== 'running' || !workflow.plan) return undefined;
+    const complete = workflow.plan.nodes.every((node) => workflow.nodeStates?.[node.id]?.state === 'completed');
+    if (complete && typeof external.workflow.complete === 'function') {
+      try {
+        return await external.workflow.complete({ identity: coreIdentity, workflowId, revision });
+      } catch {
+        return undefined;
+      }
+    }
+    // A node left running/pending after a boundary failure must not be retried
+    // implicitly; mark the workflow terminal so a host can investigate it.
+    if (typeof external.workflow.fail === 'function') {
+      try {
+        return await external.workflow.fail({
+          identity: coreIdentity,
+          workflowId,
+          revision,
+          error: { code: 'RECONCILIATION_REQUIRED', message: 'Execution stopped after a boundary failure', retryable: false },
+        });
+      } catch {
+        return undefined;
+      }
+    }
+    return undefined;
+  }
+
+  async function replayCoreWorkflow(input, requestIdentity) {
+    rejectUntrustedApproval(input);
+    const workflowId = String(input.workflowId || input.id || '').trim();
+    if (!workflowId) throw new RuntimeError('INVALID_ARGUMENT', 'workflowId is required', { details: { field: 'workflowId' } });
+    const revision = input.revision === undefined ? 1 : requestedRevision(input.revision);
+    const identityForCore = { tenantId: requestIdentity.tenantId, subjectId: requestIdentity.subject };
+    const replayInput = {
+      identity: identityForCore,
+      workflowId,
+      revision,
+      ...(requestIdentity.origin ? { origin: requestIdentity.origin } : {}),
+      ...(input.nodeIds === undefined ? {} : { nodeIds: cloneJson(input.nodeIds) }),
+      ...(input.limit === undefined ? {} : { limit: input.limit }),
+    };
+    const result = await invokeRequired(external.broker, ['replayReadonly', 'replay', 'replay_readonly'], [replayInput], 'WORKFLOW_REPLAY_UNAVAILABLE');
+    return publicCoreReplay(result);
+  }
+
   async function executeWorkflow(input = {}) {
     const requestIdentity = assertRequestIdentity(input, identity);
+    if (usingCore) return executeCoreWorkflow(input, requestIdentity);
     for (const key of [
       'approval',
       'approvals',
@@ -462,6 +748,7 @@ export function createCompositionRoot(options = {}) {
 
   async function workflowStatus(input = {}) {
     const requestIdentity = assertRequestIdentity(input, identity);
+    if (usingCore) return statusCoreWorkflow(input, requestIdentity);
     const workflowId = String(input.workflowId || input.id || '').trim();
     if (!workflowId) {
       throw new RuntimeError('INVALID_ARGUMENT', 'workflowId is required', {
@@ -481,6 +768,7 @@ export function createCompositionRoot(options = {}) {
 
   async function replayReadonly(input = {}) {
     const requestIdentity = assertRequestIdentity(input, identity);
+    if (usingCore) return replayCoreWorkflow(input, requestIdentity);
     const workflowId = String(input.workflowId || input.id || '').trim();
     if (!workflowId) {
       throw new RuntimeError('INVALID_ARGUMENT', 'workflowId is required', {
@@ -560,6 +848,7 @@ export function createCompositionRoot(options = {}) {
   }
 
   async function injectTrustedApproval(input = {}) {
+    if (usingCore) return injectCoreTrustedApproval(input);
     const candidate = input.approvalRequest || input.approval || input;
     if (!candidate || typeof candidate !== 'object') {
       throw new RuntimeError('INVALID_APPROVAL', 'A server-side approval record is required');
@@ -654,6 +943,108 @@ export function createCompositionRoot(options = {}) {
       expiresAt: trusted.expiresAt,
       trusted: true,
     };
+  }
+
+  async function injectCoreTrustedApproval(input = {}) {
+    const candidate = input.approvalRequest || input.approval || input;
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
+      throw new RuntimeError('INVALID_APPROVAL', 'A server-side approval record is required');
+    }
+    const workflowId = String(candidate.workflowId || candidate.id || '').trim();
+    if (!workflowId) throw new RuntimeError('INVALID_APPROVAL', 'Approval must identify a workflow');
+    const revision = candidate.revision === undefined ? 1 : requestedRevision(candidate.revision);
+    const tenantId = String(candidate.tenantId || '');
+    const subjectId = String(candidate.subjectId || candidate.subject || candidate.userId || '');
+    if (!tenantId || !subjectId) throw new RuntimeError('INVALID_APPROVAL', 'Approval must bind tenant and subject');
+    const coreIdentity = { tenantId, subjectId };
+    const workflow = await invokeRequired(
+      external.workflow,
+      ['get', 'status', 'read'],
+      [{ identity: coreIdentity, workflowId, revision }],
+      'WORKFLOW_STORE_UNAVAILABLE',
+    );
+    const plan = workflow?.plan;
+    const nodeId = String(candidate.nodeId || '');
+    const node = plan?.nodes?.find((entry) => entry.id === nodeId || entry.nodeId === nodeId);
+    if (!node) throw new RuntimeError('APPROVAL_BINDING_MISMATCH', 'Approval node is not in the workflow');
+    if (node.readOnly === true) throw new RuntimeError('APPROVAL_NOT_REQUIRED', 'Read-only nodes do not require approval');
+    const origin = String(node.origin || candidate.origin || '');
+    const adapter = String(node.adapter || node.adapterId || candidate.adapter || candidate.adapterId || '');
+    const capabilityId = String(node.capabilityId || candidate.capabilityId || candidate.action || '');
+    const capabilityVersion = String(node.capabilityVersion || candidate.capabilityVersion || candidate.version || '');
+    if (!origin || !adapter || !capabilityId || !capabilityVersion) {
+      throw new RuntimeError('INVALID_APPROVAL', 'Approval must bind origin, adapter, capability, and version');
+    }
+    for (const [field, received, expected] of [
+      ['origin', candidate.origin, origin],
+      ['adapter', candidate.adapter || candidate.adapterId, adapter],
+      ['capabilityId', candidate.capabilityId || candidate.action, capabilityId],
+      ['capabilityVersion', candidate.capabilityVersion || candidate.version, capabilityVersion],
+    ]) {
+      if (received !== undefined && String(received) !== String(expected)) {
+        throw new RuntimeError('APPROVAL_BINDING_MISMATCH', `Approval ${field} does not match the planned node`);
+      }
+    }
+    const argsHash = canonicalArgsHash(node.args, external.hasher);
+    const suppliedHash = candidate.argsHash || candidate.argumentHash || candidate.canonicalArgsHash;
+    if (suppliedHash !== undefined && String(suppliedHash) !== argsHash) {
+      throw new RuntimeError('APPROVAL_BINDING_MISMATCH', 'Approval arguments do not match the planned node');
+    }
+    const issuer = coreServices?.approvalIssuer || external.approvals?.createIssuer?.('composition-root');
+    if (!issuer || typeof issuer.issue !== 'function') {
+      throw new RuntimeError('APPROVAL_UNAVAILABLE', 'Trusted approval issuance is not configured');
+    }
+    let credential;
+    try {
+      credential = issuer.issue({
+        tenantId,
+        subjectId,
+        workflowId,
+        revision,
+        nodeId: node.id,
+        origin,
+        adapter,
+        args: cloneJson(node.args),
+      });
+    } catch (error) {
+      throw toRuntimeError(error, 'INVALID_APPROVAL', 'Trusted approval could not be issued');
+    }
+    trustedApprovals.set(String(credential.approvalId || credential.nonce), {
+      credential: cloneJson(credential),
+      tenantId,
+      subjectId,
+      workflowId,
+      revision,
+      nodeId: node.id,
+      origin,
+      adapter,
+      capabilityId,
+      capabilityVersion,
+      argsHash,
+    });
+    return {
+      accepted: true,
+      workflowId,
+      revision,
+      nodeId: node.id,
+      approvalId: credential.approvalId,
+      nonce: credential.nonce,
+      expiresAt: credential.expiresAt,
+      trusted: true,
+    };
+  }
+
+  function findCoreCredential(binding = {}) {
+    const requestedHash = String(binding.argsHash || binding.argumentHash || binding.canonicalArgsHash || '');
+    for (const entry of trustedApprovals.values()) {
+      if (!entry?.credential) continue;
+      if (entry.tenantId !== binding.tenantId || entry.subjectId !== (binding.subjectId || binding.subject)) continue;
+      if (entry.workflowId !== binding.workflowId || Number(entry.revision) !== Number(binding.revision)) continue;
+      if (entry.nodeId !== binding.nodeId || entry.origin !== binding.origin || entry.adapter !== (binding.adapter || binding.adapterId)) continue;
+      if (entry.capabilityId !== (binding.capabilityId || binding.capability) || entry.argsHash !== requestedHash) continue;
+      return cloneJson(entry.credential);
+    }
+    return undefined;
   }
 
   function findTrustedApproval(record, node) {
@@ -783,6 +1174,11 @@ export function createCompositionRoot(options = {}) {
       at: nowIso(now),
       ...redactSecrets(event),
     };
+    // AuditLog's object envelope is `{ type, ...details }`, while the
+    // historical runtime records called this field `event`.  Include the
+    // canonical `type` alongside the compatibility field so both sinks see a
+    // valid event without changing the public response shape.
+    if (entry.type === undefined && typeof entry.event === 'string') entry.type = entry.event;
     auditRecords.push(entry);
     if (external.audit) {
       await invokeFirst(external.audit, ['append', 'record', 'write'], [cloneJson(entry)]);
@@ -826,6 +1222,9 @@ function buildFallbackPlan(request, identity) {
     tenantId: identity.tenantId,
     subject: identity.subject,
     origin: identity.origin,
+    ...(request.workflowId === undefined ? {} : { workflowId: request.workflowId }),
+    ...(request.revision === undefined ? {} : { revision: request.revision }),
+    ...(request.goal === undefined ? {} : { goal: request.goal }),
     request,
     nodes: rawNodes,
   };
@@ -849,6 +1248,14 @@ function normalizePlanRequest(input) {
 function normalizePlan(plan, identity, request, resolveCapability = () => undefined) {
   const source = plan && typeof plan === 'object' ? plan : {};
   const nodes = source.nodes || source.steps || source.actions || [];
+  const requestedWorkflowId = source.workflowId ?? source.id ?? request?.workflowId ?? request?.id;
+  const requestedRevision = source.revision ?? request?.revision;
+  const requestedGoal = source.goal ?? request?.goal;
+  const workflowId = requestedWorkflowId === undefined
+    ? ''
+    : normalizeWorkflowId(requestedWorkflowId);
+  const revision = requestedRevision === undefined ? 1 : normalizePlanRevision(requestedRevision);
+  const goal = requestedGoal === undefined ? undefined : normalizePlanGoal(requestedGoal);
   const normalizedNodes = (Array.isArray(nodes) ? nodes : []).map((node, index) => {
     const candidate = node && typeof node === 'object' ? node : { capabilityId: node };
     const capabilityId = String(candidate.capabilityId || candidate.operation || candidate.name || '').trim();
@@ -911,19 +1318,23 @@ function normalizePlan(plan, identity, request, resolveCapability = () => undefi
     throw new RuntimeError('INVALID_PLAN', 'A workflow plan must contain at least one node');
   }
   return {
-    id: String(source.workflowId || source.id || ''),
-    workflowId: String(source.workflowId || source.id || ''),
+    id: workflowId,
+    workflowId,
     tenantId: String(source.tenantId || identity.tenantId),
     subject: String(source.subject || source.subjectId || identity.subject),
     subjectId: String(source.subjectId || source.subject || identity.subjectId || identity.subject),
     origin: String(source.origin || identity.origin || ''),
-    revision: Number.isInteger(Number(source.revision)) ? Number(source.revision) : 1,
+    revision,
+    ...(goal === undefined ? {} : { goal }),
     request: cloneJson(source.request || request),
     nodes: normalizedNodes,
     planHash: source.planHash || hashCanonical({
       tenantId: identity.tenantId,
       subject: identity.subject,
       origin: identity.origin,
+      workflowId,
+      revision,
+      ...(goal === undefined ? {} : { goal }),
       nodes: normalizedNodes,
     }),
   };
@@ -941,6 +1352,7 @@ function createWorkflowRecord(plan, identity, request, idFactory = createSequenc
     subjectId: plan.subjectId || plan.subject || identity.subjectId || identity.subject,
     origin: plan.origin || identity.origin || '',
     revision: plan.revision || 1,
+    ...(plan.goal === undefined ? {} : { goal: plan.goal }),
     status: 'proposed',
     request: cloneJson(request),
     planHash: plan.planHash,
@@ -957,6 +1369,89 @@ function publicWorkflow(record) {
   const value = cloneJson(record);
   if (value && value.pendingApproval) value.pendingApproval = redactSecrets(value.pendingApproval);
   return value;
+}
+
+function publicCoreWorkflow(record, fallbackPlan, request) {
+  const source = record && typeof record === 'object' ? cloneJson(record) : {};
+  const plan = source.plan || (fallbackPlan ? cloneJson(fallbackPlan) : undefined);
+  const value = {
+    ...(plan && typeof plan === 'object' ? plan : {}),
+    ...source,
+    ...(plan && typeof plan === 'object' ? {
+      nodes: cloneJson(plan.nodes || []),
+      planHash: plan.planHash,
+    } : {}),
+  };
+  if (value.workflowId === undefined && plan?.workflowId !== undefined) value.workflowId = plan.workflowId;
+  if (value.id === undefined && value.workflowId !== undefined) value.id = value.workflowId;
+  if (value.revision === undefined && plan?.revision !== undefined) value.revision = plan.revision;
+  if (value.tenantId === undefined && plan?.tenantId !== undefined) value.tenantId = plan.tenantId;
+  if (value.subjectId === undefined && plan?.subjectId !== undefined) value.subjectId = plan.subjectId;
+  if (value.subject === undefined && value.subjectId !== undefined) value.subject = value.subjectId;
+  if (value.origin === undefined && plan?.origin !== undefined) value.origin = plan.origin;
+  if (request && typeof request === 'object') {
+    if (value.request === undefined) value.request = cloneJson(request.request || request);
+    if (value.goal === undefined && request.goal !== undefined) value.goal = request.goal;
+  }
+  // The plan itself carries its proposal status; execution/status snapshots
+  // carry the authoritative workflow state at the top level.  Do not let the
+  // spread of `plan` shadow a completed/failed state from the store record.
+  const effectiveState = source.state || source.status || plan?.state || plan?.status || 'proposed';
+  value.state = effectiveState;
+  value.status = source.status || source.state || effectiveState;
+  if (value.pendingApproval) value.pendingApproval = redactSecrets(value.pendingApproval);
+  if (value.awaitingApproval) value.awaitingApproval = redactSecrets(value.awaitingApproval);
+  const byNodeId = new Map((value.nodes || []).map((node) => [node.id || node.nodeId, node]));
+  const completed = Array.isArray(value.results)
+    ? value.results
+    : Object.values(value.nodeStates || {})
+      .filter((node) => node.state === 'completed')
+      .map((node) => ({ nodeId: node.nodeId, output: node.output }));
+  const outputs = completed.map((entry) => {
+    const node = byNodeId.get(entry.nodeId) || {};
+    return {
+      nodeId: entry.nodeId,
+      capabilityId: entry.capabilityId || node.capabilityId,
+      capabilityVersion: entry.capabilityVersion || node.capabilityVersion,
+      readOnly: entry.readOnly === undefined ? node.readOnly === true : entry.readOnly === true,
+      mode: entry.mode || (node.readOnly === true ? 'read' : 'mutation'),
+      output: redactSecrets(entry.output),
+    };
+  });
+  value.outputs = cloneJson(outputs);
+  value.results = cloneJson(outputs.map(({ nodeId, output }) => ({ nodeId, output })));
+  value.cursor = value.order?.length
+    ? value.order.filter((nodeId) => value.nodeStates?.[nodeId]?.state === 'completed').length
+    : outputs.length;
+  if (value.approvalRequired && typeof value.approvalRequired === 'object') {
+    const approval = redactSecrets(value.approvalRequired);
+    if (approval.adapterId === undefined && approval.adapter !== undefined) approval.adapterId = approval.adapter;
+    value.approvalRequest = approval;
+    value.approvalRequired = true;
+  }
+  return cloneJson(value);
+}
+
+function publicCoreExecution(result) {
+  return publicCoreWorkflow(result);
+}
+
+function publicCoreReplay(result) {
+  const value = cloneJson(result && typeof result === 'object' ? result : {});
+  const nodes = Array.isArray(value.nodes) ? value.nodes : (value.replayedNodes || []);
+  const replayedNodes = nodes.map((node) => ({
+    ...node,
+    readOnly: true,
+    output: redactSecrets(node.output),
+  }));
+  return {
+    ...value,
+    status: value.status || value.state || 'completed',
+    state: value.state || value.status || 'completed',
+    readOnly: true,
+    replayedNodes: cloneJson(replayedNodes),
+    outputs: cloneJson(replayedNodes),
+  };
 }
 
 function executionResult(record, extra = {}) {
@@ -1057,6 +1552,45 @@ function requestedRevision(value) {
   throw new RuntimeError('WORKFLOW_REVISION_MISMATCH', 'Workflow revision is invalid');
 }
 
+function normalizePlanRevision(value) {
+  try {
+    return requestedRevision(value);
+  } catch (error) {
+    throw new RuntimeError('INVALID_PLAN', 'Plan revision must be a positive integer', {
+      details: { field: 'revision' },
+      cause: error,
+    });
+  }
+}
+
+function normalizePlanGoal(value) {
+  if (typeof value !== 'string' || value.trim() !== value || value.length === 0 || value.length > 2000) {
+    throw new RuntimeError('INVALID_PLAN', 'Plan goal must be a non-empty string', {
+      details: { field: 'goal' },
+    });
+  }
+  return value;
+}
+
+function normalizeWorkflowId(value) {
+  if (typeof value !== 'string' || !WORKFLOW_ID_PATTERN.test(value)) {
+    throw new RuntimeError('INVALID_PLAN', 'Workflow ID must be a valid non-empty identifier', {
+      details: { field: 'workflowId' },
+    });
+  }
+  return value;
+}
+
+function normalizeCapabilityVersion(value) {
+  const version = value === undefined || value === null ? '1' : value;
+  if (typeof version !== 'string' || !CAPABILITY_VERSION_PATTERN.test(version)) {
+    throw new RuntimeError('INVALID_CAPABILITY', 'Capability version must be a valid identifier', {
+      details: { field: 'version' },
+    });
+  }
+  return version;
+}
+
 function assertRequestedRevision(value, record) {
   if (value !== undefined && requestedRevision(value) !== record.revision) {
     throw new RuntimeError('WORKFLOW_REVISION_MISMATCH', 'Workflow revision does not match the proposed plan', {
@@ -1115,6 +1649,7 @@ function normalizeCapability(value, fallbackOrigin) {
       details: { capabilityId: id },
     });
   }
+  const version = normalizeCapabilityVersion(source.version);
   const hasMode = source.mode !== undefined || source.kind !== undefined;
   if (source.readOnly === undefined && source.mutates === undefined && !hasMode) {
     throw new RuntimeError('INVALID_CAPABILITY', `Capability ${id} must declare mutability explicitly`);
@@ -1128,9 +1663,11 @@ function normalizeCapability(value, fallbackOrigin) {
   if (source.mutates !== undefined && (source.mutates === true) === readOnly) {
     throw new RuntimeError('INVALID_CAPABILITY', `Capability ${id} has conflicting mutability flags`);
   }
+  const safeSource = redactCapabilityMetadata(source);
   return {
-    ...cloneJson(source),
+    ...safeSource,
     id,
+    version,
     name: source.name || id,
     mode: readOnly ? 'read' : 'mutation',
     kind: readOnly ? 'read' : 'mutation',
@@ -1148,27 +1685,175 @@ function normalizeAdapters(value) {
 }
 
 function matchesOrigin(capability, origin) {
-  return !origin || !capability.origin || capability.origin === origin;
+  if (!origin) return true;
+  if (capability.origin && capability.origin === origin) return true;
+  if (Array.isArray(capability.origins) && capability.origins.includes(origin)) return true;
+  return !capability.origin && !Array.isArray(capability.origins);
 }
 
 function capabilitySearchText(capability) {
-  return [capability.id, capability.name, capability.description, capability.mode, capability.kind]
+  return [
+    capability.id,
+    capability.name,
+    capability.description,
+    capability.mode,
+    capability.kind,
+    ...(Array.isArray(capability.tags) ? capability.tags : []),
+    ...(Array.isArray(capability.adapters)
+      ? capability.adapters.map((entry) => typeof entry === 'string' ? entry : entry?.id || entry?.name)
+      : [capability.adapter, capability.adapterId]),
+  ]
     .filter(Boolean)
     .join(' ')
     .toLowerCase();
 }
 
 function normalizeSearchResult(value, query) {
-  if (Array.isArray(value)) return { query, capabilities: cloneJson(value), items: cloneJson(value), total: value.length };
+  if (Array.isArray(value)) {
+    const capabilities = sanitizeCapabilityList(value);
+    return { query, capabilities, items: cloneJson(capabilities), total: capabilities.length };
+  }
   const source = value && typeof value === 'object' ? value : {};
   const capabilities = source.capabilities || source.items || source.results || [];
+  const safeCapabilities = sanitizeCapabilityList(capabilities);
+  const safeItems = sanitizeCapabilityList(source.items || safeCapabilities);
   return {
     ...cloneJson(source),
     query: source.query === undefined ? query : source.query,
-    capabilities: cloneJson(capabilities),
-    items: cloneJson(source.items || capabilities),
-    total: source.total === undefined ? capabilities.length : source.total,
+    capabilities: safeCapabilities,
+    items: safeItems,
+    total: source.total === undefined ? safeCapabilities.length : source.total,
   };
+}
+
+function normalizePublicCapability(value, request) {
+  if (value === undefined || value === null) {
+    throw new RuntimeError('CAPABILITY_NOT_FOUND', 'Capability was not found');
+  }
+  if (value.tenantId !== undefined && value.tenantId !== '*' && value.tenantId !== request.tenantId) {
+    throw new RuntimeError('CAPABILITY_NOT_FOUND', 'Capability was not found');
+  }
+  const normalized = normalizeCapability(value, request.origin);
+  if (!matchesOrigin(normalized, request.origin)) {
+    throw new RuntimeError('CAPABILITY_ORIGIN_MISMATCH', 'Capability is not available at the requested origin', {
+      details: { capabilityId: normalized.id, origin: request.origin },
+    });
+  }
+  return {
+    ...cloneJson(normalized),
+    tenantId: request.tenantId,
+    subject: request.subject,
+    subjectId: request.subjectId,
+    ...(request.origin ? { origin: request.origin } : {}),
+  };
+}
+
+function sanitizeCapabilityList(value) {
+  if (!Array.isArray(value)) return [];
+  return value.map((entry) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return cloneJson(entry);
+    return redactCapabilityMetadata(entry);
+  });
+}
+
+function normalizeSearchQuery(value) {
+  if (value === undefined || value === null) return '';
+  if (typeof value !== 'string') {
+    throw new RuntimeError('INVALID_ARGUMENT', 'query must be a string', { details: { field: 'query' } });
+  }
+  return value.trim().toLowerCase();
+}
+
+function normalizeSearchKind(value) {
+  if (value === undefined || value === null || value === '') return undefined;
+  if (typeof value !== 'string' || value.trim() !== value) {
+    throw new RuntimeError('INVALID_ARGUMENT', 'kind must be a non-empty string', { details: { field: 'kind' } });
+  }
+  return value.toLowerCase();
+}
+
+function normalizeSearchAdapter(value) {
+  if (value === undefined || value === null || value === '') return undefined;
+  if (typeof value !== 'string' || value.trim() !== value) {
+    throw new RuntimeError('INVALID_ARGUMENT', 'adapter must be a non-empty string', { details: { field: 'adapter' } });
+  }
+  return value;
+}
+
+function normalizeSearchTags(value) {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value) || value.some((entry) => typeof entry !== 'string' || entry.length === 0 || entry.trim() !== entry)) {
+    throw new RuntimeError('INVALID_ARGUMENT', 'tags must be an array of non-empty strings', { details: { field: 'tags' } });
+  }
+  return [...new Set(value)];
+}
+
+function normalizeSearchReadOnly(value) {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== 'boolean') {
+    throw new RuntimeError('INVALID_ARGUMENT', 'readOnly must be boolean', { details: { field: 'readOnly' } });
+  }
+  return value;
+}
+
+function normalizeSearchLimit(value) {
+  if (value === undefined || value === null || value === '') return 100;
+  if (!Number.isSafeInteger(value) || value < 1 || value > 100) {
+    throw new RuntimeError('INVALID_ARGUMENT', 'limit must be an integer from 1 to 100', { details: { field: 'limit' } });
+  }
+  return value;
+}
+
+function normalizeSearchCursor(value) {
+  if (value === undefined || value === null || value === '') return 0;
+  if (typeof value !== 'string' || !/^\d+$/.test(value)) {
+    throw new RuntimeError('INVALID_ARGUMENT', 'cursor must be a non-negative integer string', { details: { field: 'cursor' } });
+  }
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed)) {
+    throw new RuntimeError('INVALID_ARGUMENT', 'cursor is too large', { details: { field: 'cursor' } });
+  }
+  return parsed;
+}
+
+function matchesSearchKind(capability, kind) {
+  if (kind === undefined) return true;
+  if (['read', 'readonly', 'read_only'].includes(kind)) return capability.readOnly === true;
+  if (['mutation', 'mutating', 'write', 'destructive'].includes(kind)) return capability.readOnly === false;
+  return [capability.kind, capability.mode, capability.operation]
+    .filter((value) => typeof value === 'string')
+    .some((value) => value.toLowerCase() === kind);
+}
+
+function capabilityAdapterIds(capability) {
+  const entries = [];
+  if (typeof capability.adapter === 'string') entries.push(capability.adapter);
+  if (typeof capability.adapterId === 'string') entries.push(capability.adapterId);
+  if (Array.isArray(capability.adapters)) {
+    for (const entry of capability.adapters) {
+      if (typeof entry === 'string') entries.push(entry);
+      else if (entry && typeof entry === 'object') {
+        if (typeof entry.id === 'string') entries.push(entry.id);
+        else if (typeof entry.adapterId === 'string') entries.push(entry.adapterId);
+        else if (typeof entry.name === 'string') entries.push(entry.name);
+      }
+    }
+  }
+  return entries;
+}
+
+function matchesSearchAdapter(capability, adapter) {
+  return adapter === undefined || capabilityAdapterIds(capability).includes(adapter);
+}
+
+function matchesSearchTags(capability, tags) {
+  if (tags.length === 0) return true;
+  const available = Array.isArray(capability.tags) ? capability.tags : [];
+  return tags.every((tag) => available.includes(tag));
+}
+
+function compareCapabilities(left, right) {
+  return left.id.localeCompare(right.id) || String(left.version || '').localeCompare(String(right.version || ''));
 }
 
 function isMutationMode(mode) {
@@ -1243,6 +1928,30 @@ async function invokeFirst(target, names, args) {
   return undefined;
 }
 
+async function invokeRequired(target, names, args, code = 'SERVICE_UNAVAILABLE') {
+  if (!target) throw new RuntimeError(code, 'Required runtime service is unavailable', { retryable: true });
+  for (const name of names) {
+    if (typeof target[name] !== 'function') continue;
+    const value = await target[name](...args);
+    if (value !== undefined) return value;
+  }
+  throw new RuntimeError(code, 'Required runtime service operation is unavailable', { retryable: true });
+}
+
+async function invokeCatalogDescribe(target, capabilityId, operation) {
+  if (!target) return undefined;
+  for (const name of ['describe', 'get', 'lookup']) {
+    const method = target[name];
+    if (typeof method !== 'function') continue;
+    // The core catalog and the public runtime use one object per operation.
+    // Preserve compatibility with a host's older positional adapter only when
+    // its declared arity explicitly asks for two arguments.
+    if (method.length >= 2) return method.call(target, capabilityId, operation);
+    return method.call(target, operation);
+  }
+  return undefined;
+}
+
 function canonicalArgsHash(value, hasher) {
   if (hasher) {
     const candidate = hasher.hash || hasher.canonicalHash || hasher.digest;
@@ -1261,6 +1970,24 @@ function canonicalArgsHash(value, hasher) {
     }
   }
   return hashCanonical(value);
+}
+
+function rejectUntrustedApproval(input = {}) {
+  for (const key of [
+    'approval',
+    'approvals',
+    'approvalId',
+    'approvalNonce',
+    'approvalRecord',
+    'approvalToken',
+    'credential',
+    'nonce',
+    'token',
+  ]) {
+    if (input[key] !== undefined) {
+      throw new RuntimeError('UNTRUSTED_APPROVAL', 'Approvals must come from the trusted server-side approval store');
+    }
+  }
 }
 
 function hashCanonical(value) {
@@ -1298,6 +2025,28 @@ function redactSecrets(value, seen = new Set()) {
   else {
     output = {};
     for (const key of Object.keys(value).sort()) output[key] = SECRET_KEY.test(key) ? '[REDACTED]' : redactSecrets(value[key], seen);
+  }
+  seen.delete(value);
+  return output;
+}
+
+function redactCapabilityMetadata(value, key = '', seen = new Set()) {
+  if (key && UNSAFE_CAPABILITY_KEYS.has(key.toLowerCase())) return undefined;
+  if (key && SECRET_KEY.test(key)) return '[REDACTED]';
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return value;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : '[UNSERIALIZABLE]';
+  if (typeof value !== 'object') return '[UNSERIALIZABLE]';
+  if (seen.has(value)) return '[Circular]';
+  seen.add(value);
+  let output;
+  if (Array.isArray(value)) {
+    output = value.map((entry) => redactCapabilityMetadata(entry, '', seen));
+  } else {
+    output = {};
+    for (const childKey of Object.keys(value).sort()) {
+      const child = redactCapabilityMetadata(value[childKey], childKey, seen);
+      if (child !== undefined) output[childKey] = child;
+    }
   }
   seen.delete(value);
   return output;
