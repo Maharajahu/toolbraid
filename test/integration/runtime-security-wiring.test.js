@@ -82,6 +82,14 @@ function runtimeWithCore({
     ...options,
     withCore: true,
     allowReadOnly: true,
+    policyRules: options.policyRules ?? capabilities.map((entry, index) => ({
+      id: `test-allow-${index + 1}`,
+      effect: 'allow',
+      capabilities: [entry.id],
+      origins: entry.origins || [entry.origin],
+      adapters: (entry.adapters || [{ id: entry.adapter }]).map((candidate) =>
+        typeof candidate === 'string' ? candidate : candidate.id),
+    })),
     identity: options.identity || IDENTITY,
     capabilities,
     adapters: selectedAdapter,
@@ -127,6 +135,70 @@ test('default non-fixture runtime wires concrete core and security services', ()
   // Fixture mode is an explicit deterministic test double, not the default
   // service graph used by a non-fixture host.
   assert.equal(createFixtureRuntime().core, null);
+});
+
+test('default core execution enforces policy denial before adapter invocation', async () => {
+  let calls = 0;
+  const runtime = createCompositionRoot({
+    identity: IDENTITY,
+    allowReadOnly: true,
+    deniedCapabilities: ['orders.read'],
+    capabilities: [capability('orders.read')],
+    adapters: {
+      [ADAPTER_ID]: typedAdapter({
+        execute() {
+          calls += 1;
+          return { ok: true, output: { leaked: true } };
+        },
+      }),
+    },
+  });
+  const plan = await runtime.callTool('plan.propose', {
+    ...callIdentity(),
+    nodes: [{ capabilityId: 'orders.read', args: {} }],
+  });
+  await assert.rejects(
+    runtime.callTool('workflow.execute', {
+      ...callIdentity(),
+      workflowId: plan.workflowId,
+      revision: plan.revision,
+    }),
+    (error) => errorCode(error) === 'POLICY_DENIED' && error.details?.cause?.code === 'POLICY_DENIED',
+  );
+  assert.equal(calls, 0);
+});
+
+test('mutation deny rules win before an approval can be requested or consumed', async () => {
+  let calls = 0;
+  const runtime = runtimeWithCore({
+    capabilities: [capability('orders.write', { readOnly: false })],
+    policyRules: [
+      { effect: 'allow', capabilities: ['orders.write'] },
+      { effect: 'deny', capabilities: ['orders.write'] },
+    ],
+    adapters: {
+      [ADAPTER_ID]: typedAdapter({
+        capabilityIds: ['orders.write'],
+        execute() {
+          calls += 1;
+          return { ok: true, output: { committed: true } };
+        },
+      }),
+    },
+  });
+  const plan = await runtime.callTool('plan.propose', {
+    ...callIdentity(),
+    nodes: [{ capabilityId: 'orders.write', args: { orderId: 'o-1' } }],
+  });
+  await assert.rejects(
+    runtime.callTool('workflow.execute', {
+      ...callIdentity(),
+      workflowId: plan.workflowId,
+      revision: plan.revision,
+    }),
+    (error) => errorCode(error) === 'POLICY_DENIED',
+  );
+  assert.equal(calls, 0);
 });
 
 test('withCore runtime can describe, plan, and execute through the service graph', async () => {

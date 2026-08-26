@@ -63,6 +63,7 @@ export function createCoreServices(options = {}) {
   const broker = options.broker || options.executionBroker || new ExecutionBroker({
     store: workflowStore,
     catalog,
+    policy,
     approvalStore: approvalAuthority,
     // ExecutionBroker accepts a Map/object keyed by the planned adapter id.
     // Passing the caller's array here silently disabled all adapters in the

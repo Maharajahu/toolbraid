@@ -503,8 +503,11 @@ export function createCompositionRoot(options = {}) {
       // If an audit sink fails after the adapter has committed a side effect,
       // the core broker may leave a completed node in a running workflow.  A
       // reconciliation pass closes that state without invoking the node again.
-      const reconciled = await reconcileCoreWorkflow(identityForCore, workflowId, revision);
-      if (reconciled) return publicCoreExecution(reconciled);
+      const code = error?.code || error?.details?.code;
+      if (code === 'AUDIT_FAILURE' || code === 'RECONCILIATION_REQUIRED') {
+        const reconciled = await reconcileCoreWorkflow(identityForCore, workflowId, revision);
+        if (reconciled) return publicCoreExecution(reconciled);
+      }
       throw error;
     }
     const publicValue = publicCoreExecution(result);

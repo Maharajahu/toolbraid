@@ -4,7 +4,14 @@ import { canonicalHash, jsonClone } from './serialization.js';
 import { validatePlan } from './planner.js';
 
 const TERMINAL_WORKFLOW_STATES = new Set(['completed', 'failed', 'cancelled']);
-const APPROVAL_MISS_CODES = new Set(['APPROVAL_REQUIRED', 'APPROVAL_NOT_FOUND', 'APPROVAL_EXPIRED', 'APPROVAL_INVALID', 'APPROVAL_REPLAYED']);
+const APPROVAL_MISS_CODES = new Set([
+  'APPROVAL_REQUIRED',
+  'APPROVAL_NOT_FOUND',
+  'APPROVAL_EXPIRED',
+  'APPROVAL_INVALID',
+  'APPROVAL_REPLAY',
+  'APPROVAL_REPLAYED',
+]);
 
 /**
  * Sequential execution broker for semantic capability nodes.
@@ -19,6 +26,12 @@ export class ExecutionBroker {
     this.store = options.store ?? options.workflowStore;
     if (!this.store || typeof this.store.get !== 'function') throw new CoreError('INVALID_EXECUTION', 'A workflow store is required');
     this.catalog = options.catalog;
+    this.policy = options.policy ?? options.policyEngine;
+    if (this.policy !== undefined &&
+        typeof this.policy?.evaluate !== 'function' &&
+        typeof this.policy?.check !== 'function') {
+      throw new CoreError('INVALID_EXECUTION', 'policy must expose evaluate() or check()');
+    }
     this.approvalStore = options.approvalStore ?? options.approvals;
     this.approvalVerifier = options.approvalVerifier;
     // A credential resolver is trusted constructor state.  It is deliberately
@@ -86,7 +99,15 @@ export class ExecutionBroker {
       this.#assertDependenciesCompleted(plan, workflow, node);
 
       if (!node.readOnly) {
-        const approval = await this.#approvalFor({ identity, workflow, node, operation });
+        let approval;
+        try {
+          approval = await this.#approvalFor({ identity, workflow, node, operation });
+        } catch (error) {
+          if (error instanceof CoreError && error.code === 'POLICY_DENIED') {
+            this.#failBeforeInvocation({ identity, workflowId, revision, nodeId, error });
+          }
+          throw error;
+        }
         if (!approval) {
           const request = approvalRequest({ identity, workflow, node });
           if (workflow.state === 'awaiting_approval') {
@@ -125,11 +146,20 @@ export class ExecutionBroker {
         // returns an unsupported value must not strand a node in `running`.
         safeOutput = normalizeOutput(output);
       } catch (error) {
-        const safe = errorShape(error, { code: 'ADAPTER_FAILURE', message: `Capability ${node.capabilityId} failed`, retryable: true });
+        const policyDenied = error instanceof CoreError && error.code === 'POLICY_DENIED';
+        const safe = errorShape(error, {
+          code: policyDenied ? 'POLICY_DENIED' : 'ADAPTER_FAILURE',
+          message: policyDenied ? `Policy denied node ${nodeId}` : `Capability ${node.capabilityId} failed`,
+          retryable: policyDenied ? false : true,
+        });
         this.store.markNode({ identity, workflowId, revision, nodeId, state: 'failed', error: safe });
         this.store.fail({ identity, workflowId, revision, error: safe });
         await this.#audit({ type: 'node_failed', identity, workflowId, revision, nodeId, error: safe });
-        throw new CoreError('EXECUTION_FAILED', `Node ${nodeId} failed`, { retryable: safe.retryable === true, details: { nodeId, cause: safe }, cause: error });
+        throw new CoreError(
+          policyDenied ? 'POLICY_DENIED' : 'EXECUTION_FAILED',
+          policyDenied ? `Policy denied node ${nodeId}` : `Node ${nodeId} failed`,
+          { retryable: safe.retryable === true, details: { nodeId, cause: safe }, cause: error },
+        );
       }
       workflow = this.store.markNode({ identity, workflowId, revision, nodeId, state: 'completed', output: safeOutput });
       try {
@@ -264,6 +294,10 @@ export class ExecutionBroker {
     if (typeof node.origin !== 'string' || !node.origin || typeof node.adapter !== 'string' || !node.adapter) {
       throw new CoreError('APPROVAL_CONTEXT_REQUIRED', `Mutating node ${node.id} must bind origin and adapter`);
     }
+    const credential = await this.#resolveApprovalCredential(binding);
+    const policy = await this.#evaluatePolicy({ identity, workflow, node, credential });
+    if (policy.approvalMissing) return false;
+
     let verifier = this.approvalVerifier;
     let verifierKind = verifier ? 'custom' : undefined;
     if (!verifier && this.approvalStore) {
@@ -280,7 +314,6 @@ export class ExecutionBroker {
     }
     if (!verifier) return false;
     try {
-      const credential = await this.#resolveApprovalCredential(binding);
       const candidate = {
         ...binding,
         args: jsonClone(node.args),
@@ -323,6 +356,7 @@ export class ExecutionBroker {
     const origin = node.origin;
     if (operation.adapter !== undefined && operation.adapter !== adapterId) throw new CoreError('EXECUTION_CONTEXT', 'Caller adapter does not match the proposed plan');
     if (operation.origin !== undefined && operation.origin !== origin) throw new CoreError('EXECUTION_CONTEXT', 'Caller origin does not match the proposed plan');
+    if (node.readOnly) await this.#evaluatePolicy({ identity, workflow, node });
     const adapter = await this.#resolveAdapter({ adapterId, origin, node, identity, replay });
     const request = {
       capabilityId: node.capabilityId,
@@ -355,6 +389,57 @@ export class ExecutionBroker {
     if (typeof this.executor === 'function') return this.#withTimeout(Promise.resolve(this.executor(request)), node.timeoutMs);
     if (this.executor && typeof this.executor.execute === 'function') return this.#withTimeout(Promise.resolve(this.executor.execute(request)), node.timeoutMs);
     throw new CoreError('ADAPTER_UNAVAILABLE', `No executor is configured for adapter ${adapterId ?? '(none)'}`, { retryable: true });
+  }
+
+  async #evaluatePolicy({ identity, workflow, node, credential }) {
+    if (!this.policy) return { allowed: true };
+    const binding = approvalBinding({ identity, workflow, node });
+    const request = {
+      ...binding,
+      capability: node.capabilityId,
+      action: node.operation ?? (node.readOnly ? 'read' : 'write'),
+      mutation: !node.readOnly,
+      ...(credential === undefined || credential === null ? {} : { approval: jsonClone(credential) }),
+    };
+    let result;
+    try {
+      const method = typeof this.policy.evaluate === 'function'
+        ? this.policy.evaluate
+        : this.policy.check;
+      result = await method.call(this.policy, request);
+    } catch (error) {
+      throw new CoreError('POLICY_DENIED', 'Policy evaluation failed closed', {
+        retryable: false,
+        cause: error,
+      });
+    }
+    if (result === true || result?.allowed === true || result?.authorized === true) return result;
+    const code = typeof result?.code === 'string' ? result.code : 'POLICY_DENIED';
+    if (APPROVAL_MISS_CODES.has(code)) return { approvalMissing: true, code };
+    throw new CoreError('POLICY_DENIED', 'Policy denied workflow node', {
+      retryable: false,
+      details: {
+        policyCode: code,
+        ...(typeof result?.ruleId === 'string' ? { ruleId: result.ruleId } : {}),
+      },
+    });
+  }
+
+  #failBeforeInvocation({ identity, workflowId, revision, nodeId, error }) {
+    const safe = errorShape(error, {
+      code: 'POLICY_DENIED',
+      message: `Policy denied node ${nodeId}`,
+      retryable: false,
+    });
+    try {
+      const current = this.store.get({ identity, workflowId, revision });
+      if (!TERMINAL_WORKFLOW_STATES.has(current.state)) {
+        this.store.fail({ identity, workflowId, revision, error: safe });
+      }
+    } catch {
+      // The policy decision still fails closed even if a non-standard store
+      // cannot persist the diagnostic terminal state.
+    }
   }
 
   async #resolveAdapter({ adapterId, origin, node, identity, replay }) {

@@ -68,6 +68,12 @@ function mutationRuntime() {
     },
   });
   const runtime = createCompositionRoot({
+    policyRules: [{
+      effect: 'allow',
+      capabilities: ['orders.update'],
+      origins: ['https://shop.example.test'],
+      adapters: ['safe-adapter', 'evil-adapter'],
+    }],
     capabilities: [{
       id: 'orders.update',
       version: '1',
@@ -175,6 +181,7 @@ test('concurrent workflow executions cannot invoke the same node twice', async (
     },
   };
   const runtime = createCompositionRoot({
+    allowReadOnly: true,
     capabilities: [{
       id: 'orders.read',
       version: '1',
