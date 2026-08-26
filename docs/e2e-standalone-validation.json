@@ -1,63 +1,64 @@
 {
   "status": "PASS",
-  "artifact": "/mnt/data/toolbraid-repo/release/index.html",
-  "artifactBytes": 25635,
-  "runtimeMode": "compatibility-runtime",
+  "artifact": "/mnt/data/toolbraid-repo/dist/index.html",
+  "artifactBytes": 187082,
+  "runtimeMode": "polyfill",
   "providers": 4,
   "discoveredTools": 6,
   "quarantinedTools": 1,
   "planNodes": 7,
   "completedNodes": 7,
   "recommendation": {
-    "route": {
-      "id": "SR-0712",
-      "provider": "SwiftRail",
-      "depart": "07:12",
-      "arrive": "08:14",
-      "price": 39.9,
-      "duration": "1h 02m"
-    },
-    "hotel": {
-      "id": "NS-POINT-A",
-      "name": "Point A Liverpool Street",
-      "price": 145,
-      "distanceKm": 1
-    },
     "total": 184.9,
-    "budget": 250,
-    "remaining": 65.1,
+    "travel": {
+      "id": "VR-0745",
+      "provider": "West Midlands Railway",
+      "price": 39.9,
+      "departAt": "07:45",
+      "arriveAt": "09:03"
+    },
+    "stay": {
+      "id": "NS-POINT-A",
+      "label": "Point A Liverpool Street",
+      "provider": "Point A",
+      "price": 145,
+      "address": "13-15 Folgate Street, London E1 6BX"
+    },
     "walkingMinutes": 13,
     "distanceKm": 1,
-    "selectedTools": {
-      "travel": {
-        "providerId": "swiftrail",
-        "tool": "journey_lookup"
-      },
-      "stay": {
-        "providerId": "northstay",
-        "tool": "rooms_lookup"
-      }
-    }
+    "savings": 65.1
   },
   "holds": {
     "travel": {
-      "holdId": "VR-HOLD-MTA2LNKC",
-      "expiresInMinutes": 15,
-      "routeId": "SR-0712",
-      "price": 39.9
+      "holdId": "VR-HOLD-VR-0745",
+      "expiresAt": "2026-08-26T13:21:23.414Z",
+      "status": "held",
+      "raw": {
+        "holdId": "VR-HOLD-VR-0745",
+        "status": "held",
+        "expiresAt": "2026-08-26T13:21:23.414Z",
+        "fare": 39.9
+      }
     },
     "stay": {
-      "holdId": "NS-HOLD-MTA2LNKC",
-      "expiresInMinutes": 15,
-      "propertyId": "NS-POINT-A",
-      "price": 145
+      "holdId": "NS-HOLD-NS-POINT-A",
+      "expiresAt": "2026-08-26T13:26:23.444Z",
+      "status": "held",
+      "raw": {
+        "holdId": "NS-HOLD-NS-POINT-A",
+        "status": "held",
+        "expiresAt": "2026-08-26T13:26:23.444Z",
+        "checkIn": "2026-08-27",
+        "nights": 1,
+        "nightly": 145
+      }
     }
   },
   "approval": {
     "source": "human",
-    "planFingerprint": "f315d758f315d758f315d758f315d758f315d758f315d758f315d758f315d758",
+    "planFingerprint": "6697909d1b551386227f9276301b0609abcbb51868ecd00d99ff188ed87c9495",
     "actionFingerprintCount": 2,
-    "consumedAt": "2026-08-26T12:28:49.163Z",
+    "consumedAt": "2026-08-26T13:06:23.227Z",
     "replayBlocked": true
   },
   "desktopViewport": {

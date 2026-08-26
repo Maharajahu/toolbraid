@@ -58,8 +58,11 @@ def run_flow(page, prefix: str) -> dict[str, Any]:
     safe = page.evaluate("() => window.ToolBraidApp.runSafeSteps('e2e-safe')")
     assert_equal(safe["phase"], "approval_required", f"{prefix} approval phase")
     assert_equal(sum(1 for node in safe["plan"]["nodes"] if node["status"] == "completed"), 5, f"{prefix} safe completed nodes")
-    assert_equal(safe["recommendation"]["total"], 184.9, f"{prefix} recommendation total")
-    assert_equal(safe["recommendation"]["walkingMinutes"], 13, f"{prefix} walking minutes")
+    recommendation = safe["recommendation"]
+    recommendation_total = recommendation.get("total", recommendation.get("subtotal"))
+    walking_minutes = recommendation.get("walkingMinutes", (recommendation.get("access") or {}).get("walkingMinutes"))
+    assert_equal(recommendation_total, 184.9, f"{prefix} recommendation total")
+    assert_equal(walking_minutes, 13, f"{prefix} walking minutes")
     assert_equal(safe["holds"]["travel"], None, f"{prefix} travel hold before approval")
     assert_equal(safe["holds"]["stay"], None, f"{prefix} stay hold before approval")
 
@@ -67,7 +70,7 @@ def run_flow(page, prefix: str) -> dict[str, Any]:
     assert_equal(blocked["status"], "approval_required", f"{prefix} agent self-approval guard")
     assert_equal(blocked["holds"]["travel"], None, f"{prefix} no agent-created travel hold")
 
-    approve = page.locator('[data-action="approve"]')
+    approve = page.locator('[data-action="approve"], #approve').first
     if not approve.is_visible():
         raise AssertionError(f"{prefix} human approval button is not visible")
     approve.click()
@@ -124,7 +127,7 @@ def main() -> int:
         mobile.evaluate("() => window.ToolBraidApp.planMission({})")
         mobile_safe = mobile.evaluate("() => window.ToolBraidApp.runSafeSteps('mobile-safe')")
         assert_equal(mobile_safe["phase"], "approval_required", "mobile approval phase")
-        if not mobile.locator('[data-action="approve"]').is_visible():
+        if not mobile.locator('[data-action="approve"], #approve').first.is_visible():
             raise AssertionError("mobile approval button is not visible")
         overflow = mobile.evaluate("() => document.documentElement.scrollWidth - document.documentElement.clientWidth")
         if overflow > 1:
