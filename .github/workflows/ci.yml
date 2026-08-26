@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: toolbraid-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Node ${{ matrix.node }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [20.x, 22.x]
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      # The runtime contract is dependency-free. Avoid an install step that
+      # could execute third-party lifecycle scripts or require a lockfile.
+      - name: Run tests
+        run: npm test
+
+      - name: Run syntax and full check
+        run: npm run check
+
+      - name: Run release validation
+        run: node --test test/release
