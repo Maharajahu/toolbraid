@@ -169,7 +169,7 @@ export function createAdapterRegistry({ adapters = [] } = {}) {
     let origin;
     try { origin = normalizeOrigin({ origin: input.origin }); } catch (error) { return errorResult({ error }); }
     let capability;
-    try { capability = validateCapabilityName({ name: input.capability }); } catch (error) { return errorResult({ error }); }
+    try { capability = validateCapabilityName({ name: input.capability ?? input.capabilityId ?? input.operation }); } catch (error) { return errorResult({ error }); }
     let request;
     try { request = input.request === undefined ? {} : assertRecord({ value: input.request, name: 'adapter request' }); } catch (error) { return errorResult({ error }); }
     let policy;
@@ -284,15 +284,19 @@ export function createAdapterRegistry({ adapters = [] } = {}) {
     let origin;
     try { origin = normalizeOrigin({ origin: input.origin }); } catch (error) { return errorResult({ error }); }
     let capability;
-    try { capability = validateCapabilityName({ name: input.capability }); } catch (error) { return errorResult({ error }); }
+    try { capability = validateCapabilityName({ name: input.capability ?? input.capabilityId ?? input.operation }); } catch (error) { return errorResult({ error }); }
     if (selection.origin !== origin || selection.capability !== capability || selection.selectedAdapterId !== adapterId) return errorResult({ error: createAdapterError({ code: 'ADAPTER_SELECTION_BINDING_MISMATCH', message: 'Selection is not bound to this origin, capability, or adapter.' }) });
     try {
-      return entry.adapter.execute({
+      const result = entry.adapter.execute({
         origin,
         capability,
         args: input.args,
         context: input.context,
       });
+      if (result && typeof result.then === 'function') {
+        return result.catch((error) => errorResult({ error }));
+      }
+      return result;
     } catch (error) {
       return errorResult({ error });
     }
@@ -305,4 +309,3 @@ export function selectAdapter({ registry, origin, capability, request, policy } 
   if (!registry || typeof registry.select !== 'function') return errorResult({ error: createAdapterError({ code: 'ADAPTER_REGISTRY_REQUIRED', message: 'A registry is required.' }) });
   return registry.select({ origin, capability, request, policy });
 }
-

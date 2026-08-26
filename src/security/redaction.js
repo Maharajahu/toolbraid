@@ -107,6 +107,9 @@ function walkRedact(value, path, depth, seen, replacement, maxDepth, underSecret
       return result;
     }
 
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) return UNSERIALIZABLE;
+
     const result = Object.create(null);
     for (const key of Object.keys(value)) {
       const descriptor = Object.getOwnPropertyDescriptor(value, key);

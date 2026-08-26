@@ -184,7 +184,12 @@ export function normalizeCapability(value, scope = { tenantId: '*' }) {
     throw new CoreError('UNSAFE_CAPABILITY', 'Raw browser or shell primitives are not capabilities');
   }
   const version = normalizeVersion(value.version);
-  const readOnly = value.readOnly ?? (typeof value.mutates === 'boolean' ? !value.mutates : undefined);
+  const mode = value.mode ?? value.kind;
+  const modeReadOnly = mode === 'read' || mode === 'readonly' || mode === 'read_only';
+  const modeMutating = mode === 'mutation' || mode === 'mutating' || mode === 'write';
+  const readOnly = value.readOnly
+    ?? (typeof value.mutates === 'boolean' ? !value.mutates : undefined)
+    ?? (modeReadOnly ? true : modeMutating ? false : undefined);
   if (typeof readOnly !== 'boolean') {
     throw new CoreError('INVALID_CAPABILITY', 'Capability readOnly must be explicit');
   }
@@ -205,7 +210,7 @@ export function normalizeCapability(value, scope = { tenantId: '*' }) {
     throw new CoreError('CAPABILITY_FORBIDDEN', 'Capability tenant scope does not match identity');
   }
   const adapters = normalizeAdapters(value.adapters ?? value.adapter);
-  const origins = normalizeStringList(value.origins ?? value.origin, 'origins');
+  const origins = normalizeOrigins(value.origins ?? value.origin);
   const tags = normalizeStringList(value.tags, 'tags');
   const description = optionalString(value.description, 'description') ?? '';
   const name = optionalString(value.name, 'name') ?? id;
@@ -220,6 +225,9 @@ export function normalizeCapability(value, scope = { tenantId: '*' }) {
     readOnly,
     mutates: !readOnly,
     operation: value.operation ?? (readOnly ? 'read' : 'write'),
+    mode: readOnly ? 'read' : 'mutation',
+    kind: readOnly ? 'read' : 'mutation',
+    requiresApproval: value.requiresApproval === undefined ? !readOnly : Boolean(value.requiresApproval),
     inputSchema,
     outputSchema,
     adapters,
@@ -228,6 +236,9 @@ export function normalizeCapability(value, scope = { tenantId: '*' }) {
     metadata,
     tenantId,
   };
+  if (adapters.length === 1) normalized.adapter = adapters[0].id;
+  if (origins.length === 1) normalized.origin = origins[0];
+  if (value.risk !== undefined) normalized.risk = optionalString(value.risk, 'risk');
   if (value.provider !== undefined) normalized.provider = jsonClone(value.provider);
   if (value.providerMetadata !== undefined) normalized.providerMetadata = jsonClone(value.providerMetadata);
   return normalized;
@@ -241,6 +252,10 @@ function searchView(record) {
     description: record.description,
     readOnly: record.readOnly,
     mutates: record.mutates,
+    mode: record.mode,
+    kind: record.kind,
+    requiresApproval: record.requiresApproval,
+    ...(record.risk === undefined ? {} : { risk: record.risk }),
     adapters: record.adapters,
     origins: record.origins,
     tags: record.tags,
@@ -326,6 +341,29 @@ function normalizeStringList(value, field) {
   return [...new Set(result)].sort((left, right) => left.localeCompare(right));
 }
 
+function normalizeOrigins(value) {
+  if (value === undefined) return [];
+  const list = Array.isArray(value) ? value : [value];
+  const result = [];
+  for (const entry of list) {
+    if (typeof entry !== 'string' || entry.length === 0 || entry.length > 2048 || entry.trim() !== entry) {
+      throw new CoreError('INVALID_CAPABILITY', 'origins entries must be absolute HTTP(S) origins');
+    }
+    let parsed;
+    try {
+      parsed = new URL(entry);
+    } catch {
+      throw new CoreError('INVALID_CAPABILITY', 'origins entries must be absolute HTTP(S) origins');
+    }
+    if ((parsed.protocol !== 'http:' && parsed.protocol !== 'https:') ||
+        parsed.username || parsed.password || parsed.pathname !== '/' || parsed.search || parsed.hash || !parsed.hostname) {
+      throw new CoreError('INVALID_CAPABILITY', 'origins entries must be canonical HTTP(S) origins');
+    }
+    if (!result.includes(parsed.origin)) result.push(parsed.origin);
+  }
+  return result.sort((left, right) => left.localeCompare(right));
+}
+
 function normalizeQuery(value) {
   if (typeof value !== 'string') throw new CoreError('INVALID_QUERY', 'query must be a string');
   return value.trim().toLowerCase().replace(/\s+/g, ' ');
@@ -363,4 +401,3 @@ function requireObject(value, label) {
   }
   return value;
 }
-

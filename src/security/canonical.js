@@ -16,6 +16,9 @@ const DEFAULT_MAX_OBJECT_KEYS = 100_000;
  * keys sorted by their UTF-16 code units (the ordering used by JCS).
  */
 export function canonicalJson(value, options = {}) {
+  if (options === null || typeof options !== "object" || Array.isArray(options)) {
+    throw new SecurityError("INVALID_CANONICAL_OPTIONS", "Canonicalization options must be an object.");
+  }
   const settings = {
     maxDepth: options.maxDepth ?? DEFAULT_MAX_DEPTH,
     maxArrayLength: options.maxArrayLength ?? DEFAULT_MAX_ARRAY_LENGTH,
@@ -100,7 +103,17 @@ function encodeArray(value, path, depth, ancestors, settings) {
   // JSON.stringify ignores enumerable non-index array properties.  Rejecting
   // them avoids two in-memory values accidentally receiving the same binding.
   const keys = Object.keys(value);
-  for (const key of keys) {
+  for (const name of Object.getOwnPropertyNames(value)) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, name);
+    if (descriptor && !("value" in descriptor)) {
+      throw new SecurityError("INVALID_CANONICAL_JSON", "Accessor properties are not JSON-safe.", {
+        details: { path: `${path}.${name}` },
+      });
+    }
+  }
+  const ownNames = Object.getOwnPropertyNames(value);
+  for (const key of ownNames) {
+    if (key === "length") continue;
     if (!isArrayIndexKey(key, value.length)) {
       throw new SecurityError("INVALID_CANONICAL_JSON", "Arrays may only contain indexed values.", {
         details: { path: `${path}.${key}` },
@@ -113,6 +126,11 @@ function encodeArray(value, path, depth, ancestors, settings) {
       });
     }
   }
+  if (Object.getOwnPropertySymbols(value).length > 0) {
+    throw new SecurityError("INVALID_CANONICAL_JSON", "Symbol keys are not JSON-safe.", {
+      details: { path },
+    });
+  }
 
   const parts = [];
   for (let index = 0; index < value.length; index += 1) {
@@ -121,7 +139,13 @@ function encodeArray(value, path, depth, ancestors, settings) {
         details: { path: `${path}[${index}]` },
       });
     }
-    parts.push(encode(value[index], `${path}[${index}]`, depth + 1, ancestors, settings));
+    const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
+    if (!descriptor || !("value" in descriptor) || descriptor.enumerable !== true) {
+      throw new SecurityError("INVALID_CANONICAL_JSON", "Array indices must be enumerable data properties.", {
+        details: { path: `${path}[${index}]` },
+      });
+    }
+    parts.push(encode(descriptor.value, `${path}[${index}]`, depth + 1, ancestors, settings));
   }
   return `[${parts.join(",")}]`;
 }
@@ -135,13 +159,27 @@ function encodeObject(value, path, depth, ancestors, settings) {
   }
 
   const symbols = Object.getOwnPropertySymbols(value);
-  if (symbols.some((symbol) => Object.prototype.propertyIsEnumerable.call(value, symbol))) {
-    throw new SecurityError("INVALID_CANONICAL_JSON", "Enumerable symbol keys are not JSON-safe.", {
+  if (symbols.length > 0) {
+    throw new SecurityError("INVALID_CANONICAL_JSON", "Symbol keys are not JSON-safe.", {
       details: { path },
     });
   }
 
   const keys = Object.keys(value);
+  const ownNames = Object.getOwnPropertyNames(value);
+  for (const name of ownNames) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, name);
+    if (descriptor && !("value" in descriptor)) {
+      throw new SecurityError("INVALID_CANONICAL_JSON", "Accessor properties are not JSON-safe.", {
+        details: { path: `${path}.${name}` },
+      });
+    }
+    if (!keys.includes(name)) {
+      throw new SecurityError("INVALID_CANONICAL_JSON", "Non-enumerable properties are not JSON-safe.", {
+        details: { path: `${path}.${name}` },
+      });
+    }
+  }
   if (keys.length > settings.maxObjectKeys) {
     throw new SecurityError("CANONICAL_JSON_TOO_LARGE", "Object exceeds the maximum key count.", {
       details: { path },
@@ -199,6 +237,11 @@ export function canonicalHash(value, options = {}) {
 
 /** Alias useful at call sites that want to make the algorithm explicit. */
 export const sha256Canonical = canonicalHash;
+export const canonicalize = canonicalJson;
+export const canonicalStringify = canonicalJson;
+export const hashCanonical = canonicalHash;
+export const hashArguments = canonicalHash;
+export const argumentHash = canonicalHash;
 
 /**
  * Clone JSON data through the canonical representation.  This is used before
@@ -207,4 +250,3 @@ export const sha256Canonical = canonicalHash;
 export function cloneCanonical(value, options = {}) {
   return JSON.parse(canonicalJson(value, options));
 }
-

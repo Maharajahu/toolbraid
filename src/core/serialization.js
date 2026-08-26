@@ -20,7 +20,11 @@ export function canonicalHash(value) {
 }
 
 function clone(value, path, allowUndefined, seen) {
-  if (value === null || typeof value === 'string' || typeof value === 'boolean') return value;
+  if (value === null || typeof value === 'boolean') return value;
+  if (typeof value === 'string') {
+    assertUnicodeString(value, path);
+    return value;
+  }
   if (typeof value === 'number') {
     if (!Number.isFinite(value)) {
       throw new CoreError('INVALID_JSON', `Non-finite number at ${path}`);
@@ -42,20 +46,84 @@ function clone(value, path, allowUndefined, seen) {
 
   let result;
   if (Array.isArray(value)) {
-    result = value.map((entry, index) => clone(entry, `${path}[${index}]`, allowUndefined, seen));
+    if (Object.getOwnPropertySymbols(value).length > 0) {
+      throw new CoreError('INVALID_JSON', `Symbol properties are not supported at ${path}`);
+    }
+    for (const name of Object.getOwnPropertyNames(value)) {
+      if (name === 'length') continue;
+      if (!isArrayIndex(name, value.length)) {
+        throw new CoreError('INVALID_JSON', `Non-index array property at ${path}.${name}`);
+      }
+      const descriptor = Object.getOwnPropertyDescriptor(value, name);
+      if (!descriptor || !('value' in descriptor) || descriptor.enumerable !== true) {
+        throw new CoreError('INVALID_JSON', `Invalid array property at ${path}[${name}]`);
+      }
+    }
+    result = new Array(value.length);
+    for (let index = 0; index < value.length; index += 1) {
+      if (!Object.prototype.hasOwnProperty.call(value, index)) {
+        throw new CoreError('INVALID_JSON', `Sparse array entry at ${path}[${index}]`);
+      }
+      const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
+      result[index] = clone(descriptor.value, `${path}[${index}]`, allowUndefined, seen);
+    }
   } else {
     const prototype = Object.getPrototypeOf(value);
     if (prototype !== Object.prototype && prototype !== null) {
       throw new CoreError('INVALID_JSON', `Non-plain object at ${path}`);
     }
+    if (Object.getOwnPropertySymbols(value).length > 0) {
+      throw new CoreError('INVALID_JSON', `Symbol properties are not supported at ${path}`);
+    }
     result = {};
-    for (const key of Object.keys(value).sort()) {
-      const child = clone(value[key], `${path}.${key}`, allowUndefined, seen);
-      if (child !== undefined) result[key] = child;
+    const names = Object.getOwnPropertyNames(value);
+    const keys = Object.keys(value);
+    if (names.length !== keys.length) {
+      throw new CoreError('INVALID_JSON', `Non-enumerable or accessor property at ${path}`);
+    }
+    for (const key of keys.sort()) {
+      assertUnicodeString(key, `${path}.${key}`);
+      const descriptor = Object.getOwnPropertyDescriptor(value, key);
+      if (!descriptor || !('value' in descriptor) || descriptor.enumerable !== true) {
+        throw new CoreError('INVALID_JSON', `Accessor property at ${path}.${key}`);
+      }
+      const child = clone(descriptor.value, `${path}.${key}`, allowUndefined, seen);
+      if (child !== undefined) {
+        // Assignment to `__proto__` on an ordinary object changes its
+        // prototype.  Define JSON keys as data properties so parsed attacker
+        // input is cloned exactly and cannot create hash ambiguity.
+        Object.defineProperty(result, key, {
+          value: child,
+          enumerable: true,
+          configurable: true,
+          writable: true,
+        });
+      }
     }
   }
   seen.delete(value);
   return result;
+}
+
+function isArrayIndex(key, length) {
+  if (!/^(?:0|[1-9]\d*)$/.test(key)) return false;
+  const index = Number(key);
+  return Number.isSafeInteger(index) && index >= 0 && index < length && String(index) === key;
+}
+
+function assertUnicodeString(value, path) {
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const next = value.charCodeAt(index + 1);
+      if (!(next >= 0xdc00 && next <= 0xdfff)) {
+        throw new CoreError('INVALID_JSON', `Lone surrogate at ${path}`);
+      }
+      index += 1;
+    } else if (code >= 0xdc00 && code <= 0xdfff) {
+      throw new CoreError('INVALID_JSON', `Lone surrogate at ${path}`);
+    }
+  }
 }
 
 export function isJsonSafe(value) {
@@ -66,4 +134,3 @@ export function isJsonSafe(value) {
     return false;
   }
 }
-

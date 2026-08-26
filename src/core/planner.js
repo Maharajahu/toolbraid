@@ -59,10 +59,13 @@ export class DeterministicPlanner {
     const requiresApproval = orderedNodes.filter((node) => !node.readOnly).map((node) => node.id);
     const plan = {
       workflowId,
+      id: workflowId,
       revision,
       tenantId: identity.tenantId,
       subjectId: identity.subjectId,
+      subject: identity.subjectId,
       state: 'proposed',
+      status: 'proposed',
       nodes: orderedNodes,
       edges,
       order,
@@ -72,6 +75,7 @@ export class DeterministicPlanner {
     };
     if (source.label !== undefined) plan.label = requireString(source.label, 'label', 300);
     if (source.goal !== undefined) plan.goal = requireString(source.goal, 'goal', 2000);
+    if (source.origin !== undefined) plan.origin = requireString(source.origin, 'origin', 2048);
     if (source.metadata !== undefined) plan.metadata = jsonClone(source.metadata);
     plan.planHash = hashPlan(plan);
     return jsonClone(plan);
@@ -149,15 +153,23 @@ export class DeterministicPlanner {
     const origin = normalizeOriginChoice(rawNode.origin, capability, id);
     const node = {
       id,
+      nodeId: id,
       capabilityId: capability.id,
       capabilityVersion: capability.version,
+      operation: capability.id,
       args: clonedArgs,
       argumentHash: canonicalHash(clonedArgs),
       dependsOn,
       readOnly,
       mutates: !readOnly,
+      mode: readOnly ? 'read' : 'mutation',
+      kind: readOnly ? 'read' : 'mutation',
+      requiresApproval: !readOnly,
     };
-    if (adapter !== undefined) node.adapter = adapter;
+    if (adapter !== undefined) {
+      node.adapter = adapter;
+      node.adapterId = adapter;
+    }
     if (origin !== undefined) node.origin = origin;
     if (rawNode.label !== undefined) node.label = requireString(rawNode.label, 'node.label', 300);
     if (rawNode.metadata !== undefined) node.metadata = jsonClone(rawNode.metadata);
@@ -176,6 +188,9 @@ export function validatePlan(input) {
   const identity = requireIdentity(operation);
   const plan = operation.plan;
   if (!plan || typeof plan !== 'object' || Array.isArray(plan)) throw new CoreError('INVALID_PLAN', 'plan must be an object');
+  if (typeof plan.planHash !== 'string' || !/^[a-f0-9]{64}$/.test(plan.planHash)) {
+    throw new CoreError('INVALID_PLAN', 'Plan integrity hash is required');
+  }
   if (plan.tenantId !== identity.tenantId || plan.subjectId !== identity.subjectId) {
     throw new CoreError('WORKFLOW_FORBIDDEN', 'Plan identity does not match caller');
   }
@@ -204,7 +219,7 @@ export function validatePlan(input) {
     mutating: nodes.some((node) => !node.readOnly),
     requiresApproval: nodes.filter((node) => !node.readOnly).map((node) => node.id),
   };
-  if (plan.planHash !== undefined && plan.planHash !== hashPlan(expected)) {
+  if (plan.planHash !== hashPlan(expected)) {
     throw new CoreError('INVALID_PLAN', 'Plan hash does not match contents');
   }
   return jsonClone({ ...expected, planHash: hashPlan(expected) });

@@ -4,6 +4,8 @@ import {
   AdapterContractError,
   assertRecord,
   cloneJson,
+  createAdapterError,
+  errorResult,
   isJsonSafe,
   isPlainObject,
 } from './contracts.js';
@@ -71,7 +73,7 @@ export function createDomAccessibilityAdapter(spec = {}) {
     throw new AdapterContractError({ code: 'DOM_TREE_INVALID', message: 'Accessibility tree must be JSON-safe.' });
   }
   const userAvailability = input.availability;
-  return createAdapter({
+  const adapter = createAdapter({
     ...input,
     id: input.id ?? 'dom.accessibility',
     kind: ADAPTER_KINDS.DOM_ACCESSIBILITY,
@@ -90,9 +92,25 @@ export function createDomAccessibilityAdapter(spec = {}) {
       return custom;
     },
   });
+  const execute = adapter.execute;
+  return Object.freeze({
+    ...adapter,
+    execute: (execution = {}) => {
+      const inputRequest = isPlainObject({ value: execution }) ? execution : {};
+      const context = isPlainObject({ value: inputRequest.context }) ? inputRequest.context : {};
+      const capability = adapter.getCapability({ name: inputRequest.capability });
+      const currentTree = context.accessibilityTree ?? context.tree ?? inputRequest.accessibilityTree ?? inputRequest.tree ?? tree;
+      if (capability && !treeContainsTarget({ tree: currentTree, target: capability.semanticTarget })) {
+        return errorResult({ error: createAdapterError({ code: 'DOM_TARGET_UNAVAILABLE', message: 'Semantic target is not present in the accessibility tree.' }) });
+      }
+      return execute(execution);
+    },
+  });
 }
 
 // A short alias keeps imports ergonomic while retaining the explicit contract
 // name in stack traces and descriptors.
 export const createDomAdapter = createDomAccessibilityAdapter;
-
+export const DomAccessibilityAdapter = createDomAccessibilityAdapter;
+export const createDomA11yAdapter = createDomAccessibilityAdapter;
+export const createDOMAccessibilityAdapter = createDomAccessibilityAdapter;

@@ -131,17 +131,31 @@ function normalizeEvent(eventOrType, details) {
     if (details === null || typeof details !== "object" || Array.isArray(details)) {
       throw new SecurityError("INVALID_AUDIT_EVENT", "Audit event details must be an object.");
     }
-    event = { ...details, type: eventOrType };
+    event = copyEventFields(details);
+    // The event-type argument is authoritative and cannot be shadowed by a
+    // caller-provided `type` field.
+    event.type = eventOrType;
   } else {
     if (eventOrType === null || typeof eventOrType !== "object" || Array.isArray(eventOrType)) {
       throw new SecurityError("INVALID_AUDIT_EVENT", "Audit event must be an object.");
     }
-    event = { ...eventOrType };
+    event = copyEventFields(eventOrType);
     if (typeof event.type !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$/u.test(event.type)) {
       throw new SecurityError("INVALID_AUDIT_EVENT", "Audit event type is invalid.");
     }
   }
   return event;
+}
+
+function copyEventFields(value) {
+  const copy = Object.create(null);
+  for (const key of Object.keys(value)) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    // Do not invoke attacker-controlled getters while constructing an audit
+    // event.  The redactor will turn this marker into harmless JSON data.
+    copy[key] = descriptor && "value" in descriptor ? descriptor.value : "[UNSERIALIZABLE]";
+  }
+  return copy;
 }
 
 function auditTimestamp(value) {

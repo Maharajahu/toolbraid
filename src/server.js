@@ -1,7 +1,13 @@
 import { createServer as createHttpServer } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import readline from 'node:readline';
+
+import {
+  createMcpGateway,
+  createStdioTransport,
+  getToolDefinitions,
+  runStdio,
+} from './mcp/index.js';
 
 import {
   PUBLIC_TOOL_DEFINITIONS,
@@ -38,13 +44,33 @@ export function createServer(options = {}) {
     options.fixture || options.fixtures ? createFixtureRuntime(options) : createCompositionRoot(options)
   );
   const externalDispatcher = options.dispatcher || options.mcp?.dispatcher || options.mcp?.dispatch;
+  const gateway = options.gateway || (
+    options.mcp && typeof options.mcp.handleMessage === 'function' ? options.mcp : createMcpGateway({
+    ...(options.mcpOptions || {}),
+    serverInfo: options.serverInfo,
+    instructions: options.instructions,
+    requireIdentity: options.requireIdentity !== false,
+    handlers: {
+      'capabilities.search': (args) => root.callTool('capabilities.search', args),
+      'capabilities.describe': (args) => root.callTool('capabilities.describe', args),
+      'plan.propose': (args) => root.callTool('plan.propose', args),
+      'workflow.execute': (args) => root.callTool('workflow.execute', args),
+      'workflow.status': (args) => root.callTool('workflow.status', args),
+      'workflow.replay_readonly': (args) => root.callTool('workflow.replay_readonly', args),
+    },
+    })
+  );
+  const session = options.session || gateway.createSession?.();
+  const httpOptions = normalizeHttpOptions(options);
   let httpServer;
 
   const app = {
     root,
     runtime: root,
+    gateway,
+    session,
     publicToolNames: PUBLIC_TOOL_NAMES,
-    publicToolDefinitions: PUBLIC_TOOL_DEFINITIONS,
+    publicToolDefinitions: getToolDefinitions(),
 
     /** Dispatch a semantic tool directly, without JSON-RPC envelopes. */
     async callTool(name, args = {}) {
@@ -63,7 +89,15 @@ export function createServer(options = {}) {
     },
 
     /** Handle a parsed JSON-RPC request or a batch. */
-    async handleRequest(request) {
+    async handleRequest(request, requestContext = {}) {
+      // The MCP gateway owns protocol negotiation, identity validation, and
+      // cancellation semantics.  Stdio/direct callers retain the app session;
+      // transports with multiple clients can provide an isolated session.
+      if (gateway) return gateway.handleMessage(request, {
+        ...(options.context || {}),
+        ...requestContext,
+        session: requestContext.session ?? session,
+      });
       if (Array.isArray(request)) {
         if (request.length === 0) return protocolError(null, JSON_RPC.invalidRequest, 'Invalid Request');
         const responses = [];
@@ -75,8 +109,11 @@ export function createServer(options = {}) {
       }
       return handleOne(request);
     },
-    handleJsonRpc(request) {
-      return app.handleRequest(request);
+    handleJsonRpc(request, requestContext) {
+      return app.handleRequest(request, requestContext);
+    },
+    createStdioTransport(transportOptions = {}) {
+      return createStdioTransport(gateway, { ...transportOptions, session });
     },
 
     /** Internal host hook; never registered as an MCP tool. */
@@ -94,7 +131,7 @@ export function createServer(options = {}) {
     async listen(port = options.port ?? Number(process.env.PORT || 0), host = options.host || '127.0.0.1') {
       if (httpServer) return httpServer;
       httpServer = createHttpServer((request, response) => {
-        void handleHttpRequest(request, response, app);
+        void handleHttpRequest(request, response, app, httpOptions);
       });
       await new Promise((resolve, reject) => {
         const onError = (error) => {
@@ -181,7 +218,7 @@ export async function startServer(options = {}) {
 export const createApp = createServer;
 export const start = startServer;
 
-async function handleHttpRequest(request, response, app) {
+async function handleHttpRequest(request, response, app, httpOptions) {
   const pathname = new URL(request.url || '/', 'http://toolbraid.local').pathname;
   if (request.method === 'GET' && (pathname === '/healthz' || pathname === '/health')) {
     writeJson(response, 200, { ok: true, service: 'toolbraid' });
@@ -195,8 +232,22 @@ async function handleHttpRequest(request, response, app) {
     });
     return;
   }
-  if (request.method !== 'POST' || !['/', '/mcp', '/rpc'].includes(pathname)) {
+  if (pathname !== '/mcp') {
     writeJson(response, 404, { error: { code: 'NOT_FOUND', message: 'Not found', retryable: false } });
+    return;
+  }
+  if (request.method !== 'POST') {
+    response.setHeader('allow', 'POST');
+    writeJson(response, 405, { error: { code: 'METHOD_NOT_ALLOWED', message: 'Method not allowed', retryable: false } });
+    return;
+  }
+  if (!isAllowedHttpOrigin(request.headers.origin, httpOptions.allowedOrigins)) {
+    writeJson(response, 403, protocolError(null, JSON_RPC.invalidRequest, 'Origin is not allowed'));
+    return;
+  }
+  const contentType = singleHeader(request.headers['content-type']);
+  if (!contentType || !/^application\/json(?:\s*;|$)/i.test(contentType)) {
+    writeJson(response, 415, protocolError(null, JSON_RPC.invalidRequest, 'Content-Type must be application/json'));
     return;
   }
   try {
@@ -208,18 +259,41 @@ async function handleHttpRequest(request, response, app) {
       writeJson(response, 400, protocolError(null, JSON_RPC.parse, 'Parse error'));
       return;
     }
-    const result = await app.handleRequest(parsed);
-    if (result === undefined) {
-      response.writeHead(204);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      writeJson(response, 400, protocolError(parsed?.id ?? null, JSON_RPC.invalidRequest, 'Invalid Request'));
+      return;
+    }
+    const headerFailure = validateMcpHttpHeaders(request.headers, parsed);
+    if (headerFailure) {
+      writeJson(response, 400, protocolError(parsed.id ?? null, -32020, 'Header mismatch', {
+        reason: headerFailure,
+      }));
+      return;
+    }
+    // This HTTP endpoint implements the modern per-request metadata protocol;
+    // it has no authenticated MCP session-id mechanism.  Never share the
+    // stdio/direct session between unrelated HTTP clients, where one client
+    // could otherwise poison protocol negotiation or cancel a colliding id.
+    const result = await app.handleRequest(parsed, {
+      session: app.gateway.createSession?.(),
+      transport: 'http',
+    });
+    if (result === undefined || result === null) {
+      response.writeHead(202, { 'cache-control': 'no-store' });
       response.end();
       return;
     }
-    writeJson(response, 200, result);
+    writeJson(response, httpStatusForMcpResult(result), result);
   } catch (error) {
-    writeJson(response, 413, {
+    const tooLarge = error?.code === 'REQUEST_TOO_LARGE';
+    writeJson(response, tooLarge ? 413 : 500, {
       jsonrpc: '2.0',
       id: null,
-      error: { code: 'REQUEST_TOO_LARGE', message: error?.message || 'Request rejected', retryable: false },
+      error: {
+        code: tooLarge ? 'REQUEST_TOO_LARGE' : 'INTERNAL_ERROR',
+        message: tooLarge ? 'Request body exceeds the maximum size' : 'Request failed',
+        retryable: false,
+      },
     });
   }
 }
@@ -228,19 +302,138 @@ function readBody(request, maximum = 1024 * 1024) {
   return new Promise((resolve, reject) => {
     const chunks = [];
     let size = 0;
+    let settled = false;
     request.setEncoding('utf8');
-    request.on('data', (chunk) => {
+    const cleanup = () => {
+      request.off('data', onData);
+      request.off('end', onEnd);
+      request.off('error', onError);
+    };
+    const onData = (chunk) => {
       size += Buffer.byteLength(chunk);
       if (size > maximum) {
+        settled = true;
+        cleanup();
         reject(new RuntimeError('REQUEST_TOO_LARGE', 'Request body exceeds the maximum size'));
-        request.destroy();
+        // Drain the remaining bytes so the server can still send a 413 on the
+        // existing connection instead of resetting it mid-response.
+        request.resume();
         return;
       }
       chunks.push(chunk);
-    });
-    request.on('end', () => resolve(chunks.join('')));
-    request.on('error', reject);
+    };
+    const onEnd = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve(chunks.join(''));
+    };
+    const onError = (error) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(error);
+    };
+    request.on('data', onData);
+    request.on('end', onEnd);
+    request.on('error', onError);
   });
+}
+
+function normalizeHttpOptions(options) {
+  const supplied = options.http?.allowedOrigins ?? options.allowedHttpOrigins ?? [];
+  if (!Array.isArray(supplied)) {
+    throw new RuntimeError('INVALID_HTTP_OPTIONS', 'allowed HTTP origins must be an array');
+  }
+  const allowedOrigins = new Set();
+  for (const value of supplied) {
+    if (typeof value !== 'string' || value.trim() !== value) {
+      throw new RuntimeError('INVALID_HTTP_OPTIONS', 'allowed HTTP origins must be absolute origins');
+    }
+    let parsed;
+    try {
+      parsed = new URL(value);
+    } catch {
+      throw new RuntimeError('INVALID_HTTP_OPTIONS', 'allowed HTTP origins must be absolute origins');
+    }
+    if (!['http:', 'https:'].includes(parsed.protocol) || parsed.origin !== value) {
+      throw new RuntimeError('INVALID_HTTP_OPTIONS', 'allowed HTTP origins must be canonical HTTP(S) origins');
+    }
+    allowedOrigins.add(parsed.origin);
+  }
+  return Object.freeze({ allowedOrigins });
+}
+
+function isAllowedHttpOrigin(value, allowedOrigins) {
+  // Non-browser clients normally omit Origin.  If it is present, fail closed
+  // unless the operator explicitly configured that exact canonical origin.
+  if (value === undefined) return true;
+  const origin = singleHeader(value);
+  if (!origin) return false;
+  let parsed;
+  try {
+    parsed = new URL(origin);
+  } catch {
+    return false;
+  }
+  return parsed.origin === origin && allowedOrigins.has(parsed.origin);
+}
+
+function validateMcpHttpHeaders(headers, message) {
+  const version = singleHeader(headers['mcp-protocol-version']);
+  const bodyVersion = message.params?._meta?.['io.modelcontextprotocol/protocolVersion'];
+  if (!version) return 'MCP-Protocol-Version is required';
+  if (version !== bodyVersion) return 'MCP-Protocol-Version does not match request metadata';
+
+  const method = singleHeader(headers['mcp-method']);
+  if (!method) return 'Mcp-Method is required';
+  if (method !== message.method) return 'Mcp-Method does not match the JSON-RPC method';
+
+  const expectedName = ['tools/call', 'resources/read', 'prompts/get'].includes(message.method)
+    ? message.params?.name ?? message.params?.uri
+    : undefined;
+  const rawName = singleHeader(headers['mcp-name']);
+  if (expectedName !== undefined) {
+    if (!rawName) return 'Mcp-Name is required for this method';
+    const decoded = decodeMcpHeaderValue(rawName);
+    if (decoded === undefined) return 'Mcp-Name is malformed';
+    if (decoded !== expectedName) return 'Mcp-Name does not match the request body';
+  } else if (rawName !== undefined) {
+    return 'Mcp-Name is not valid for this method';
+  }
+
+  // Keep the transport pinned to the implemented modern revision.  The
+  // gateway will return the richer UnsupportedProtocolVersionError body.
+  if (typeof bodyVersion !== 'string' || !bodyVersion) return 'protocol metadata is required';
+  return null;
+}
+
+function decodeMcpHeaderValue(value) {
+  const match = /^=\?base64\?([A-Za-z0-9+/]*={0,2})\?=$/.exec(value);
+  if (match) {
+    try {
+      const decoded = Buffer.from(match[1], 'base64');
+      if (decoded.toString('base64') !== match[1]) return undefined;
+      return decoded.toString('utf8');
+    } catch {
+      return undefined;
+    }
+  }
+  if (value.startsWith('=?base64?') || value.endsWith('?=')) return undefined;
+  if (value.trim() !== value || !/^[\x20-\x7e]+$/.test(value)) return undefined;
+  return value;
+}
+
+function singleHeader(value) {
+  if (Array.isArray(value)) return value.length === 1 ? value[0] : undefined;
+  return typeof value === 'string' ? value : undefined;
+}
+
+function httpStatusForMcpResult(result) {
+  const code = result?.error?.code;
+  if (code === JSON_RPC.methodNotFound) return 404;
+  if ([JSON_RPC.parse, JSON_RPC.invalidRequest, -32020, -32021, -32022].includes(code)) return 400;
+  return 200;
 }
 
 function writeJson(response, status, value) {
@@ -310,19 +503,7 @@ async function runCli() {
   const fixture = process.env.TOOLBRAID_FIXTURE === '1';
   if (process.env.TOOLBRAID_TRANSPORT === 'stdio') {
     const app = createServer({ fixture });
-    const input = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
-    for await (const line of input) {
-      if (!line.trim()) continue;
-      let parsed;
-      try {
-        parsed = JSON.parse(line);
-      } catch {
-        process.stdout.write(`${JSON.stringify(protocolError(null, JSON_RPC.parse, 'Parse error'))}\n`);
-        continue;
-      }
-      const response = await app.handleRequest(parsed);
-      if (response !== undefined) process.stdout.write(`${JSON.stringify(response)}\n`);
-    }
+    await runStdio(app.gateway, { input: process.stdin, output: process.stdout, session: app.session });
     return;
   }
   const server = await startServer({ fixture });
@@ -337,4 +518,3 @@ if (invokedPath && invokedPath === path.resolve(fileURLToPath(import.meta.url)))
     process.exitCode = 1;
   });
 }
-

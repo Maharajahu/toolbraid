@@ -26,14 +26,20 @@ const HASH_PATTERN = /^[a-f0-9]{64}$/;
 export function normalizeBinding(input, { requireArgs = true } = {}) {
   assertRecord(input, "binding");
 
+  const tenantId = aliasedValue(input, "tenantId", []);
+  const subjectId = aliasedValue(input, "subjectId", ["subject", "userId"]);
+  const workflowId = aliasedValue(input, "workflowId", ["runId"]);
+  const nodeId = aliasedValue(input, "nodeId", []);
+  const origin = aliasedValue(input, "origin", ["siteOrigin"]);
+  const adapter = aliasedValue(input, "adapter", ["adapterId"]);
   const normalized = {
-    tenantId: normalizeIdentity("tenantId", input.tenantId),
-    subjectId: normalizeIdentity("subjectId", input.subjectId),
-    workflowId: normalizeIdentity("workflowId", input.workflowId),
+    tenantId: normalizeIdentity("tenantId", tenantId),
+    subjectId: normalizeIdentity("subjectId", subjectId),
+    workflowId: normalizeIdentity("workflowId", workflowId),
     revision: normalizeRevision(input.revision),
-    nodeId: normalizeIdentity("nodeId", input.nodeId),
-    origin: normalizeOrigin(input.origin),
-    adapter: normalizeAdapter(input.adapter),
+    nodeId: normalizeIdentity("nodeId", nodeId),
+    origin: normalizeOrigin(origin),
+    adapter: normalizeAdapter(adapter),
   };
 
   if (!Object.prototype.hasOwnProperty.call(input, "args")) {
@@ -44,8 +50,9 @@ export function normalizeBinding(input, { requireArgs = true } = {}) {
     normalized.argsHash = canonicalHash(input.args);
   }
 
-  if (Object.prototype.hasOwnProperty.call(input, "argsHash")) {
-    const supplied = normalizeHash(input.argsHash);
+  const suppliedHash = aliasedValue(input, "argsHash", ["argumentHash", "canonicalArgsHash"]);
+  if (suppliedHash !== undefined) {
+    const supplied = normalizeHash(suppliedHash);
     if (normalized.argsHash !== undefined && !constantTimeStringEqual(normalized.argsHash, supplied)) {
       throw new SecurityError("ARGS_HASH_MISMATCH", "Supplied argument hash does not match canonical arguments.");
     }
@@ -166,4 +173,16 @@ function assertRecord(value, label) {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
     throw new SecurityError("INVALID_BINDING", `${label} must be an object.`);
   }
+}
+
+function aliasedValue(input, canonical, aliases) {
+  const fields = [canonical, ...aliases].filter((name) => Object.prototype.hasOwnProperty.call(input, name));
+  if (fields.length === 0) return undefined;
+  const value = input[fields[0]];
+  for (const field of fields.slice(1)) {
+    if (input[field] !== value) {
+      throw new SecurityError("INVALID_BINDING", `${canonical} has conflicting aliases.`);
+    }
+  }
+  return value;
 }

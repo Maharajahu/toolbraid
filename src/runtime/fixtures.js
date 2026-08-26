@@ -8,12 +8,14 @@
 export const FIXTURE_IDS = Object.freeze({
   tenantId: 'tenant-acme',
   subject: 'user-alice',
+  subjectId: 'user-alice',
   origin: 'https://shop.example.test',
 });
 
 export const FIXTURE_CAPABILITIES = Object.freeze([
   Object.freeze({
     id: 'catalog.search',
+    version: '1',
     name: 'Search product catalog',
     description: 'Find products by a stable text query.',
     kind: 'read',
@@ -31,6 +33,7 @@ export const FIXTURE_CAPABILITIES = Object.freeze([
   }),
   Object.freeze({
     id: 'cart.read',
+    version: '1',
     name: 'Read shopping cart',
     description: 'Read the current cart contents.',
     kind: 'read',
@@ -47,6 +50,7 @@ export const FIXTURE_CAPABILITIES = Object.freeze([
   }),
   Object.freeze({
     id: 'cart.add',
+    version: '1',
     name: 'Add product to cart',
     description: 'Add one product to the shopping cart.',
     kind: 'mutation',
@@ -181,6 +185,7 @@ export function createFixtureDependencies(options = {}) {
     identity: {
       tenantId: String(options.tenantId || FIXTURE_IDS.tenantId),
       subject: String(options.subject || FIXTURE_IDS.subject),
+      subjectId: String(options.subjectId || options.subject || FIXTURE_IDS.subjectId),
       origin: String(options.origin || FIXTURE_IDS.origin),
     },
     now: options.now || (() => new Date('2026-01-01T00:00:00.000Z')),

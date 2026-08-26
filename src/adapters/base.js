@@ -41,15 +41,6 @@ function normalizeAdapterId({ id }) {
   return id;
 }
 
-function defaultSchema({ readOnly }) {
-  // Empty objects are intentional: concrete capabilities should normally
-  // supply a narrower schema, but the contract remains executable for a
-  // manifest that explicitly accepts an empty argument object.
-  return readOnly
-    ? { type: 'object', additionalProperties: false }
-    : { type: 'object', additionalProperties: false };
-}
-
 function firstSchema({ descriptor, names, fallback }) {
   for (const name of names) if (descriptor[name] !== undefined) return descriptor[name];
   return fallback;
@@ -60,12 +51,18 @@ function normalizeCapability({ descriptor, kind }) {
     throw new AdapterContractError({ code: 'ADAPTER_CAPABILITY_INVALID', message: 'Each capability must be a plain object.' });
   }
   const name = validateCapabilityName({ name: descriptor.name ?? descriptor.id });
+  if (descriptor.readOnly === undefined && descriptor.mutates === undefined) {
+    throw new AdapterContractError({ code: 'ADAPTER_MUTABILITY_REQUIRED', message: `Capability ${name} must declare readOnly or mutates explicitly.` });
+  }
   const readOnly = descriptor.readOnly === undefined ? descriptor.mutates !== true : descriptor.readOnly === true;
   if (descriptor.mutates !== undefined && descriptor.readOnly !== undefined && descriptor.mutates === readOnly) {
     throw new AdapterContractError({ code: 'ADAPTER_CAPABILITY_INVALID', message: `Capability ${name} has contradictory mutates/readOnly flags.` });
   }
-  const inputSchema = firstSchema({ descriptor, names: ['inputSchema', 'argsSchema', 'input'], fallback: defaultSchema({ readOnly }) });
-  const outputSchema = firstSchema({ descriptor, names: ['outputSchema', 'resultSchema', 'output'], fallback: { type: 'object' } });
+  const inputSchema = firstSchema({ descriptor, names: ['inputSchema', 'argsSchema', 'input'], fallback: undefined });
+  const outputSchema = firstSchema({ descriptor, names: ['outputSchema', 'resultSchema', 'output'], fallback: undefined });
+  if (inputSchema === undefined || outputSchema === undefined) {
+    throw new AdapterContractError({ code: 'ADAPTER_SCHEMA_REQUIRED', message: `Capability ${name} must declare inputSchema and outputSchema.` });
+  }
   const inputCheck = validateSchemaDefinition({ schema: inputSchema, name: `${name}.inputSchema` });
   const outputCheck = validateSchemaDefinition({ schema: outputSchema, name: `${name}.outputSchema` });
   if (!inputCheck.valid || !outputCheck.valid) {
@@ -233,6 +230,14 @@ export function createAdapter(spec = {}) {
     riskScore: adapterRisk.score,
     riskLevel: adapterRisk.level,
   };
+  // Keep the origin binding visible at both levels.  A consumer can inspect a
+  // single capability descriptor without having to infer which adapter
+  // origins it inherited.
+  for (const capability of descriptor.capabilities) {
+    capability.origins = [...origins];
+    if (origins.length === 1) capability.origin = origins[0];
+  }
+  if (origins.length === 1) descriptor.origin = origins[0];
   if (input.version !== undefined) {
     if (typeof input.version !== 'string' || input.version.length > 40) {
       throw new AdapterContractError({ code: 'ADAPTER_VERSION_INVALID', message: 'Adapter version must be a bounded string.' });
@@ -270,7 +275,7 @@ export function createAdapter(spec = {}) {
     try { request = normalizeProbeRequest({ input: probeInput }); } catch (error) { return errorResult({ error }); }
     let canonical;
     try { canonical = normalizeOrigin({ origin: request.origin }); } catch (error) { return errorResult({ error }); }
-    const requestedName = request.capability;
+    const requestedName = request.capability ?? request.capabilityId ?? request.operation;
     const capability = requestedName === undefined ? undefined : getCapability({ name: requestedName });
     const baseDetails = {
       adapterId: id,
@@ -298,7 +303,10 @@ export function createAdapter(spec = {}) {
           kind,
           origin: canonical,
           capability: capability?.name,
-          request: cloneJson({ value: request }),
+          // `request` is the caller's probe context.  The outer fields remain
+          // available as probeRequest for integrations that need them.
+          request: cloneJson({ value: request.request ?? request }),
+          probeRequest: cloneJson({ value: request }),
         });
         if (raw && typeof raw.then === 'function') {
           return { ok: true, available: false, ...baseDetails, reason: 'Asynchronous availability checks are not permitted during routing.' };
@@ -366,7 +374,7 @@ export function createAdapter(spec = {}) {
     try { request = normalizeExecutionRequest({ input: executionInput }); } catch (error) { return errorResult({ error }); }
     let canonical;
     try { canonical = normalizeOrigin({ origin: request.origin }); } catch (error) { return errorResult({ error }); }
-    const capability = getCapability({ name: request.capability });
+    const capability = getCapability({ name: request.capability ?? request.capabilityId ?? request.operation });
     if (capability === null) return errorResult({ error: createAdapterError({ code: 'ADAPTER_CAPABILITY_UNKNOWN', message: 'Capability is not declared by this adapter.' }) });
     if (!origins.some((bound) => originsEqual({ expected: bound, actual: canonical }))) return errorResult({ error: createAdapterError({ code: 'ADAPTER_ORIGIN_MISMATCH', message: 'Request origin is not bound to this adapter.' }) });
     if (capability.mutates) {
@@ -394,14 +402,20 @@ export function createAdapter(spec = {}) {
     }
   };
 
+  const publicCapabilities = descriptor.capabilities.map((capability) => cloneJson({ value: capability }));
+  Object.freeze(publicCapabilities);
   return Object.freeze({
     id,
     kind,
     priority,
+    ...(origins.length === 1 ? { origin: origins[0] } : {}),
+    origins: [...origins],
+    capabilities: publicCapabilities,
     describe,
     supports,
     probe,
     execute,
+    invoke: execute,
     getCapability,
   });
 }

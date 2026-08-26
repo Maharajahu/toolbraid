@@ -3,6 +3,8 @@ import {
   ADAPTER_KINDS,
   AdapterContractError,
   assertRecord,
+  createAdapterError,
+  errorResult,
   isJsonSafe,
   isPlainObject,
 } from './contracts.js';
@@ -34,7 +36,7 @@ export function createVisionFallbackAdapter(spec = {}) {
     return { ...descriptor, semanticTarget: descriptor.semanticTarget ?? descriptor.target };
   });
   const userAvailability = input.availability;
-  return createAdapter({
+  const adapter = createAdapter({
     ...input,
     id: input.id ?? 'vision.fallback',
     kind: ADAPTER_KINDS.VISION,
@@ -54,7 +56,19 @@ export function createVisionFallbackAdapter(spec = {}) {
       return custom;
     },
   });
+  const execute = adapter.execute;
+  return Object.freeze({
+    ...adapter,
+    execute: (execution = {}) => {
+      const inputRequest = isPlainObject({ value: execution }) ? execution : {};
+      if (!hasVisionEvidence({ request: inputRequest.context ?? inputRequest })) {
+        return errorResult({ error: createAdapterError({ code: 'VISION_EVIDENCE_REQUIRED', message: 'A screenshot evidence digest is required for vision fallback.' }) });
+      }
+      return execute(execution);
+    },
+  });
 }
 
 export const createVisionAdapter = createVisionFallbackAdapter;
-
+export const VisionFallbackAdapter = createVisionFallbackAdapter;
+export const createVisionFallback = createVisionFallbackAdapter;

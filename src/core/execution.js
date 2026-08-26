@@ -1,5 +1,5 @@
 import { CoreError, errorShape } from './errors.js';
-import { requireIdentity } from './identity.js';
+import { identityKey, requireIdentity } from './identity.js';
 import { canonicalHash, jsonClone } from './serialization.js';
 import { validatePlan } from './planner.js';
 
@@ -21,12 +21,19 @@ export class ExecutionBroker {
     this.catalog = options.catalog;
     this.approvalStore = options.approvalStore ?? options.approvals;
     this.approvalVerifier = options.approvalVerifier;
+    // A credential resolver is trusted constructor state.  It is deliberately
+    // not read from workflow.execute input, so a client cannot self-approve.
+    this.approvalCredentialResolver = options.approvalCredentialResolver
+      ?? options.approvalResolver
+      ?? options.credentialResolver;
+    this.approvalCredential = options.approvalCredential;
     this.executor = options.executor ?? options.execute;
     this.adapters = options.adapters;
     this.adapterResolver = options.adapterResolver;
     this.audit = options.audit;
     this.clock = typeof options.clock === 'function' ? options.clock : () => new Date().toISOString();
     this.replaySequence = 0;
+    this.inFlightExecutions = new Map();
   }
 
   async execute(input) {
@@ -35,6 +42,29 @@ export class ExecutionBroker {
     rejectCallerApproval(operation);
     const workflowId = requireWorkflowId(operation.workflowId);
     const revision = normalizeRevision(operation.revision);
+    const executionKey = `${identityKey(identity)}:${encodeURIComponent(workflowId)}:${revision}`;
+    const pending = this.inFlightExecutions.get(executionKey);
+    if (pending) return pending;
+
+    // Defer the state-machine entry until after the promise is registered so
+    // two calls made in the same turn cannot both observe a runnable node.
+    const execution = Promise.resolve().then(() => this.#executeOnce({
+      operation,
+      identity,
+      workflowId,
+      revision,
+    }));
+    this.inFlightExecutions.set(executionKey, execution);
+    try {
+      return await execution;
+    } finally {
+      if (this.inFlightExecutions.get(executionKey) === execution) {
+        this.inFlightExecutions.delete(executionKey);
+      }
+    }
+  }
+
+  async #executeOnce({ operation, identity, workflowId, revision }) {
     let workflow = this.store.get({ identity, workflowId, revision });
     if (TERMINAL_WORKFLOW_STATES.has(workflow.state)) return executionView(workflow);
     if (!workflow.plan) throw new CoreError('WORKFLOW_NOT_PROPOSED', 'Workflow has no proposed plan');
@@ -58,17 +88,22 @@ export class ExecutionBroker {
       if (!node.readOnly) {
         const approval = await this.#approvalFor({ identity, workflow, node, operation });
         if (!approval) {
+          const request = approvalRequest({ identity, workflow, node });
+          if (workflow.state === 'awaiting_approval') {
+            if (workflow.awaitingApproval?.nodeId !== nodeId || current.state !== 'awaiting_approval') {
+              throw new CoreError('APPROVAL_BINDING_MISMATCH', 'Workflow approval state does not match the pending node');
+            }
+            return executionView(workflow, { approvalRequired: request });
+          }
           workflow = this.store.awaitApproval({
             identity,
             workflowId,
             revision,
             nodeId,
-            request: approvalRequest({ identity, workflow, node }),
+            request,
           });
           await this.#audit({ type: 'approval_required', identity, workflowId, revision, nodeId });
-          return executionView(workflow, {
-            approvalRequired: approvalRequest({ identity, workflow, node }),
-          });
+          return executionView(workflow, { approvalRequired: request });
         }
         if (workflow.state === 'awaiting_approval') {
           workflow = this.store.resume({ identity, workflowId, revision, nodeId });
@@ -83,9 +118,12 @@ export class ExecutionBroker {
 
       workflow = this.store.markNode({ identity, workflowId, revision, nodeId, state: 'running' });
       await this.#audit({ type: 'node_started', identity, workflowId, revision, nodeId, readOnly: node.readOnly });
-      let output;
+      let safeOutput;
       try {
-        output = await this.#invoke({ identity, workflow, plan, node, operation, replay: false });
+        const output = await this.#invoke({ identity, workflow, plan, node, operation, replay: false });
+        // Treat boundary normalization as part of execution.  An adapter that
+        // returns an unsupported value must not strand a node in `running`.
+        safeOutput = normalizeOutput(output);
       } catch (error) {
         const safe = errorShape(error, { code: 'ADAPTER_FAILURE', message: `Capability ${node.capabilityId} failed`, retryable: true });
         this.store.markNode({ identity, workflowId, revision, nodeId, state: 'failed', error: safe });
@@ -93,7 +131,6 @@ export class ExecutionBroker {
         await this.#audit({ type: 'node_failed', identity, workflowId, revision, nodeId, error: safe });
         throw new CoreError('EXECUTION_FAILED', `Node ${nodeId} failed`, { retryable: safe.retryable === true, details: { nodeId, cause: safe }, cause: error });
       }
-      const safeOutput = normalizeOutput(output);
       workflow = this.store.markNode({ identity, workflowId, revision, nodeId, state: 'completed', output: safeOutput });
       await this.#audit({ type: 'node_completed', identity, workflowId, revision, nodeId, readOnly: node.readOnly });
     }
@@ -205,28 +242,57 @@ export class ExecutionBroker {
       throw new CoreError('APPROVAL_CONTEXT_REQUIRED', `Mutating node ${node.id} must bind origin and adapter`);
     }
     let verifier = this.approvalVerifier;
+    let verifierKind = verifier ? 'custom' : undefined;
     if (!verifier && this.approvalStore) {
-      if (typeof this.approvalStore === 'function') verifier = this.approvalStore;
-      else if (typeof this.approvalStore.verifyAndConsume === 'function') verifier = this.approvalStore.verifyAndConsume.bind(this.approvalStore);
-      else if (typeof this.approvalStore.consume === 'function') verifier = this.approvalStore.consume.bind(this.approvalStore);
-      else if (typeof this.approvalStore.verify === 'function') verifier = this.approvalStore.verify.bind(this.approvalStore);
+      if (typeof this.approvalStore === 'function') {
+        verifier = this.approvalStore;
+        verifierKind = 'custom';
+      } else if (typeof this.approvalStore.verifyAndConsume === 'function') {
+        verifier = this.approvalStore.verifyAndConsume.bind(this.approvalStore);
+        verifierKind = 'one-object';
+      } else if (typeof this.approvalStore.consume === 'function') {
+        verifier = this.approvalStore.consume.bind(this.approvalStore);
+        verifierKind = 'consume';
+      }
     }
     if (!verifier) return false;
     try {
-      const result = await verifier({
+      const credential = await this.#resolveApprovalCredential(binding);
+      const candidate = {
         ...binding,
+        args: jsonClone(node.args),
         argumentHash: binding.argumentHash,
         canonicalArgumentHash: binding.argumentHash,
         // A verifier may use this to check expiry with an injected clock.  It
         // is server derived, never caller supplied.
         now: this.#now(),
         operation: 'consume',
-      });
+      };
+      if (credential !== undefined && credential !== null) candidate.approval = jsonClone(credential);
+      let result;
+      // ApprovalAuthority.consume(binding, credential) needs the original args
+      // so it can recompute the hash at the security boundary.  One-object
+      // stores receive a nested credential and binding-compatible object.
+      if (verifierKind === 'consume' && credential !== undefined && credential !== null && verifier.length >= 2) {
+        result = await verifier(candidate, credential, { now: this.#now() });
+      } else {
+        result = await verifier(candidate);
+      }
       return result === true || result?.approved === true || result?.valid === true || result?.consumed === true;
     } catch (error) {
       if (error instanceof CoreError && APPROVAL_MISS_CODES.has(error.code)) return false;
       throw new CoreError('APPROVAL_CHECK_FAILED', 'Approval verification failed', { retryable: true, cause: error });
     }
+  }
+
+  async #resolveApprovalCredential(binding) {
+    if (this.approvalCredentialResolver !== undefined) {
+      if (typeof this.approvalCredentialResolver === 'function') {
+        return this.approvalCredentialResolver({ ...binding, binding: { ...binding } });
+      }
+      return this.approvalCredentialResolver;
+    }
+    return this.approvalCredential;
   }
 
   async #invoke({ identity, workflow, plan, node, operation, replay, recordedOutput }) {
@@ -332,14 +398,18 @@ export function approvalBinding({ identity, workflow, node }) {
     adapter: node.adapter,
     capabilityId: node.capabilityId,
     capabilityVersion: node.capabilityVersion,
+    args: jsonClone(node.args),
+    argsHash: argumentHash,
     argumentHash,
+    canonicalArgsHash: argumentHash,
   };
 }
 
 export function approvalRequest({ identity, workflow, node }) {
   const binding = approvalBinding({ identity, workflow, node });
+  const { args: _args, ...publicBinding } = binding;
   return {
-    ...binding,
+    ...publicBinding,
     expiresAt: null,
     // The request is a description for a trusted approval UI/store.  It is not
     // itself an approval and is never accepted from workflow.execute input.
@@ -349,6 +419,10 @@ export function approvalRequest({ identity, workflow, node }) {
 
 function executionView(workflow, extras = {}) {
   const value = jsonClone(workflow);
+  value.id = value.workflowId;
+  value.status = value.state;
+  value.subject = value.subjectId;
+  value.cursor = value.plan?.order?.filter((nodeId) => value.nodeStates?.[nodeId]?.state === 'completed').length ?? 0;
   const results = Object.values(value.nodeStates ?? {})
     .filter((node) => node.state === 'completed')
     .sort((left, right) => left.nodeId.localeCompare(right.nodeId))
@@ -381,4 +455,3 @@ function requireObject(value, label) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new CoreError('INVALID_INPUT', `${label} must be an object`);
   return value;
 }
-

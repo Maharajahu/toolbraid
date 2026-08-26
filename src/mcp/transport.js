@@ -45,6 +45,7 @@ export class StdioTransport {
     };
     this.decoder = new TextDecoder('utf-8');
     this.buffer = '';
+    this.discardingOversizedFrame = false;
     this.started = false;
     this.closed = false;
     this.tasks = new Set();
@@ -108,6 +109,7 @@ export class StdioTransport {
       this.input.off?.('error', this._onError);
     }
     this.buffer = '';
+    this.discardingOversizedFrame = false;
   }
 
   #receive(chunk) {
@@ -120,20 +122,32 @@ export class StdioTransport {
       this.#writeParseError();
       return;
     }
+    if (this.discardingOversizedFrame) {
+      const delimiter = text.indexOf('\n');
+      if (delimiter === -1) return;
+      // Continue only with bytes after the delimiter that terminated the
+      // oversized frame.  Without this state, a later chunk containing the
+      // tail of that frame could be interpreted as a new JSON-RPC request.
+      text = text.slice(delimiter + 1);
+      this.discardingOversizedFrame = false;
+    }
+
     this.buffer += text;
 
     let newlineIndex = this.buffer.indexOf('\n');
     while (newlineIndex !== -1) {
       const line = this.buffer.slice(0, newlineIndex).replace(/\r$/, '');
       this.buffer = this.buffer.slice(newlineIndex + 1);
-      this.#enqueue(line);
+      if (asUint8Length(line) > this.maxLineBytes) this.#writeParseError();
+      else this.#enqueue(line);
       newlineIndex = this.buffer.indexOf('\n');
     }
 
     if (asUint8Length(this.buffer) > this.maxLineBytes) {
-      // Drop the oversized frame up to its next delimiter.  The peer receives
-      // the standard parse error and can continue using the same process.
+      // Drop this frame through its next delimiter.  Keep explicit discard
+      // state across chunks so no suffix of the rejected frame can execute.
       this.buffer = '';
+      this.discardingOversizedFrame = true;
       this.#writeParseError();
     }
   }
@@ -182,4 +196,3 @@ export function runStdio(gateway, options = {}) {
     input.once?.('close', done);
   });
 }
-

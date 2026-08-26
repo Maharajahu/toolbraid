@@ -12,13 +12,13 @@ import { SecurityError } from "./errors.js";
 const EFFECTS = new Set(["allow", "deny"]);
 const VALUE_FIELDS = Object.freeze([
   ["tenantId", "tenantIds"],
-  ["subjectId", "subjectIds"],
-  ["workflowId", "workflowIds"],
+  ["subjectId", "subjectIds", ["subject"]],
+  ["workflowId", "workflowIds", ["runId"]],
   ["nodeId", "nodeIds"],
   ["origin", "origins"],
-  ["adapter", "adapters"],
-  ["capability", "capabilities"],
-  ["action", "actions"],
+  ["adapter", "adapters", ["adapterId"]],
+  ["capability", "capabilities", ["capabilityId"]],
+  ["action", "actions", ["operation"]],
 ]);
 
 /**
@@ -120,7 +120,12 @@ export class PolicyEngine {
       // Recompute argsHash inside the authority from the original request;
       // passing only the normalized hash here would allow a caller to present
       // a hash-only binding that the authority cannot independently validate.
-      const verified = this.#approvalAuthority.verify(request, approval);
+      let verified;
+      try {
+        verified = this.#approvalAuthority.verify(request, approval);
+      } catch {
+        verified = { ok: false, code: "APPROVAL_INVALID" };
+      }
       if (!verified || verified.ok !== true) {
         const result = denial(verified?.code ?? "APPROVAL_INVALID", "Trusted approval is missing or invalid.");
         this.#auditDecision(normalized, result);
@@ -154,12 +159,22 @@ export class PolicyEngine {
   authorize(request) {
     const preflight = this.evaluate(request);
     if (!preflight.allowed) return preflight;
-    const normalized = normalizeRequest(request);
+    let normalized;
+    try {
+      normalized = normalizeRequest(request);
+    } catch {
+      return denial("INVALID_REQUEST", "Execution request is invalid.");
+    }
     if (!normalized.mutation) return { ...preflight, authorized: true };
 
     // As above, hand the authority the original argument object so the
     // canonical hash is recomputed at the trust boundary.
-    const consumed = this.#approvalAuthority.consume(request, this.#credential(request));
+    let consumed;
+    try {
+      consumed = this.#approvalAuthority.consume(request, this.#credential(request));
+    } catch {
+      consumed = { ok: false, code: "APPROVAL_INVALID" };
+    }
     if (!consumed || consumed.ok !== true || consumed.consumed !== true) {
       const result = denial(consumed?.code ?? "APPROVAL_INVALID", "Trusted approval could not be consumed.");
       this.#auditDecision(normalized, result);
@@ -201,14 +216,26 @@ export class PolicyEngine {
 
 export const SecurityPolicy = PolicyEngine;
 
+export function createPolicyEngine(options = {}) {
+  return new PolicyEngine(options);
+}
+
+export function evaluatePolicy(engineOrInput, maybeInput) {
+  if (engineOrInput instanceof PolicyEngine) return engineOrInput.evaluate(maybeInput);
+  if (engineOrInput && typeof engineOrInput.evaluate === "function") return engineOrInput.evaluate(maybeInput);
+  return new PolicyEngine().evaluate(engineOrInput);
+}
+
 export function normalizeRequest(request) {
   if (request === null || typeof request !== "object" || Array.isArray(request)) {
     throw new SecurityError("INVALID_REQUEST", "Execution request must be an object.");
   }
   const binding = normalizeBinding(request, { requireArgs: true });
   const mutation = resolveMutation(request);
-  const capability = request.capability === undefined ? undefined : normalizeToken("capability", request.capability);
-  const action = request.action === undefined ? undefined : normalizeToken("action", request.action);
+  const capabilityValue = aliasedRequestValue(request, "capability", ["capabilityId"]);
+  const actionValue = aliasedRequestValue(request, "action", ["operation"]);
+  const capability = capabilityValue === undefined ? undefined : normalizeToken("capability", capabilityValue);
+  const action = actionValue === undefined ? undefined : normalizeToken("action", actionValue);
   if (capability === undefined && action === undefined) {
     throw new SecurityError("INVALID_REQUEST", "Execution request requires capability or action.");
   }
@@ -235,11 +262,18 @@ function normalizeRule(rule, index) {
   const id = rule.id === undefined ? `rule-${index + 1}` : normalizeToken("rule id", rule.id);
   const selectors = {};
   for (const [singular, plural] of VALUE_FIELDS) {
-    const supplied = Object.prototype.hasOwnProperty.call(rule, plural) ? rule[plural] : rule[singular];
+    const aliases = VALUE_FIELDS.find(([name]) => name === singular)?.[2] ?? [];
+    const supplied = firstDefinedProperty(rule, [plural, singular, ...aliases]);
     if (supplied !== undefined) selectors[plural] = normalizeSelector(plural, supplied, singular);
   }
   if (rule.argsHash !== undefined) selectors.argsHash = normalizeHash(rule.argsHash);
-  if (rule.args !== undefined) selectors.argsHash = canonicalHash(rule.args);
+  if (rule.args !== undefined) {
+    const computedArgsHash = canonicalHash(rule.args);
+    if (selectors.argsHash !== undefined && selectors.argsHash !== computedArgsHash) {
+      throw new SecurityError("INVALID_POLICY", `Rule ${index} argsHash does not match args.`);
+    }
+    selectors.argsHash = computedArgsHash;
+  }
   if (rule.mutation !== undefined) {
     if (typeof rule.mutation !== "boolean") throw new SecurityError("INVALID_POLICY", `Rule ${index} mutation must be boolean.`);
     selectors.mutation = rule.mutation;
@@ -319,6 +353,20 @@ function normalizeToken(name, value) {
 
 function hasAnySelector(selectors) {
   return Object.values(selectors).some((value) => value !== undefined);
+}
+
+function firstDefinedProperty(object, fields) {
+  const present = fields.filter((field) => Object.prototype.hasOwnProperty.call(object, field) && object[field] !== undefined);
+  if (present.length === 0) return undefined;
+  const value = object[present[0]];
+  for (const field of present.slice(1)) {
+    if (object[field] !== value) throw new SecurityError("INVALID_POLICY", `Conflicting ${present[0]} selectors.`);
+  }
+  return value;
+}
+
+function aliasedRequestValue(request, canonical, aliases) {
+  return firstDefinedProperty(request, [canonical, ...aliases]);
 }
 
 function denial(code, message, ruleId) {

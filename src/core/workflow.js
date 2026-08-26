@@ -214,7 +214,11 @@ export class WorkflowStore {
     const identity = requireIdentity(operation);
     const record = this.#ownedRecord(operation, identity);
     if (record.state !== 'awaiting_approval') throw new CoreError('WORKFLOW_STATE', 'Workflow is not awaiting approval');
-    this.#transitionRecord(record, 'running', { type: 'approval_resumed', nodeId: operation.nodeId });
+    const nodeId = requireNodeId(operation.nodeId);
+    if (record.awaitingApproval?.nodeId !== nodeId || record.nodeStates[nodeId]?.state !== 'awaiting_approval') {
+      throw new CoreError('APPROVAL_BINDING_MISMATCH', 'Approval does not match the node awaiting approval');
+    }
+    this.#transitionRecord(record, 'running', { type: 'approval_resumed', nodeId });
     record.awaitingApproval = null;
     return this.#public(record);
   }

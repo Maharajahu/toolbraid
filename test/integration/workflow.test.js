@@ -92,7 +92,12 @@ test('JSON-RPC tools/list exposes exactly the six public tools', async () => {
     jsonrpc: '2.0',
     id: 1,
     method: 'tools/list',
-    params: {},
+    params: {
+      _meta: {
+        'io.modelcontextprotocol/protocolVersion': '2026-07-28',
+        'io.modelcontextprotocol/clientCapabilities': {},
+      },
+    },
   });
   assert.deepEqual(response.result.tools.map(({ name }) => name), PUBLIC_TOOL_NAMES);
 
@@ -102,6 +107,5 @@ test('JSON-RPC tools/list exposes exactly the six public tools', async () => {
     method: 'tools/call',
     params: { name: 'approval.grant', arguments: {} },
   });
-  assert.equal(hidden.error.code, -32601);
+  assert.equal(hidden.error.code, -32602);
 });
-

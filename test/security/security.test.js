@@ -105,6 +105,23 @@ test("approval nonce is required, expires, and cannot be issued by consumers", (
   assert.equal(authority.consume(BASE, token).code, "APPROVAL_EXPIRED");
 });
 
+test("one-object approval records recompute aliases and consume exactly once", () => {
+  const { authority, issuer } = makeAuthority();
+  const { subjectId, adapter, ...baseAliases } = BASE;
+  const token = issuer.issue({
+    ...baseAliases,
+    subject: subjectId,
+    adapterId: adapter,
+  });
+  assert.equal(authority.verifyAndConsume({
+    ...baseAliases,
+    subject: BASE.subjectId,
+    adapterId: BASE.adapter,
+    approvalId: token.approvalId,
+    approvalNonce: token.nonce,
+  }).consumed, true);
+});
+
 test("policy requires explicit allow rules and trusted approval for mutations", () => {
   const { authority, issuer } = makeAuthority();
   const policy = new PolicyEngine({

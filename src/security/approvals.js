@@ -2,11 +2,9 @@ import { randomBytes as nodeRandomBytes, randomUUID, timingSafeEqual } from "nod
 import { AuditLog } from "./audit.js";
 import {
   BINDING_FIELDS,
-  bindingEquals,
   constantTimeStringEqual,
   normalizeBinding,
 } from "./binding.js";
-import { cloneCanonical } from "./canonical.js";
 import { SecurityError } from "./errors.js";
 
 const DEFAULT_TTL_MS = 2 * 60 * 1000;
@@ -79,6 +77,9 @@ export class ApprovalAuthority {
       grant(binding, options = {}) {
         return authority.#issue(authority.#issuerSecret, label, binding, options);
       },
+      issueApproval(binding, options = {}) {
+        return authority.#issue(authority.#issuerSecret, label, binding, options);
+      },
     });
   }
 
@@ -112,8 +113,9 @@ export class ApprovalAuthority {
   }
 
   /** Validate a credential without consuming its single-use nonce. */
-  verify(binding, credential, { now } = {}) {
-    return this.#check(binding, credential, false, now);
+  verify(bindingOrInput, credential, { now } = {}) {
+    const split = splitCheckInput(bindingOrInput, credential);
+    return this.#check(split.binding, split.credential, false, now);
   }
 
   /**
@@ -122,8 +124,14 @@ export class ApprovalAuthority {
    * update; a durable implementation must use an equivalent compare-and-swap
    * transaction on its backing store.
    */
-  consume(binding, credential, { now } = {}) {
-    return this.#check(binding, credential, true, now);
+  consume(bindingOrInput, credential, { now } = {}) {
+    const split = splitCheckInput(bindingOrInput, credential);
+    return this.#check(split.binding, split.credential, true, now);
+  }
+
+  /** One-object spelling used by stores plugged into execution brokers. */
+  verifyAndConsume(input) {
+    return this.consume(input);
   }
 
   #issue(secret, issuerLabel, bindingInput, options) {
@@ -196,6 +204,7 @@ export class ApprovalAuthority {
       return {
         ok: true,
         valid: true,
+        approved: true,
         approvalId: record.approvalId,
         expiresAt: record.expiresAt,
       };
@@ -212,6 +221,8 @@ export class ApprovalAuthority {
     });
     return {
       ok: true,
+      valid: true,
+      approved: true,
       consumed: true,
       approvalId: record.approvalId,
       expiresAt: record.expiresAt,
@@ -303,7 +314,8 @@ function currentTime(value) {
 
 function parseCredential(value) {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
-  const { approvalId, nonce } = value;
+  const approvalId = value.approvalId;
+  const nonce = value.nonce ?? value.approvalNonce;
   if (typeof approvalId !== "string" || !APPROVAL_ID_PATTERN.test(approvalId)) return null;
   if (typeof nonce !== "string" || !NONCE_PATTERN.test(nonce)) return null;
   return { approvalId, nonce };
@@ -329,6 +341,63 @@ function withoutArgs(binding) {
 }
 
 function failure(code, message) {
-  return { ok: false, valid: false, consumed: false, code, message };
+  return { ok: false, valid: false, approved: false, consumed: false, code, message };
 }
 
+function splitCheckInput(bindingOrInput, credential) {
+  if (credential !== undefined) return { binding: bindingOrInput, credential };
+  if (bindingOrInput === null || typeof bindingOrInput !== "object" || Array.isArray(bindingOrInput)) {
+    return { binding: bindingOrInput, credential: undefined };
+  }
+  const input = bindingOrInput;
+  const nestedBinding = input.binding;
+  if (nestedBinding !== undefined) {
+    // A one-object envelope is either `{ binding, approval }` or an inline
+    // binding.  Never let an attacker put an approved binding under `binding`
+    // while leaving different origin/adapter/args fields at the top level for
+    // the caller to execute.  Treat the mixed shape as invalid instead of
+    // guessing which copy is authoritative.
+    const hasInlineBinding = [
+      "tenantId",
+      "subjectId",
+      "subject",
+      "userId",
+      "workflowId",
+      "runId",
+      "revision",
+      "nodeId",
+      "origin",
+      "siteOrigin",
+      "adapter",
+      "adapterId",
+      "args",
+      "argsHash",
+      "argumentHash",
+      "canonicalArgsHash",
+    ].some((field) => Object.prototype.hasOwnProperty.call(input, field));
+    return {
+      binding: hasInlineBinding ? null : nestedBinding,
+      credential: input.approval ?? input.approvalRef ?? input.credential ?? input.token,
+    };
+  }
+  const hasInlineCredential = input.approval !== undefined
+    || input.approvalRef !== undefined
+    || input.credential !== undefined
+    || input.token !== undefined
+    || input.approvalId !== undefined
+    || input.approvalNonce !== undefined;
+  if (!hasInlineCredential) return { binding: input, credential: undefined };
+  const {
+    approval,
+    approvalRef,
+    credential: inline,
+    token,
+    approvalId,
+    approvalNonce,
+    nonce,
+    ...binding
+  } = input;
+  let reference = approval ?? approvalRef ?? inline ?? token;
+  if (reference === undefined && approvalId !== undefined) reference = { approvalId, nonce: nonce ?? approvalNonce };
+  return { binding, credential: reference };
+}

@@ -35,7 +35,16 @@ export function createWebMcpAdapter(spec = {}) {
   }
   const manifestOrigins = manifest?.origin === undefined ? undefined : [manifest.origin];
   const origins = input.origins ?? (input.origin === undefined ? manifestOrigins : undefined);
-  if (manifest !== undefined) validateManifest({ manifest, origins: origins?.map((origin) => normalizeOrigin({ origin })) });
+  if (input.metadata !== undefined && !isJsonSafe({ value: input.metadata })) {
+    throw new AdapterContractError({ code: 'WEBMCP_METADATA_INVALID', message: 'WebMCP adapter metadata must be JSON-safe.' });
+  }
+  if (manifest !== undefined) {
+    const normalizedOrigins = origins?.map((entry) => normalizeOrigin({ origin: entry }));
+    validateManifest({ manifest, origins: normalizedOrigins });
+    if (input.origin !== undefined && manifest.origin !== undefined && normalizeOrigin({ origin: input.origin }) !== normalizeOrigin({ origin: manifest.origin })) {
+      throw new AdapterContractError({ code: 'ADAPTER_ORIGIN_MISMATCH', message: 'WebMCP manifest origin does not match the adapter binding.' });
+    }
+  }
   const capabilities = input.capabilities ?? input.operations ?? manifest?.capabilities;
   return createAdapter({
     ...input,
@@ -52,3 +61,6 @@ export function createWebMcpAdapter(spec = {}) {
   });
 }
 
+export const WebMcpAdapter = createWebMcpAdapter;
+export const WebMCPAdapter = createWebMcpAdapter;
+export const createWebMCPAdapter = createWebMcpAdapter;

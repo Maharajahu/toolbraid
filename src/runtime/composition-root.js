@@ -1,9 +1,11 @@
 import { createHash } from 'node:crypto';
 
+import { getToolDefinitions } from '../mcp/tools.js';
 import {
   FIXTURE_IDS,
   createFixtureDependencies,
 } from './fixtures.js';
+import { createCoreServices } from './services.js';
 
 /** The only names that may be exposed through the MCP transport. */
 export const PUBLIC_TOOL_NAMES = Object.freeze([
@@ -20,103 +22,7 @@ export const PUBLIC_TOOL_NAMES = Object.freeze([
  * does the same validation for direct calls, so transport choice cannot become
  * a policy bypass.
  */
-export const PUBLIC_TOOL_DEFINITIONS = Object.freeze([
-  Object.freeze({
-    name: 'capabilities.search',
-    description: 'Search semantic capabilities available to an explicit tenant and subject.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        tenantId: { type: 'string' },
-        subject: { type: 'string' },
-        origin: { type: 'string' },
-        query: { type: 'string' },
-        limit: { type: 'integer', minimum: 1, maximum: 100 },
-      },
-      required: ['tenantId', 'subject'],
-      additionalProperties: false,
-    },
-  }),
-  Object.freeze({
-    name: 'capabilities.describe',
-    description: 'Describe one semantic capability for an explicit tenant and subject.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        tenantId: { type: 'string' },
-        subject: { type: 'string' },
-        origin: { type: 'string' },
-        capabilityId: { type: 'string' },
-        id: { type: 'string' },
-      },
-      required: ['tenantId', 'subject'],
-      additionalProperties: false,
-    },
-  }),
-  Object.freeze({
-    name: 'plan.propose',
-    description: 'Create a reviewable workflow plan from semantic capabilities.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        tenantId: { type: 'string' },
-        subject: { type: 'string' },
-        origin: { type: 'string' },
-        request: { type: 'object' },
-        goal: { type: 'string' },
-        nodes: { type: 'array' },
-      },
-      required: ['tenantId', 'subject'],
-      additionalProperties: true,
-    },
-  }),
-  Object.freeze({
-    name: 'workflow.execute',
-    description: 'Execute safe nodes and continue an approved workflow.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        tenantId: { type: 'string' },
-        subject: { type: 'string' },
-        workflowId: { type: 'string' },
-        id: { type: 'string' },
-        revision: { type: 'integer' },
-      },
-      required: ['tenantId', 'subject'],
-      additionalProperties: true,
-    },
-  }),
-  Object.freeze({
-    name: 'workflow.status',
-    description: 'Read workflow state and recorded outputs.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        tenantId: { type: 'string' },
-        subject: { type: 'string' },
-        workflowId: { type: 'string' },
-        id: { type: 'string' },
-      },
-      required: ['tenantId', 'subject'],
-      additionalProperties: true,
-    },
-  }),
-  Object.freeze({
-    name: 'workflow.replay_readonly',
-    description: 'Replay only recorded read-only workflow nodes.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        tenantId: { type: 'string' },
-        subject: { type: 'string' },
-        workflowId: { type: 'string' },
-        id: { type: 'string' },
-      },
-      required: ['tenantId', 'subject'],
-      additionalProperties: true,
-    },
-  }),
-]);
+export const PUBLIC_TOOL_DEFINITIONS = Object.freeze(getToolDefinitions().map((definition) => deepFreeze(definition)));
 
 const PUBLIC_TOOL_SET = new Set(PUBLIC_TOOL_NAMES);
 const UNSAFE_CAPABILITY_WORDS = /(?:^|[._:/-])(click|shell|exec|execute|javascript|eval|raw|cookie|filesystem|fs)(?:$|[._:/-])/i;
@@ -165,7 +71,7 @@ export function createCompositionRoot(options = {}) {
 
   const identity = normalizeIdentity(source.identity || {
     tenantId: source.tenantId,
-    subject: source.subject,
+    subject: source.subject || source.subjectId,
     origin: source.origin,
   }, { allowMissing: true });
   const idFactory = typeof source.idFactory === 'function'
@@ -182,15 +88,26 @@ export function createCompositionRoot(options = {}) {
 
   const workflows = new Map();
   const trustedApprovals = new Map();
+  const pendingApprovalNonces = new Set();
+  const executingWorkflows = new Set();
   const auditRecords = [];
+  const coreServices = source.services || source.coreServices || (source.withCore === true || source.core === true
+    ? createCoreServices({
+      ...source,
+      identity,
+      capabilities: source.capabilities || [...capabilityIndex.values()],
+      adapters,
+      clock: now,
+    })
+    : null);
   const external = {
-    catalog: source.catalog,
-    planner: source.planner,
-    workflow: source.workflow || source.workflowStore,
-    broker: source.broker || source.executionBroker,
-    policy: source.policy || source.policyEngine,
-    approvals: source.approvals || source.approvalStore,
-    audit: source.audit || source.auditLog,
+    catalog: source.catalog || coreServices?.catalog,
+    planner: source.planner || coreServices?.planner,
+    workflow: source.workflow || source.workflowStore || coreServices?.workflowStore,
+    broker: source.broker || source.executionBroker || coreServices?.broker,
+    policy: source.policy || source.policyEngine || coreServices?.policy,
+    approvals: source.approvals || source.approvalStore || coreServices?.approvalAuthority,
+    audit: source.audit || source.auditLog || coreServices?.audit,
     hasher: source.hasher || source.canonicalHasher,
   };
 
@@ -201,6 +118,21 @@ export function createCompositionRoot(options = {}) {
     workflows,
     trustedApprovals,
     auditRecords,
+    // A host can inspect these references to integrate a durable implementation
+    // without reaching into the protocol layer.  The runtime only calls the
+    // narrow methods documented by each neighboring module.
+    services: {
+      catalog: external.catalog,
+      planner: external.planner,
+      workflow: external.workflow,
+      broker: external.broker,
+      policy: external.policy,
+      approvals: external.approvals,
+      audit: external.audit,
+      adapters,
+    },
+    core: coreServices,
+    approvalIssuer: coreServices?.approvalIssuer,
     publicToolNames: PUBLIC_TOOL_NAMES,
     publicToolDefinitions: PUBLIC_TOOL_DEFINITIONS,
 
@@ -288,6 +220,7 @@ export function createCompositionRoot(options = {}) {
     const payload = normalizeSearchResult(result, query);
     payload.tenantId = request.tenantId;
     payload.subject = request.subject;
+    payload.subjectId = request.subjectId;
     if (request.origin) payload.origin = request.origin;
     return cloneJson(payload);
   }
@@ -331,6 +264,7 @@ export function createCompositionRoot(options = {}) {
       ...cloneJson(normalized),
       tenantId: request.tenantId,
       subject: request.subject,
+      subjectId: request.subjectId,
       ...(request.origin ? { origin: request.origin } : {}),
     };
   }
@@ -363,6 +297,21 @@ export function createCompositionRoot(options = {}) {
 
   async function executeWorkflow(input = {}) {
     const requestIdentity = assertRequestIdentity(input, identity);
+    for (const key of [
+      'approval',
+      'approvals',
+      'approvalId',
+      'approvalNonce',
+      'approvalRecord',
+      'approvalToken',
+      'credential',
+      'nonce',
+      'token',
+    ]) {
+      if (input[key] !== undefined) {
+        throw new RuntimeError('UNTRUSTED_APPROVAL', 'Approvals must come from the trusted server-side approval store');
+      }
+    }
     const workflowId = String(input.workflowId || input.id || '').trim();
     if (!workflowId) {
       throw new RuntimeError('INVALID_ARGUMENT', 'workflowId is required', {
@@ -376,11 +325,17 @@ export function createCompositionRoot(options = {}) {
       });
     }
     assertWorkflowIdentity(record, requestIdentity);
-    if (input.revision !== undefined && Number(input.revision) !== record.revision) {
-      throw new RuntimeError('WORKFLOW_REVISION_MISMATCH', 'Workflow revision does not match the proposed plan', {
-        details: { expected: record.revision, received: Number(input.revision) },
-      });
+    const executionKey = `${record.tenantId}|${record.subject}|${record.workflowId}|${record.revision}`;
+    if (executingWorkflows.has(executionKey)) {
+      throw new RuntimeError('WORKFLOW_BUSY', 'Workflow execution is already in progress', { retryable: true });
     }
+    executingWorkflows.add(executionKey);
+    try {
+      if (input.revision !== undefined && requestedRevision(input.revision) !== record.revision) {
+        throw new RuntimeError('WORKFLOW_REVISION_MISMATCH', 'Workflow revision does not match the proposed plan', {
+          details: { expected: record.revision },
+        });
+      }
 
     // A completed workflow is idempotent.  It must never run a mutation a
     // second time merely because workflow.execute was called again.
@@ -499,7 +454,10 @@ export function createCompositionRoot(options = {}) {
       workflowId: record.workflowId,
       revision: record.revision,
     });
-    return executionResult(record);
+      return executionResult(record);
+    } finally {
+      executingWorkflows.delete(executionKey);
+    }
   }
 
   async function workflowStatus(input = {}) {
@@ -517,6 +475,7 @@ export function createCompositionRoot(options = {}) {
       });
     }
     assertWorkflowIdentity(record, requestIdentity);
+    assertRequestedRevision(input.revision, record);
     return publicWorkflow(record);
   }
 
@@ -535,12 +494,39 @@ export function createCompositionRoot(options = {}) {
       });
     }
     assertWorkflowIdentity(record, requestIdentity);
+    assertRequestedRevision(input.revision, record);
+    const requestedNodeIds = normalizeReplayNodeIds(input.nodeIds);
+    const replayLimit = normalizeReplayLimit(input.limit);
+    const byNodeId = new Map(record.nodes.map((node) => [node.nodeId, node]));
+    if (requestedNodeIds) {
+      // Validate the entire request before invoking any adapter.  A mixed
+      // read/mutation list must fail atomically rather than replaying a prefix.
+      for (const nodeId of requestedNodeIds) {
+        const node = byNodeId.get(nodeId);
+        if (!node) throw new RuntimeError('REPLAY_NOT_AVAILABLE', `Node is not recorded: ${nodeId}`);
+        const capability = capabilityIndex.get(node.capabilityId) || node;
+        if (node.readOnly !== true || capability.readOnly !== true ||
+            isMutationMode(node.mode) || isMutationMode(node.kind) ||
+            isMutationMode(capability.mode) || isMutationMode(capability.kind)) {
+          throw new RuntimeError('REPLAY_MUTATION_FORBIDDEN', `Mutation node cannot be replayed: ${nodeId}`);
+        }
+      }
+    }
     const replayedNodes = [];
-    for (const node of record.nodes) {
+    const selectedNodes = requestedNodeIds
+      ? requestedNodeIds.map((nodeId) => byNodeId.get(nodeId))
+      : record.nodes;
+    for (const node of selectedNodes) {
+      if (replayedNodes.length >= replayLimit) break;
       const capability = capabilityIndex.get(node.capabilityId) || node;
-      if (!isReadOnlyNode(node, capability)) continue;
       const prior = record.outputs.find((entry) => entry.nodeId === node.nodeId);
-      if (!prior) continue;
+      // Replay is permitted only when the stored plan, current catalog, and
+      // original execution record independently agree that the node was
+      // read-only.  A single tampered flag must never turn a recorded mutation
+      // into an approval-free replay.
+      if (!prior || prior.readOnly !== true || node.readOnly !== true || capability.readOnly !== true ||
+          isMutationMode(node.mode) || isMutationMode(node.kind) ||
+          isMutationMode(capability.mode) || isMutationMode(capability.kind)) continue;
       // Re-run only semantic read nodes.  No approval is consulted and no
       // mutation node is ever handed to an adapter during replay.
       try {
@@ -587,24 +573,35 @@ export function createCompositionRoot(options = {}) {
     }
     const bound = {
       tenantId: String(candidate.tenantId || ''),
-      subject: String(candidate.subject || candidate.userId || ''),
+      subject: String(candidate.subject || candidate.subjectId || candidate.userId || ''),
+      subjectId: String(candidate.subjectId || candidate.subject || candidate.userId || ''),
       workflowId,
       revision: Number(candidate.revision),
       nodeId: String(candidate.nodeId || ''),
       origin: String(candidate.origin || ''),
+      adapterId: String(candidate.adapterId || candidate.adapter || ''),
+      capabilityId: String(candidate.capabilityId || candidate.action || ''),
+      capabilityVersion: String(candidate.capabilityVersion || candidate.version || ''),
       canonicalArgsHash: String(candidate.canonicalArgsHash || candidate.argsHash || ''),
       nonce: String(candidate.nonce || ''),
       expiresAt: candidate.expiresAt,
     };
     assertWorkflowIdentity(record, bound);
-    if (!bound.nodeId || !bound.nonce || !bound.canonicalArgsHash || !bound.origin || !Number.isInteger(bound.revision)) {
-      throw new RuntimeError('INVALID_APPROVAL', 'Approval must bind workflow, revision, node, origin, hash and nonce');
+    if (!bound.nodeId || !bound.nonce || !bound.canonicalArgsHash || !bound.origin ||
+        !bound.adapterId || !bound.capabilityId || !Number.isInteger(bound.revision)) {
+      throw new RuntimeError('INVALID_APPROVAL', 'Approval must bind workflow, revision, node, origin, adapter, capability, hash and nonce');
     }
     if (bound.revision !== record.revision) {
       throw new RuntimeError('APPROVAL_BINDING_MISMATCH', 'Approval revision does not match the workflow revision');
     }
     const node = record.nodes.find((entry) => entry.nodeId === bound.nodeId);
     if (!node) throw new RuntimeError('APPROVAL_BINDING_MISMATCH', 'Approval node is not in the workflow');
+    const expectedAdapterId = adapterBinding(node, record.origin);
+    const expectedCapabilityVersion = String(node.capabilityVersion || capabilityIndex.get(node.capabilityId)?.version || '');
+    if (bound.adapterId !== expectedAdapterId || bound.capabilityId !== node.capabilityId ||
+        bound.capabilityVersion !== expectedCapabilityVersion) {
+      throw new RuntimeError('APPROVAL_BINDING_MISMATCH', 'Approval adapter or capability does not match the planned node');
+    }
     const expectedHash = await canonicalArgsHash(node.args, external.hasher);
     if (expectedHash !== bound.canonicalArgsHash) {
       throw new RuntimeError('APPROVAL_BINDING_MISMATCH', 'Approval arguments do not match the planned node', {
@@ -619,7 +616,7 @@ export function createCompositionRoot(options = {}) {
       throw new RuntimeError('APPROVAL_EXPIRED', 'Approval has expired');
     }
     const key = approvalKey(bound);
-    if (trustedApprovals.has(key)) {
+    if (trustedApprovals.has(key) || pendingApprovalNonces.has(key)) {
       throw new RuntimeError('APPROVAL_NONCE_REUSED', 'Approval nonce has already been injected');
     }
     const trusted = {
@@ -630,8 +627,13 @@ export function createCompositionRoot(options = {}) {
       injectedAt: nowIso(now),
       consumed: false,
     };
-    await persistApproval(external.approvals, trusted);
-    trustedApprovals.set(key, trusted);
+    pendingApprovalNonces.add(key);
+    try {
+      await persistApproval(external.approvals, trusted);
+      trustedApprovals.set(key, trusted);
+    } finally {
+      pendingApprovalNonces.delete(key);
+    }
     record.pendingApproval = undefined;
     await appendAudit({
       event: 'workflow.approval.injected',
@@ -667,6 +669,8 @@ export function createCompositionRoot(options = {}) {
       if (approval.tenantId !== record.tenantId || approval.subject !== record.subject) continue;
       if (approval.workflowId !== record.workflowId || approval.revision !== record.revision) continue;
       if (approval.nodeId !== node.nodeId || approval.origin !== record.origin) continue;
+      if (approval.adapterId !== adapterBinding(node, record.origin) || approval.capabilityId !== node.capabilityId) continue;
+      if (approval.capabilityVersion !== String(node.capabilityVersion || capabilityIndex.get(node.capabilityId)?.version || '')) continue;
       if (approval.canonicalArgsHash !== expectedHash) continue;
       return approval;
     }
@@ -744,9 +748,15 @@ export function createCompositionRoot(options = {}) {
     return candidates[0] || (id ? undefined : adapters[0]);
   }
 
+  function adapterBinding(node, origin) {
+    const adapter = selectAdapter(node, origin);
+    return String(node.adapterId || node.adapter || adapter?.id || adapter?.name || '');
+  }
+
   function makeApprovalRequest(record, node) {
     const hash = canonicalArgsHash(node.args, external.hasher);
     const expiresAt = new Date(now().getTime() + 5 * 60 * 1000).toISOString();
+    const capabilityVersion = String(node.capabilityVersion || capabilityIndex.get(node.capabilityId)?.version || '');
     return {
       tenantId: record.tenantId,
       subject: record.subject,
@@ -754,6 +764,10 @@ export function createCompositionRoot(options = {}) {
       revision: record.revision,
       nodeId: node.nodeId,
       origin: record.origin,
+      adapterId: adapterBinding(node, record.origin),
+      adapter: adapterBinding(node, record.origin),
+      capabilityId: node.capabilityId,
+      capabilityVersion,
       canonicalArgsHash: hash,
       argsHash: hash,
       expiresAt,
@@ -849,11 +863,37 @@ function normalizePlan(plan, identity, request, resolveCapability = () => undefi
       });
     }
     const metadata = resolveCapability(capabilityId);
-    const mode = candidate.mode || candidate.kind || metadata?.mode || metadata?.kind || (candidate.readOnly === false ? 'mutation' : 'read');
-    const readOnly = candidate.readOnly !== undefined ? candidate.readOnly === true : !isMutationMode(mode);
+    if (candidate.readOnly !== undefined && typeof candidate.readOnly !== 'boolean') {
+      throw new RuntimeError('INVALID_PLAN', `Node ${capabilityId} readOnly must be boolean`);
+    }
+    if (candidate.mutates !== undefined && typeof candidate.mutates !== 'boolean') {
+      throw new RuntimeError('INVALID_PLAN', `Node ${capabilityId} mutates must be boolean`);
+    }
+    const requestedMode = candidate.mode ?? candidate.kind;
+    const modeReadOnly = requestedMode === undefined ? undefined : readOnlyForMode(requestedMode, capabilityId);
+    const declaredReadOnly = candidate.readOnly !== undefined
+      ? candidate.readOnly
+      : candidate.mutates !== undefined
+        ? !candidate.mutates
+        : modeReadOnly;
+    if (candidate.readOnly !== undefined && candidate.mutates !== undefined && candidate.readOnly === candidate.mutates) {
+      throw new RuntimeError('INVALID_PLAN', `Node ${capabilityId} has conflicting mutability flags`);
+    }
+    if (declaredReadOnly !== undefined && modeReadOnly !== undefined && declaredReadOnly !== modeReadOnly) {
+      throw new RuntimeError('INVALID_PLAN', `Node ${capabilityId} mode conflicts with mutability flags`);
+    }
+    const catalogReadOnly = metadata?.readOnly;
+    if (typeof catalogReadOnly === 'boolean' && declaredReadOnly !== undefined && declaredReadOnly !== catalogReadOnly) {
+      throw new RuntimeError('INVALID_PLAN', `Node ${capabilityId} mutability disagrees with the capability catalog`);
+    }
+    // Unknown capability metadata cannot default to read-only.  A trusted
+    // adapter/catalog may explicitly declare a read operation; ambiguity is a
+    // mutation so the approval boundary fails closed.
+    const readOnly = typeof catalogReadOnly === 'boolean' ? catalogReadOnly : declaredReadOnly === true;
     return {
       nodeId: String(candidate.nodeId || candidate.id || `node-${index + 1}`),
       capabilityId,
+      capabilityVersion: String(candidate.capabilityVersion || candidate.version || metadata?.version || ''),
       operation: String(candidate.operation || capabilityId),
       args: cloneJson(candidate.args || candidate.arguments || {}),
       adapterId: candidate.adapterId,
@@ -862,7 +902,7 @@ function normalizePlan(plan, identity, request, resolveCapability = () => undefi
       mode: readOnly ? 'read' : 'mutation',
       kind: readOnly ? 'read' : 'mutation',
       readOnly,
-      requiresApproval: candidate.requiresApproval !== undefined ? candidate.requiresApproval === true : !readOnly,
+      requiresApproval: !readOnly,
       risk: candidate.risk || metadata?.risk || (readOnly ? 'low' : 'high'),
       status: 'pending',
     };
@@ -874,7 +914,8 @@ function normalizePlan(plan, identity, request, resolveCapability = () => undefi
     id: String(source.workflowId || source.id || ''),
     workflowId: String(source.workflowId || source.id || ''),
     tenantId: String(source.tenantId || identity.tenantId),
-    subject: String(source.subject || identity.subject),
+    subject: String(source.subject || source.subjectId || identity.subject),
+    subjectId: String(source.subjectId || source.subject || identity.subjectId || identity.subject),
     origin: String(source.origin || identity.origin || ''),
     revision: Number.isInteger(Number(source.revision)) ? Number(source.revision) : 1,
     request: cloneJson(source.request || request),
@@ -896,7 +937,8 @@ function createWorkflowRecord(plan, identity, request, idFactory = createSequenc
     workflowId,
     id: workflowId,
     tenantId: plan.tenantId || identity.tenantId,
-    subject: plan.subject || identity.subject,
+    subject: plan.subject || plan.subjectId || identity.subject,
+    subjectId: plan.subjectId || plan.subject || identity.subjectId || identity.subject,
     origin: plan.origin || identity.origin || '',
     revision: plan.revision || 1,
     status: 'proposed',
@@ -944,9 +986,10 @@ function normalizeIdentity(value = {}, options = {}) {
   const source = value && typeof value === 'object' ? value : {};
   const identity = {
     tenantId: String(source.tenantId || '').trim(),
-    subject: String(source.subject || source.userId || '').trim(),
+    subject: String(source.subject || source.subjectId || source.userId || '').trim(),
     origin: String(source.origin || '').trim(),
   };
+  identity.subjectId = identity.subject;
   if (options.allowMissing) return identity;
   if (!identity.tenantId || !identity.subject) {
     throw new RuntimeError('IDENTITY_REQUIRED', 'tenantId and subject must be explicit');
@@ -955,16 +998,47 @@ function normalizeIdentity(value = {}, options = {}) {
 }
 
 function assertRequestIdentity(input, configured) {
-  const source = input && typeof input === 'object' ? input : {};
-  const identity = normalizeIdentity({
-    tenantId: source.tenantId || source.context?.tenantId || configured?.tenantId,
-    subject: source.subject || source.userId || source.context?.subject || configured?.subject,
-    origin: source.origin || source.context?.origin || configured?.origin,
-  }, { allowMissing: true });
+  const source = input && typeof input === 'object' && !Array.isArray(input) ? input : {};
+  const nested = source.identity === undefined ? {} : requireIdentityRecord(source.identity, 'identity');
+  const context = source.context === undefined ? {} : requireIdentityRecord(source.context, 'context');
+  const tenantId = consistentExplicitValue('tenantId', [source.tenantId, nested.tenantId, context.tenantId]);
+  const subject = consistentExplicitValue('subject', [
+    source.subject,
+    source.subjectId,
+    source.userId,
+    nested.subject,
+    nested.subjectId,
+    nested.userId,
+    context.subject,
+    context.subjectId,
+    context.userId,
+  ]);
+  const origin = consistentExplicitValue('origin', [source.origin, nested.origin, context.origin], { required: false });
+  const identity = normalizeIdentity({ tenantId, subject, origin }, { allowMissing: true });
   if (!identity.tenantId || !identity.subject) {
     throw new RuntimeError('IDENTITY_REQUIRED', 'tenantId and subject must be explicit');
   }
   return identity;
+}
+
+function requireIdentityRecord(value, field) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new RuntimeError('INVALID_IDENTITY', `${field} must be an object`);
+  }
+  return value;
+}
+
+function consistentExplicitValue(field, candidates, { required = true } = {}) {
+  const values = candidates.filter((value) => value !== undefined);
+  if (values.length === 0) return required ? '' : undefined;
+  if (values.some((value) => typeof value !== 'string' || value.length === 0 || value.length > 2048 ||
+      value.trim() !== value || /[\u0000-\u001f\u007f]/u.test(value))) {
+    throw new RuntimeError('INVALID_IDENTITY', `${field} is invalid`);
+  }
+  if (!values.every((value) => value === values[0])) {
+    throw new RuntimeError('INVALID_IDENTITY', `Conflicting ${field} values`);
+  }
+  return values[0];
 }
 
 function assertWorkflowIdentity(record, identity) {
@@ -972,6 +1046,46 @@ function assertWorkflowIdentity(record, identity) {
       (identity.origin && record.origin && identity.origin !== record.origin)) {
     throw new RuntimeError('IDENTITY_MISMATCH', 'Workflow identity does not match the explicit request identity');
   }
+}
+
+function requestedRevision(value) {
+  if (typeof value === 'number' && Number.isSafeInteger(value) && value > 0) return value;
+  if (typeof value === 'string' && /^[1-9]\d{0,9}$/.test(value)) {
+    const parsed = Number(value);
+    if (Number.isSafeInteger(parsed)) return parsed;
+  }
+  throw new RuntimeError('WORKFLOW_REVISION_MISMATCH', 'Workflow revision is invalid');
+}
+
+function assertRequestedRevision(value, record) {
+  if (value !== undefined && requestedRevision(value) !== record.revision) {
+    throw new RuntimeError('WORKFLOW_REVISION_MISMATCH', 'Workflow revision does not match the proposed plan', {
+      details: { expected: record.revision },
+    });
+  }
+}
+
+function normalizeReplayNodeIds(value) {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || value.length === 0 || value.length > 100) {
+    throw new RuntimeError('INVALID_REPLAY', 'nodeIds must be a non-empty array of at most 100 node ids');
+  }
+  const result = [];
+  for (const nodeId of value) {
+    if (typeof nodeId !== 'string' || !nodeId || nodeId.length > 128) {
+      throw new RuntimeError('INVALID_REPLAY', 'nodeIds contains an invalid node id');
+    }
+    if (!result.includes(nodeId)) result.push(nodeId);
+  }
+  return result;
+}
+
+function normalizeReplayLimit(value) {
+  if (value === undefined) return 100;
+  if (!Number.isSafeInteger(value) || value < 1 || value > 100) {
+    throw new RuntimeError('INVALID_REPLAY', 'limit must be an integer from 1 to 100');
+  }
+  return value;
 }
 
 function normalizeCapabilities(value, adapters) {
@@ -993,8 +1107,27 @@ function normalizeCapabilities(value, adapters) {
 function normalizeCapability(value, fallbackOrigin) {
   const source = value && typeof value === 'object' ? value : { id: value };
   const id = String(source.id || source.capabilityId || source.name || '').trim();
-  const mode = source.mode || source.kind || (source.readOnly === false ? 'mutation' : 'read');
-  const readOnly = source.readOnly !== undefined ? source.readOnly === true : !isMutationMode(mode);
+  if (!id || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(id)) {
+    throw new RuntimeError('INVALID_CAPABILITY', 'Capability id is invalid');
+  }
+  if (UNSAFE_CAPABILITY_WORDS.test(id)) {
+    throw new RuntimeError('CAPABILITY_NOT_ALLOWED', 'Raw or unsafe primitives are not discoverable capabilities', {
+      details: { capabilityId: id },
+    });
+  }
+  const hasMode = source.mode !== undefined || source.kind !== undefined;
+  if (source.readOnly === undefined && source.mutates === undefined && !hasMode) {
+    throw new RuntimeError('INVALID_CAPABILITY', `Capability ${id} must declare mutability explicitly`);
+  }
+  const mode = source.mode || source.kind || (source.readOnly === false || source.mutates === true ? 'mutation' : 'read');
+  const readOnly = source.readOnly !== undefined
+    ? source.readOnly === true
+    : source.mutates !== undefined
+      ? source.mutates !== true
+      : readOnlyForMode(String(mode), id);
+  if (source.mutates !== undefined && (source.mutates === true) === readOnly) {
+    throw new RuntimeError('INVALID_CAPABILITY', `Capability ${id} has conflicting mutability flags`);
+  }
   return {
     ...cloneJson(source),
     id,
@@ -1042,6 +1175,16 @@ function isMutationMode(mode) {
   return /mutation|write|destructive|side.?effect/i.test(String(mode || ''));
 }
 
+function readOnlyForMode(mode, capabilityId) {
+  if (typeof mode !== 'string') {
+    throw new RuntimeError('INVALID_PLAN', `Node ${capabilityId} mode must be a string`);
+  }
+  const normalized = mode.toLowerCase();
+  if (normalized === 'read' || normalized === 'readonly' || normalized === 'read_only') return true;
+  if (isMutationMode(normalized)) return false;
+  throw new RuntimeError('INVALID_PLAN', `Node ${capabilityId} mode is not recognized`);
+}
+
 function isReadOnlyNode(node, capability) {
   if (node.readOnly !== undefined) return node.readOnly === true;
   if (node.mode !== undefined) return !isMutationMode(node.mode);
@@ -1080,7 +1223,9 @@ function normalizeExpiry(value, fallbackDate) {
 }
 
 function approvalKey(approval) {
-  return [approval.workflowId, approval.revision, approval.nodeId, approval.nonce].join('|');
+  // Nonces are globally single use inside this authority, not merely unique
+  // within one workflow/node tuple.
+  return approval.nonce;
 }
 
 async function persistApproval(store, approval) {
@@ -1143,7 +1288,9 @@ function createSequenceIdFactory(prefix) {
 }
 
 function redactSecrets(value, seen = new Set()) {
-  if (value === null || typeof value !== 'object') return value;
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return value;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : '[UNSERIALIZABLE]';
+  if (typeof value !== 'object') return '[UNSERIALIZABLE]';
   if (seen.has(value)) return '[Circular]';
   seen.add(value);
   let output;
@@ -1174,6 +1321,13 @@ function cloneJson(value, seen = new Set()) {
   }
   seen.delete(value);
   return result;
+}
+
+function deepFreeze(value, seen = new Set()) {
+  if (!value || typeof value !== 'object' || seen.has(value)) return value;
+  seen.add(value);
+  for (const child of Object.values(value)) deepFreeze(child, seen);
+  return Object.freeze(value);
 }
 
 function toRuntimeError(error, fallbackCode = 'RUNTIME_ERROR', fallbackMessage = 'Runtime operation failed') {

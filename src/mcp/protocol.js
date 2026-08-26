@@ -68,8 +68,9 @@ export function hasOwn(value, key) {
 
 export function isRequestId(value) {
   // MCP RequestId is string | number and JSON-RPC disallows null.  MCP's
-  // base protocol further narrows numeric IDs to integers.
-  return (typeof value === 'string' && value.length > 0) || INTEGER_ID(value);
+  // base protocol further narrows numeric IDs to integers.  Empty strings are
+  // still strings and are therefore retained for wire compatibility.
+  return typeof value === 'string' || INTEGER_ID(value);
 }
 
 export function isJsonValue(value, seen = new Set()) {
@@ -93,10 +94,10 @@ export function isJsonValue(value, seen = new Set()) {
 }
 
 export function cloneJson(value) {
+  if (value === undefined) return undefined;
   if (!isJsonValue(value)) {
     throw new TypeError('Value is not JSON-safe');
   }
-  if (value === undefined) return undefined;
   return JSON.parse(JSON.stringify(value));
 }
 
@@ -191,7 +192,7 @@ export function classifyMessage(message) {
     throw new ProtocolError(
       JSON_RPC_ERROR_CODES.INVALID_REQUEST,
       'Invalid Request',
-      { reason: 'id must be a non-empty string or integer' },
+      { reason: 'id must be a string or integer' },
     );
   }
 
@@ -325,7 +326,7 @@ export function validateRequestMetadata(params) {
   if (
     progressToken !== undefined &&
     !(
-      (typeof progressToken === 'string' && progressToken.length > 0) ||
+      typeof progressToken === 'string' ||
       INTEGER_ID(progressToken)
     )
   ) {
@@ -408,4 +409,3 @@ export function formatProtocolError(id, error) {
     'Internal error',
   );
 }
-

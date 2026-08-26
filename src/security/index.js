@@ -1,6 +1,11 @@
 export {
   canonicalJson,
+  canonicalize,
+  canonicalStringify,
   canonicalHash,
+  hashCanonical,
+  hashArguments,
+  argumentHash,
   sha256Canonical,
   cloneCanonical,
 } from "./canonical.js";
@@ -21,10 +26,11 @@ export { ApprovalAuthority, ApprovalStore } from "./approvals.js";
 export {
   PolicyEngine,
   SecurityPolicy,
+  createPolicyEngine,
+  evaluatePolicy,
   normalizeRequest,
   isMutationRequest,
 } from "./policy.js";
 export { AuditLog, AppendOnlyAuditLog } from "./audit.js";
 export { redactSecrets, redact, isSecretLikeKey } from "./redaction.js";
 export { SecurityError, securityError, toSecurityError } from "./errors.js";
-

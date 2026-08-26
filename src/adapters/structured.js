@@ -21,3 +21,5 @@ export function createStructuredAdapter(spec = {}) {
   });
 }
 
+export const StructuredApiAdapter = createStructuredAdapter;
+export const createStructuredApiAdapter = createStructuredAdapter;

@@ -74,17 +74,34 @@ function normalizeServerInfo(value) {
 
 function identityFromArguments(args) {
   const nested = isPlainObject(args.identity) ? args.identity : {};
-  const tenantId = args.tenantId ?? nested.tenantId;
-  const subjectId = args.subjectId ?? args.userId ?? nested.subjectId ?? nested.userId;
-  if (
-    typeof tenantId !== 'string' ||
-    tenantId.length === 0 ||
-    typeof subjectId !== 'string' ||
-    subjectId.length === 0
-  ) {
+  const tenantValues = ownValues(args, ['tenantId']).concat(ownValues(nested, ['tenantId']));
+  // ToolBraid's runtime calls the subject field `subject`; MCP clients often
+  // use `subjectId` or `userId`.  Accept the aliases as explicit input, but
+  // never derive identity from clientInfo, process globals, or constructor
+  // defaults.
+  const subjectValues = ownValues(args, ['subject', 'subjectId', 'userId'])
+    .concat(ownValues(nested, ['subject', 'subjectId', 'userId']));
+  if (!consistentIdentityValues(tenantValues) || !consistentIdentityValues(subjectValues)) {
     return null;
   }
-  return { tenantId, subjectId };
+  return { tenantId: tenantValues[0], subjectId: subjectValues[0] };
+}
+
+function ownValues(value, names) {
+  return names
+    .filter((name) => Object.prototype.hasOwnProperty.call(value, name) && value[name] !== undefined)
+    .map((name) => value[name]);
+}
+
+function consistentIdentityValues(values) {
+  if (values.length === 0) return false;
+  if (values.some((value) =>
+    typeof value !== 'string' ||
+    value.length === 0 ||
+    value.length > 256 ||
+    value.trim() !== value ||
+    /[\u0000-\u001f\u007f]/u.test(value))) return false;
+  return values.every((value) => value === values[0]);
 }
 
 function toolExecutionError(code, message, details, modern) {
@@ -244,6 +261,16 @@ export class McpGateway {
         reason: 'arguments must be an object',
       });
     }
+    // Identity is a security boundary, so report its absence/conflict before
+    // generic schema diagnostics and never let a handler infer it elsewhere.
+    if (this.requireIdentity && !identityFromArguments(args)) {
+      return toolExecutionError(
+        'identity_required',
+        'Explicit tenantId and subjectId (or userId) are required',
+        undefined,
+        modern,
+      );
+    }
     const schemaResult = validateJsonSchema(args, getToolSchema(name));
     if (!schemaResult.valid) {
       return toolExecutionError(
@@ -253,15 +280,6 @@ export class McpGateway {
         modern,
       );
     }
-    if (this.requireIdentity && !identityFromArguments(args)) {
-      return toolExecutionError(
-        'identity_required',
-        'Explicit tenantId and subjectId (or userId) are required',
-        undefined,
-        modern,
-      );
-    }
-
     const handler = this.onToolCall ?? handlerFor(this.handlers, name);
     if (!handler) {
       return toolExecutionError(
@@ -365,7 +383,13 @@ export class McpGateway {
         case 'tools/call':
           return await this.#call(request, negotiated, session, context);
         case 'ping':
-          return resultResponse(request.id, negotiated.modern ? { resultType: MODERN_RESULT_TYPE } : {});
+          return resultResponse(
+            request.id,
+            this.#withServerInfo(
+              negotiated.modern ? { resultType: MODERN_RESULT_TYPE } : {},
+              negotiated.modern,
+            ),
+          );
         default:
           return errorResponse(
             request.id,
@@ -471,8 +495,9 @@ export class McpGateway {
       return {
         ok: false,
         error: new ProtocolError(
-          JSON_RPC_ERROR_CODES.NOT_INITIALIZED,
-          'Server not initialized',
+          JSON_RPC_ERROR_CODES.INVALID_PARAMS,
+          'Invalid params',
+          { reason: 'params._meta is required for the current MCP protocol' },
         ),
       };
     }
@@ -592,6 +617,7 @@ export class McpGateway {
         cacheScope: 'public',
       }
       : { tools };
+    this.#withServerInfo(result, negotiated.modern);
     if (start + pageSize < allTools.length) result.nextCursor = `tb:${start + pageSize}`;
     return resultResponse(request.id, result);
   }
@@ -617,6 +643,11 @@ export class McpGateway {
 
     const controller = new AbortController();
     const key = idKey(request.id);
+    if (session.pending.has(key)) {
+      throw new ProtocolError(JSON_RPC_ERROR_CODES.INVALID_REQUEST, 'Invalid Request', {
+        reason: 'request id is already in flight',
+      });
+    }
     const record = { controller, cancelled: false };
     session.pending.set(key, record);
     try {
@@ -634,6 +665,7 @@ export class McpGateway {
       // Cancellation on stdio suppresses all subsequent messages for the
       // canceled request, even when a handler does not observe AbortSignal.
       if (record.cancelled) return null;
+      this.#withServerInfo(toolResult, negotiated.modern);
       return resultResponse(request.id, toolResult);
     } finally {
       session.pending.delete(key);
@@ -664,6 +696,17 @@ export class McpGateway {
         return null;
     }
   }
+
+  #withServerInfo(result, modern) {
+    if (modern && isPlainObject(result)) {
+      const metadata = isPlainObject(result._meta) ? result._meta : {};
+      if (metadata['io.modelcontextprotocol/serverInfo'] === undefined) {
+        metadata['io.modelcontextprotocol/serverInfo'] = cloneJson(this.serverInfo);
+      }
+      result._meta = metadata;
+    }
+    return result;
+  }
 }
 
 function errorResponseFromNegotiation(id, error) {
@@ -684,4 +727,3 @@ export {
   SUPPORTED_PROTOCOL_VERSIONS,
   PUBLIC_TOOL_NAMES,
 };
-

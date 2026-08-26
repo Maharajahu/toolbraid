@@ -23,6 +23,11 @@ const identityProperties = Object.freeze({
     minLength: 1,
     description: 'Explicit user or subject identity.',
   },
+  subject: {
+    type: 'string',
+    minLength: 1,
+    description: 'Explicit user or subject identity (runtime alias for subjectId).',
+  },
   userId: {
     type: 'string',
     minLength: 1,
@@ -35,20 +40,33 @@ const identityProperties = Object.freeze({
       tenantId: { type: 'string', minLength: 1 },
       subjectId: { type: 'string', minLength: 1 },
       userId: { type: 'string', minLength: 1 },
+      subject: { type: 'string', minLength: 1 },
     },
+    required: ['tenantId'],
+    anyOf: [
+      { required: ['subjectId'] },
+      { required: ['subject'] },
+      { required: ['userId'] },
+    ],
     additionalProperties: false,
   },
 });
 
 const commonProperties = Object.freeze({
   ...identityProperties,
-  requestId: { type: 'string', minLength: 1 },
   origin: { type: 'string', minLength: 1 },
-  metadata: { type: 'object' },
-  options: { type: 'object' },
 });
 
-function objectSchema(properties, description) {
+const explicitIdentity = Object.freeze({
+  anyOf: [
+    { required: ['tenantId', 'subjectId'] },
+    { required: ['tenantId', 'subject'] },
+    { required: ['tenantId', 'userId'] },
+    { required: ['identity'] },
+  ],
+});
+
+function objectSchema(properties, description, constraints = []) {
   return {
     $schema: schemaUrl,
     type: 'object',
@@ -57,11 +75,8 @@ function objectSchema(properties, description) {
       ...commonProperties,
       ...properties,
     },
-    // Unknown fields are retained for forward-compatible workflow contracts;
-    // the gateway still validates every declared field and all arguments must
-    // be a JSON object.  The core policy layer remains responsible for
-    // semantic/authorization checks.
-    additionalProperties: true,
+    allOf: [explicitIdentity, ...constraints],
+    additionalProperties: false,
   };
 }
 
@@ -76,6 +91,8 @@ const definitions = [
         query: { type: 'string', minLength: 1 },
         kind: { type: 'string', minLength: 1 },
         adapter: { type: 'string', minLength: 1 },
+        tags: { type: 'array', items: { type: 'string', minLength: 1 } },
+        readOnly: { type: 'boolean' },
         limit: { type: 'integer', minimum: 1, maximum: 100 },
         cursor: { type: 'string', minLength: 1 },
       },
@@ -93,8 +110,10 @@ const definitions = [
         capabilityId: { type: 'string', minLength: 1 },
         id: { type: 'string', minLength: 1 },
         name: { type: 'string', minLength: 1 },
+        version: { type: 'string', minLength: 1 },
       },
       'Describe a semantic capability without invoking it.',
+      [{ anyOf: [{ required: ['capabilityId'] }, { required: ['id'] }, { required: ['name'] }] }],
     ),
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
   },
@@ -105,12 +124,18 @@ const definitions = [
       'Construct a policy-checkable workflow proposal for an explicit tenant and subject. Proposal creation does not execute nodes.',
     inputSchema: objectSchema(
       {
-        objective: { type: 'string', minLength: 1 },
-        intent: { type: 'string', minLength: 1 },
-        workflow: { type: 'object' },
+        request: { type: 'object' },
+        goal: { type: 'string', minLength: 1 },
         nodes: { type: 'array', items: { type: 'object' } },
-        constraints: { type: 'object' },
-        revision: { type: ['string', 'integer'] },
+        steps: { type: 'array', items: { type: 'object' } },
+        action: { type: 'string', minLength: 1 },
+        capabilityId: { type: 'string', minLength: 1 },
+        operation: { type: 'string', minLength: 1 },
+        productId: { type: 'string', minLength: 1 },
+        quantity: { type: 'integer', minimum: 1 },
+        args: { type: 'object' },
+        workflowId: { type: 'string', minLength: 1 },
+        revision: { type: 'integer', minimum: 1 },
       },
       'Propose a workflow for policy review; no node is executed by this tool.',
     ),
@@ -124,14 +149,11 @@ const definitions = [
     inputSchema: objectSchema(
       {
         workflowId: { type: 'string', minLength: 1 },
-        revision: { type: ['string', 'integer'] },
-        approvalId: { type: 'string', minLength: 1 },
-        approvalNonce: { type: 'string', minLength: 1 },
-        arguments: { type: 'object' },
-        input: { type: 'object' },
-        dryRun: { type: 'boolean' },
+        id: { type: 'string', minLength: 1 },
+        revision: { type: 'integer', minimum: 1 },
       },
       'Execute only an approved, policy-checked workflow; arbitrary code and shell commands are not accepted.',
+      [{ anyOf: [{ required: ['workflowId'] }, { required: ['id'] }] }],
     ),
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false },
   },
@@ -143,10 +165,11 @@ const definitions = [
     inputSchema: objectSchema(
       {
         workflowId: { type: 'string', minLength: 1 },
-        runId: { type: 'string', minLength: 1 },
-        revision: { type: ['string', 'integer'] },
+        id: { type: 'string', minLength: 1 },
+        revision: { type: 'integer', minimum: 1 },
       },
       'Read workflow state without changing it.',
+      [{ anyOf: [{ required: ['workflowId'] }, { required: ['id'] }] }],
     ),
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
   },
@@ -158,12 +181,19 @@ const definitions = [
     inputSchema: objectSchema(
       {
         workflowId: { type: 'string', minLength: 1 },
-        runId: { type: 'string', minLength: 1 },
-        revision: { type: ['string', 'integer'] },
-        nodeIds: { type: 'array', items: { type: 'string', minLength: 1 } },
+        id: { type: 'string', minLength: 1 },
+        revision: { type: 'integer', minimum: 1 },
+        nodeIds: {
+          type: 'array',
+          minItems: 1,
+          maxItems: 100,
+          uniqueItems: true,
+          items: { type: 'string', minLength: 1 },
+        },
         limit: { type: 'integer', minimum: 1, maximum: 100 },
       },
       'Replay recorded read-only nodes only; mutation nodes are excluded.',
+      [{ anyOf: [{ required: ['workflowId'] }, { required: ['id'] }] }],
     ),
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
   },
@@ -187,4 +217,3 @@ export function hasPublicTool(name) {
 export function getToolSchema(name) {
   return byName.get(name)?.inputSchema;
 }
-

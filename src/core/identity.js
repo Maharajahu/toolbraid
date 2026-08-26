@@ -22,13 +22,16 @@ export function requireIdentity(input) {
 
   const source = hasNested ? nested : input;
   const tenantId = source.tenantId;
-  const subjectId = source.subjectId ?? source.userId;
+  const subjectId = aliasedSubject(source);
   if (hasNested && input.tenantId !== undefined && input.tenantId !== tenantId) {
     throw new CoreError('INVALID_IDENTITY', 'Conflicting tenant identity values');
   }
-  const topSubject = input.subjectId ?? input.userId;
+  const topSubject = aliasedSubject(input);
   if (hasNested && topSubject !== undefined && topSubject !== subjectId) {
     throw new CoreError('INVALID_IDENTITY', 'Conflicting subject identity values');
+  }
+  if (tenantId === undefined || subjectId === undefined) {
+    throw new CoreError('IDENTITY_REQUIRED', 'Explicit tenant and subject identity is required');
   }
   validateId(tenantId, 'tenantId');
   validateId(subjectId, 'subjectId');
@@ -61,3 +64,13 @@ function validateId(value, field) {
   }
 }
 
+function aliasedSubject(source) {
+  const values = ['subjectId', 'subject', 'userId']
+    .filter((key) => Object.prototype.hasOwnProperty.call(source, key) && source[key] !== undefined);
+  if (values.length === 0) return undefined;
+  const value = source[values[0]];
+  for (const key of values.slice(1)) {
+    if (source[key] !== value) throw new CoreError('INVALID_IDENTITY', 'Conflicting subject identity values');
+  }
+  return value;
+}
