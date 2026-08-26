@@ -85,6 +85,7 @@ test('replay sanitizes hostile adapter output before exposing it', async () => {
     },
   };
   const runtime = createCompositionRoot({
+    allowReadOnly: true,
     identity: {
       tenantId: 'tenant-a',
       subject: 'subject-a',

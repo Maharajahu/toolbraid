@@ -10,11 +10,15 @@ export const BINDING_FIELDS = Object.freeze([
   "nodeId",
   "origin",
   "adapter",
+  "capabilityId",
+  "capabilityVersion",
   "argsHash",
 ]);
 
 const ID_LIMIT = 256;
 const ADAPTER_PATTERN = /^[a-z0-9][a-z0-9._-]{0,127}$/;
+const CAPABILITY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
+const VERSION_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._+\-]{0,63}$/;
 const HASH_PATTERN = /^[a-f0-9]{64}$/;
 
 /**
@@ -32,6 +36,8 @@ export function normalizeBinding(input, { requireArgs = true } = {}) {
   const nodeId = aliasedValue(input, "nodeId", []);
   const origin = aliasedValue(input, "origin", ["siteOrigin"]);
   const adapter = aliasedValue(input, "adapter", ["adapterId"]);
+  const capabilityId = aliasedValue(input, "capabilityId", ["capability"]);
+  const capabilityVersion = aliasedValue(input, "capabilityVersion", ["version"]);
   const normalized = {
     tenantId: normalizeIdentity("tenantId", tenantId),
     subjectId: normalizeIdentity("subjectId", subjectId),
@@ -40,6 +46,8 @@ export function normalizeBinding(input, { requireArgs = true } = {}) {
     nodeId: normalizeIdentity("nodeId", nodeId),
     origin: normalizeOrigin(origin),
     adapter: normalizeAdapter(adapter),
+    capabilityId: normalizeCapabilityToken("capabilityId", capabilityId, CAPABILITY_PATTERN),
+    capabilityVersion: normalizeCapabilityToken("capabilityVersion", capabilityVersion, VERSION_PATTERN),
   };
 
   if (!Object.prototype.hasOwnProperty.call(input, "args")) {
@@ -129,6 +137,13 @@ export function normalizeHash(value) {
   return value;
 }
 
+function normalizeCapabilityToken(name, value, pattern) {
+  if (typeof value !== "string" || !pattern.test(value)) {
+    throw new SecurityError("INVALID_BINDING", `${name} must be a valid identifier.`);
+  }
+  return value;
+}
+
 export function bindingWithoutArgs(binding) {
   const normalized = normalizeBinding(binding, { requireArgs: false });
   return Object.freeze({
@@ -139,6 +154,8 @@ export function bindingWithoutArgs(binding) {
     nodeId: normalized.nodeId,
     origin: normalized.origin,
     adapter: normalized.adapter,
+    capabilityId: normalized.capabilityId,
+    capabilityVersion: normalized.capabilityVersion,
     argsHash: normalized.argsHash,
   });
 }

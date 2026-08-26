@@ -18,6 +18,8 @@ const BASE = Object.freeze({
   nodeId: "node-a",
   origin: "https://EXAMPLE.com:443",
   adapter: "Structured-API",
+  capabilityId: "payments.charge",
+  capabilityVersion: "1",
   args: Object.freeze({ amount: 25, currency: "USD" }),
 });
 
@@ -84,6 +86,8 @@ for (const [field, change] of [
   ["nodeId", "node-b"],
   ["origin", "https://evil.example"],
   ["adapter", "vision"],
+  ["capabilityId", "payments.quote"],
+  ["capabilityVersion", "999"],
   ["args", { amount: 26, currency: "USD" }],
 ]) {
   test(`approval cannot be swapped to a different ${field}`, () => {
@@ -160,7 +164,7 @@ test("policy denies origin or adapter swaps before adapter execution", () => {
 });
 
 test("read-only policy can be enabled independently and defaults fail closed", () => {
-  const read = { ...BASE, capability: "catalog.search", mutation: false };
+  const read = { ...BASE, capabilityId: "catalog.search", capability: "catalog.search", mutation: false };
   assert.equal(new PolicyEngine().evaluate(read).code, "POLICY_DENIED");
   assert.equal(new PolicyEngine({ allowReadOnly: true }).authorize(read).authorized, true);
   assert.equal(new PolicyEngine({ allowReadOnly: true }).evaluate({ ...read, mutation: true }).code, "POLICY_DENIED");

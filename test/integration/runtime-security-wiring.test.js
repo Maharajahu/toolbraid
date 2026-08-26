@@ -403,6 +403,7 @@ test('capability visibility is tenant-scoped and secret metadata is redacted', a
     query: 'tenant.orders',
   });
   assert.equal(otherSearch.capabilities.some(({ id }) => id === 'tenant.orders.read'), false);
+  assert.equal(otherSearch.total, 0);
   await assert.rejects(
     runtime.callTool('capabilities.describe', {
       ...callIdentity(OTHER_IDENTITY),

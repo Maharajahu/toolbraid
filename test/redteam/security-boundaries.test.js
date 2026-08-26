@@ -20,6 +20,8 @@ const binding = Object.freeze({
   nodeId: 'node-a',
   origin: 'https://safe.example',
   adapter: 'structured-api',
+  capabilityId: 'payments.charge',
+  capabilityVersion: '1',
   args: Object.freeze({ amount: 10 }),
 });
 

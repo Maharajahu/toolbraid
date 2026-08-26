@@ -259,16 +259,6 @@ export function createCompositionRoot(options = {}) {
         ...(input.cursor === undefined ? {} : { cursor: String(cursor) }),
       }], 'CAPABILITY_SEARCH_UNAVAILABLE');
       const payload = normalizeSearchResult(result, query);
-      if (result && result.total === undefined) {
-        payload.total = [...capabilityIndex.values()]
-          .filter((capability) => matchesOrigin(capability, request.origin))
-          .filter((capability) => !query || capabilitySearchText(capability).includes(query))
-          .filter((capability) => matchesSearchKind(capability, kind))
-          .filter((capability) => matchesSearchAdapter(capability, adapter))
-          .filter((capability) => matchesSearchTags(capability, tags))
-          .filter((capability) => readOnly === undefined || capability.readOnly === readOnly)
-          .length;
-      }
       payload.tenantId = request.tenantId;
       payload.subject = request.subject;
       payload.subjectId = request.subjectId;
@@ -1007,6 +997,8 @@ export function createCompositionRoot(options = {}) {
         nodeId: node.id,
         origin,
         adapter,
+        capabilityId,
+        capabilityVersion,
         args: cloneJson(node.args),
       });
     } catch (error) {

@@ -111,6 +111,7 @@ export class CapabilityCatalog {
     const nextOffset = offset + selected.length;
     const result = {
       capabilities: selected,
+      total: candidates.length,
       nextCursor: nextOffset < candidates.length ? String(nextOffset) : null,
     };
     // `items` is a useful compatibility alias for callers that use the common
