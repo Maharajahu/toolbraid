@@ -43,6 +43,15 @@ const DEFAULT_INSTRUCTIONS =
 
 const MODERN_RESULT_TYPE = 'complete';
 
+// MCP does not define a queueing contract for a server.  Rejecting excess
+// work at admission is safer than allowing an unbounded set of provider calls
+// (and keeps cancellation bookkeeping bounded as well).  These are gateway
+// limits, not execution timeouts: an admitted handler may still run until it
+// cooperatively observes its AbortSignal or completes.
+const DEFAULT_MAX_ACTIVE_CALLS = 64;
+const DEFAULT_MAX_SESSION_ACTIVE_CALLS = 32;
+const ACTIVE_CALL_LIMIT_CODE = 'ACTIVE_CALL_LIMIT';
+
 // Tool handlers sit on the provider side of the MCP trust boundary.  Keep
 // their result/error envelopes useful, but bounded enough that a provider
 // cannot turn a single call into an unbounded response or smuggle an exception
@@ -51,15 +60,21 @@ const MAX_RESULT_DEPTH = 12;
 const MAX_RESULT_ENTRIES = 256;
 const MAX_RESULT_NODES = 4096;
 const MAX_RESULT_STRING_LENGTH = 8192;
+const MAX_RESULT_BYTES = 512 * 1024;
+// Leave room for truncation markers/JSON punctuation whenever the walker
+// reaches the byte budget.  The emitted result remains comfortably below the
+// public 512 KiB aggregate limit even when a hostile tree hits every depth and
+// node bound at once.
+const MAX_SANITIZED_BYTES = MAX_RESULT_BYTES - 64 * 1024;
 const MAX_ERROR_CODE_LENGTH = 128;
 const MAX_ERROR_MESSAGE_LENGTH = 2048;
 const REDACTED_VALUE = '[REDACTED]';
 const UNSERIALIZABLE_VALUE = '[UNSERIALIZABLE]';
 const OMIT_VALUE = Symbol('omit provider field');
+const PROVIDER_VALUE_OVERFLOW = Symbol('provider value exceeded aggregate byte budget');
 const OMITTED_PROVIDER_KEYS = new Set(['cause', 'stack', 'stacktrace', 'trace']);
 
 const BEARER_SECRET_PATTERN = /\bBearer\s+[^\s,;]+/giu;
-const KEYED_SECRET_PATTERN = /\b((?:access[_-]?key|access[_-]?token|api[_-]?key|authorization|bearer|client[_-]?secret|cookie|credential|jwt|nonce|oauth|pass(?:word|code|phrase)?|private[_-]?key|refresh[_-]?token|secret(?:[_-]?key)?|session(?:[_-]?id)?|signature|ssn|token|totp))\b(\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s,;]+)/giu;
 
 function idKey(id) {
   return `${typeof id}:${String(id)}`;
@@ -68,6 +83,10 @@ function idKey(id) {
 function asSafeString(value, fallback, maxLength = 2048) {
   if (typeof value !== 'string' || value.length === 0) return fallback;
   return value.length > maxLength ? value.slice(0, maxLength) : value;
+}
+
+function positiveLimit(value, fallback) {
+  return Number.isSafeInteger(value) && value > 0 ? value : fallback;
 }
 
 function ownData(value, key) {
@@ -122,9 +141,85 @@ function redactSensitiveText(value, maxLength = MAX_RESULT_STRING_LENGTH) {
   let text = value.length > maxLength ? value.slice(0, maxLength) : value;
   text = text
     .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/gu, ' ')
-    .replace(BEARER_SECRET_PATTERN, 'Bearer [REDACTED]')
-    .replace(KEYED_SECRET_PATTERN, '$1$2[REDACTED]');
+    .replace(BEARER_SECRET_PATTERN, 'Bearer [REDACTED]');
+  text = redactKeyedSecrets(text);
   return text.length > maxLength ? text.slice(0, maxLength) : text;
+}
+
+function redactKeyedSecrets(text) {
+  let output = '';
+  let copyFrom = 0;
+  let index = 0;
+  while (index < text.length) {
+    const current = text[index];
+    const quoted = current === '"' || current === "'";
+    const keyStart = quoted ? index + 1 : index;
+    if (!isAsciiLetter(text[keyStart]) || (!quoted && keyStart > 0 && isKeyCharacter(text[keyStart - 1]))) {
+      index += 1;
+      continue;
+    }
+
+    let keyEnd = keyStart;
+    while (keyEnd < text.length && isKeyCharacter(text[keyEnd])) keyEnd += 1;
+    // Advancing past a long key is important: otherwise a long ordinary word
+    // would make the bounded key matcher retry at every character.
+    if (keyEnd - keyStart > 128) {
+      index = keyEnd;
+      continue;
+    }
+    if (quoted && text[keyEnd] !== current) {
+      index = keyEnd;
+      continue;
+    }
+
+    let separatorStart = quoted ? keyEnd + 1 : keyEnd;
+    while (separatorStart < text.length && /\s/u.test(text[separatorStart])) separatorStart += 1;
+    if (text[separatorStart] !== ':' && text[separatorStart] !== '=') {
+      index = Math.max(index + 1, keyEnd);
+      continue;
+    }
+    let valueStart = separatorStart + 1;
+    while (valueStart < text.length && /\s/u.test(text[valueStart])) valueStart += 1;
+    if (valueStart >= text.length) {
+      index = valueStart;
+      continue;
+    }
+    const valueQuote = text[valueStart] === '"' || text[valueStart] === "'"
+      ? text[valueStart]
+      : undefined;
+    let valueEnd = valueStart;
+    if (valueQuote) {
+      valueEnd += 1;
+      while (valueEnd < text.length && text[valueEnd] !== valueQuote) valueEnd += 1;
+      if (valueEnd < text.length) valueEnd += 1;
+    } else {
+      while (valueEnd < text.length && !/[\s,;]/u.test(text[valueEnd])) valueEnd += 1;
+    }
+
+    const key = text.slice(keyStart, keyEnd);
+    if (isSecretLikeKey(key)) {
+      output += text.slice(copyFrom, valueStart);
+      output += '[REDACTED]';
+      copyFrom = valueEnd;
+    }
+    index = Math.max(index + 1, valueEnd);
+  }
+  return copyFrom === 0 ? text : output + text.slice(copyFrom);
+}
+
+function isAsciiLetter(value) {
+  if (typeof value !== 'string' || value.length !== 1) return false;
+  const code = value.charCodeAt(0);
+  return (code >= 0x41 && code <= 0x5a) || (code >= 0x61 && code <= 0x7a);
+}
+
+function isKeyCharacter(value) {
+  if (typeof value !== 'string' || value.length !== 1) return false;
+  const code = value.charCodeAt(0);
+  return (code >= 0x41 && code <= 0x5a) ||
+    (code >= 0x61 && code <= 0x7a) ||
+    (code >= 0x30 && code <= 0x39) ||
+    value === '_' || value === '-';
 }
 
 function sanitizeErrorCode(value, fallback = 'tool_execution_error') {
@@ -144,17 +239,70 @@ function sanitizeErrorMessage(value, fallback = 'Tool execution failed') {
   return text.length === 0 ? fallback : text;
 }
 
+function serializedByteLength(value) {
+  try {
+    const encoded = JSON.stringify(value);
+    return encoded === undefined ? Infinity : Buffer.byteLength(encoded, 'utf8');
+  } catch {
+    return Infinity;
+  }
+}
+
+function resultWithinLimit(value) {
+  return serializedByteLength(value) <= MAX_RESULT_BYTES;
+}
+
 function sanitizeProviderValue(value, options = {}) {
   const state = {
     maxDepth: options.maxDepth ?? MAX_RESULT_DEPTH,
     maxEntries: options.maxEntries ?? MAX_RESULT_ENTRIES,
     maxNodes: options.maxNodes ?? MAX_RESULT_NODES,
     maxStringLength: options.maxStringLength ?? MAX_RESULT_STRING_LENGTH,
+    maxBytes: options.maxBytes ?? MAX_SANITIZED_BYTES,
+    bytes: 0,
+    overflowed: false,
     nodes: 0,
     seen: new WeakSet(),
   };
   const result = walkProviderValue(value, state, 0, undefined);
-  return result === OMIT_VALUE ? UNSERIALIZABLE_VALUE : result;
+  const safe = result === OMIT_VALUE ? UNSERIALIZABLE_VALUE : result;
+  if (state.overflowed && safe !== null && typeof safe === 'object') {
+    try {
+      Object.defineProperty(safe, PROVIDER_VALUE_OVERFLOW, { value: true });
+    } catch {
+      // The sanitized value is still bounded; an unmarkable primitive/object
+      // will be handled by the final serialized-size check.
+    }
+  }
+  return safe;
+}
+
+function reserveProviderBytes(state, bytes) {
+  if (!Number.isSafeInteger(bytes) || bytes < 0 || state.bytes + bytes > state.maxBytes) {
+    state.overflowed = true;
+    return false;
+  }
+  state.bytes += bytes;
+  return true;
+}
+
+function providerValueOverflowed(value) {
+  return Boolean(value && typeof value === 'object' && value[PROVIDER_VALUE_OVERFLOW] === true);
+}
+
+function encodedProviderBytes(value) {
+  try {
+    const encoded = JSON.stringify(value);
+    return encoded === undefined ? Infinity : Buffer.byteLength(encoded, 'utf8');
+  } catch {
+    return Infinity;
+  }
+}
+
+function providerMarker(state) {
+  return reserveProviderBytes(state, encodedProviderBytes(UNSERIALIZABLE_VALUE))
+    ? UNSERIALIZABLE_VALUE
+    : OMIT_VALUE;
 }
 
 function sanitizeProviderError(value) {
@@ -166,7 +314,11 @@ function sanitizeProviderError(value) {
   const message = ownData(value, 'message');
   if (message.present) putData(safe, 'message', sanitizeErrorMessage(message.value));
   const details = ownData(value, 'details');
-  if (details.present) putData(safe, 'details', sanitizeProviderValue(details.value));
+  if (details.present) {
+    const safeDetails = sanitizeProviderValue(details.value);
+    putData(safe, 'details', safeDetails);
+    if (providerValueOverflowed(safeDetails)) markProviderValueOverflow(safe);
+  }
   return safe;
 }
 
@@ -174,48 +326,80 @@ function sanitizeResultPayload(value) {
   const safe = sanitizeProviderValue(value);
   if (!safePlainObject(value) || !safePlainObject(safe)) return safe;
   const error = ownData(value, 'error');
-  if (error.present) putData(safe, 'error', sanitizeProviderError(error.value));
+  if (error.present) {
+    const safeError = sanitizeProviderError(error.value);
+    putData(safe, 'error', safeError);
+    if (providerValueOverflowed(safeError)) markProviderValueOverflow(safe);
+  }
   return safe;
+}
+
+function markProviderValueOverflow(value) {
+  if (value === null || typeof value !== 'object') return;
+  try {
+    Object.defineProperty(value, PROVIDER_VALUE_OVERFLOW, { value: true });
+  } catch {
+    // Bounded sanitized values are still safe if a host object cannot carry
+    // the diagnostic marker; the final size check remains authoritative.
+  }
 }
 
 function walkProviderValue(value, state, depth, key) {
   if (omittedProviderKey(key)) return OMIT_VALUE;
-  if (isSecretLikeKey(key)) return REDACTED_VALUE;
-  if (depth > state.maxDepth || state.nodes >= state.maxNodes) return UNSERIALIZABLE_VALUE;
+  if (isSecretLikeKey(key)) {
+    return reserveProviderBytes(state, encodedProviderBytes(REDACTED_VALUE))
+      ? REDACTED_VALUE
+      : OMIT_VALUE;
+  }
+  if (state.bytes >= state.maxBytes) return OMIT_VALUE;
+  if (depth > state.maxDepth || state.nodes >= state.maxNodes) return providerMarker(state);
   state.nodes += 1;
 
-  if (value === null) return null;
+  if (value === null) {
+    return reserveProviderBytes(state, 4) ? null : OMIT_VALUE;
+  }
   switch (typeof value) {
     case 'string':
-      return redactSensitiveText(value, state.maxStringLength);
+      {
+        const safe = redactSensitiveText(value, state.maxStringLength);
+        return reserveProviderBytes(state, encodedProviderBytes(safe)) ? safe : OMIT_VALUE;
+      }
     case 'boolean':
-      return value;
+      return reserveProviderBytes(state, value ? 4 : 5) ? value : OMIT_VALUE;
     case 'number':
-      return Number.isFinite(value) ? value : UNSERIALIZABLE_VALUE;
+      if (!Number.isFinite(value)) return providerMarker(state);
+      return reserveProviderBytes(state, encodedProviderBytes(value)) ? value : OMIT_VALUE;
     case 'undefined':
     case 'bigint':
     case 'function':
     case 'symbol':
-      return UNSERIALIZABLE_VALUE;
+      return providerMarker(state);
     case 'object':
       break;
     default:
-      return UNSERIALIZABLE_VALUE;
+      return providerMarker(state);
   }
 
-  if (state.seen.has(value)) return UNSERIALIZABLE_VALUE;
+  if (state.seen.has(value)) return providerMarker(state);
   state.seen.add(value);
   try {
     if (Array.isArray(value)) {
+      if (!reserveProviderBytes(state, 2)) return OMIT_VALUE;
       const length = Number.isSafeInteger(value.length) && value.length >= 0 ? value.length : 0;
       const result = [];
       const count = Math.min(length, state.maxEntries);
       for (let index = 0; index < count; index += 1) {
+        const separatorBytes = result.length === 0 ? 0 : 1;
+        if (!reserveProviderBytes(state, separatorBytes)) break;
         const entry = ownData(value, String(index));
         const child = entry.present
           ? walkProviderValue(entry.value, state, depth + 1, undefined)
-          : UNSERIALIZABLE_VALUE;
-        result.push(child === OMIT_VALUE ? UNSERIALIZABLE_VALUE : child);
+          : providerMarker(state);
+        if (child === OMIT_VALUE) {
+          state.bytes -= separatorBytes;
+          break;
+        }
+        result.push(child);
       }
       return result;
     }
@@ -226,23 +410,33 @@ function walkProviderValue(value, state, depth, key) {
       prototype = Object.getPrototypeOf(value);
       keys = Object.keys(value);
     } catch {
-      return UNSERIALIZABLE_VALUE;
+      return providerMarker(state);
     }
-    if (prototype !== Object.prototype && prototype !== null) return UNSERIALIZABLE_VALUE;
+    if (prototype !== Object.prototype && prototype !== null) return providerMarker(state);
 
+    if (!reserveProviderBytes(state, 2)) return OMIT_VALUE;
     const result = {};
     for (const childKey of keys.slice(0, state.maxEntries)) {
+      if (omittedProviderKey(childKey)) continue;
+      const separatorBytes = Object.keys(result).length === 0 ? 0 : 1;
+      const keyBytes = encodedProviderBytes(childKey) + 1;
+      if (!reserveProviderBytes(state, separatorBytes + keyBytes)) break;
       const entry = ownData(value, childKey);
       if (!entry.present) {
         putData(result, childKey, UNSERIALIZABLE_VALUE);
         continue;
       }
       const child = walkProviderValue(entry.value, state, depth + 1, childKey);
-      if (child !== OMIT_VALUE) putData(result, childKey, child);
+      if (child !== OMIT_VALUE) {
+        putData(result, childKey, child);
+      } else {
+        state.bytes -= separatorBytes + keyBytes;
+        break;
+      }
     }
     return result;
   } catch {
-    return UNSERIALIZABLE_VALUE;
+    return providerMarker(state);
   } finally {
     state.seen.delete(value);
   }
@@ -303,7 +497,7 @@ function consistentIdentityValues(values) {
   return values.every((value) => value === values[0]);
 }
 
-function toolExecutionError(code, message, details, modern) {
+function toolExecutionError(code, message, details, modern, { enforceSize = true } = {}) {
   const safeCode = sanitizeErrorCode(code);
   const safeMessage = sanitizeErrorMessage(message);
   const retryable = ownData(details, 'retryable');
@@ -316,6 +510,7 @@ function toolExecutionError(code, message, details, modern) {
   if (detailValue.present) {
     const safeDetails = sanitizeProviderValue(detailValue.value);
     if (safeDetails !== OMIT_VALUE) structuredContent.details = safeDetails;
+    if (providerValueOverflowed(safeDetails)) markProviderValueOverflow(structuredContent);
   }
   const result = {
     content: [{ type: 'text', text: safeMessage }],
@@ -323,6 +518,15 @@ function toolExecutionError(code, message, details, modern) {
     isError: true,
   };
   if (modern) result.resultType = MODERN_RESULT_TYPE;
+  if (enforceSize && (providerValueOverflowed(structuredContent) || !resultWithinLimit(result))) {
+    return toolExecutionError(
+      'result_too_large',
+      'Tool result exceeds the maximum size',
+      undefined,
+      modern,
+      { enforceSize: false },
+    );
+  }
   return result;
 }
 
@@ -369,12 +573,17 @@ function failedStatus(value) {
   return status.present && status.value === 'failed';
 }
 
-function indicatesFailure(value, structuredValue) {
+function indicatesFailure(value, structuredValue, { ordinary = false } = {}) {
   if (failedStatus(value)) return true;
   if (safePlainObject(structuredValue) && failedStatus(structuredValue)) return true;
-  // Presence is intentional: an explicitly supplied null/empty error is still
-  // a provider assertion that the operation failed, and should fail closed.
-  return hasOwnData(value, 'error');
+  // Complete MCP ToolResult envelopes retain fail-closed presence semantics:
+  // even a null/empty `error` field is an explicit provider assertion.  An
+  // ordinary semantic value is different; a compatibility `error: null`
+  // field (such as on a completed workflow snapshot) represents success.
+  const error = ownData(value, 'error');
+  return error.present && (!ordinary || (
+    error.value !== null && error.value !== undefined && error.value !== false && error.value !== ''
+  ));
 }
 
 function normalizedContent(value) {
@@ -416,12 +625,25 @@ function normalizeToolResult(value, modern) {
   );
   if (!complete) {
     const structuredContent = value === undefined ? null : sanitizeResultPayload(value);
-    return normalizeWrappedResult(structuredContent, indicatesFailure(value, structuredContent), modern);
+    if (providerValueOverflowed(structuredContent)) {
+      return toolExecutionError('result_too_large', 'Tool result exceeds the maximum size', undefined, modern);
+    }
+    const result = normalizeWrappedResult(
+      structuredContent,
+      indicatesFailure(value, structuredContent, { ordinary: true }),
+      modern,
+    );
+    return resultWithinLimit(result)
+      ? result
+      : toolExecutionError('result_too_large', 'Tool result exceeds the maximum size', undefined, modern);
   }
 
   let result = sanitizeResultPayload(value);
   if (!safePlainObject(result)) {
     return toolExecutionError('invalid_tool_result', 'Tool returned an invalid result', undefined, modern);
+  }
+  if (providerValueOverflowed(result)) {
+    return toolExecutionError('result_too_large', 'Tool result exceeds the maximum size', undefined, modern);
   }
 
   const rawContent = ownData(value, 'content');
@@ -465,7 +687,9 @@ function normalizeToolResult(value, modern) {
   if (!isJsonValue(result)) {
     return toolExecutionError('invalid_tool_result', 'Tool returned non-JSON data', undefined, modern);
   }
-  return result;
+  return resultWithinLimit(result)
+    ? result
+    : toolExecutionError('result_too_large', 'Tool result exceeds the maximum size', undefined, modern);
 }
 
 function normalizeWrappedResult(structuredContent, isError, modern) {
@@ -502,12 +726,34 @@ function requestParams(message) {
   return message.params === undefined ? {} : message.params;
 }
 
+function isNotificationCandidate(message) {
+  // Once a JSON-RPC object has a valid version and a method but no id, it is a
+  // notification for response purposes even when a later structural check
+  // rejects its params.  JSON-RPC notifications are never answerable.
+  return Boolean(
+    isPlainObject(message) &&
+    message.jsonrpc === '2.0' &&
+    !hasOwn(message, 'id') &&
+    hasOwn(message, 'method'),
+  );
+}
+
 export class McpGateway {
   constructor(options = {}) {
     this.options = isPlainObject(options) ? options : {};
     this.serverInfo = normalizeServerInfo(this.options.serverInfo);
     this.instructions = asSafeString(this.options.instructions, DEFAULT_INSTRUCTIONS, 4096);
     this.requireIdentity = this.options.requireIdentity !== false;
+    this.maxActiveCalls = positiveLimit(
+      this.options.maxActiveCalls ?? this.options.maxConcurrentCalls,
+      DEFAULT_MAX_ACTIVE_CALLS,
+    );
+    this.maxSessionActiveCalls = positiveLimit(
+      this.options.maxSessionActiveCalls ?? this.options.maxConcurrentCallsPerSession,
+      DEFAULT_MAX_SESSION_ACTIVE_CALLS,
+    );
+    this.activeCalls = 0;
+    this.sessionCallState = new WeakMap();
     this.listTtlMs = Number.isSafeInteger(this.options.listTtlMs) && this.options.listTtlMs >= 0
       ? this.options.listTtlMs
       : 0;
@@ -573,6 +819,22 @@ export class McpGateway {
       );
     }
 
+    const releaseCall = this.#admitCall(context.session ?? this.defaultSession, modern);
+    if (!releaseCall) {
+      return toolExecutionError(
+        ACTIVE_CALL_LIMIT_CODE,
+        'Gateway active-call limit reached; retry later',
+        {
+          retryable: true,
+          details: {
+            limit: this.maxActiveCalls,
+            sessionLimit: this.maxSessionActiveCalls,
+          },
+        },
+        modern,
+      );
+    }
+
     const callContext = {
       ...context,
       name,
@@ -592,6 +854,8 @@ export class McpGateway {
         info,
         modern,
       );
+    } finally {
+      releaseCall();
     }
   }
 
@@ -630,7 +894,7 @@ export class McpGateway {
     try {
       classified = classifyMessage(message);
     } catch (error) {
-      return formatProtocolError(undefined, error);
+      return isNotificationCandidate(message) ? null : formatProtocolError(undefined, error);
     }
 
     const session = context.session ?? this.defaultSession;
@@ -690,6 +954,28 @@ export class McpGateway {
   async handleLine(line, context = {}) {
     const response = await this.handleMessage(line, context);
     return response === null || response === undefined ? null : serializeMessage(response);
+  }
+
+  #admitCall(session) {
+    const key = session && (typeof session === 'object' || typeof session === 'function')
+      ? session
+      : this.defaultSession;
+    let state = this.sessionCallState.get(key);
+    if (!state) {
+      state = { active: 0 };
+      this.sessionCallState.set(key, state);
+    }
+    if (this.activeCalls >= this.maxActiveCalls || state.active >= this.maxSessionActiveCalls) return undefined;
+
+    this.activeCalls += 1;
+    state.active += 1;
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      this.activeCalls = Math.max(0, this.activeCalls - 1);
+      state.active = Math.max(0, state.active - 1);
+    };
   }
 
   #negotiateRequest(request, session) {

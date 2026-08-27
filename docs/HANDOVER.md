@@ -161,13 +161,15 @@ The server-side control plane owns the following boundaries:
   approval boundary. Client-supplied approval-shaped fields are rejected.
   A consumed approval cannot be used for a second mutation.
 - Provider metadata, page content, observations, and adapter output are
-  untrusted data. Results are JSON-safe and thrown handler details are
+  untrusted data and are never promoted into catalog authority by the default
+  non-fixture runtime. Results are JSON-safe and thrown handler details are
   sanitized; audit records redact secret-like keys.
 - Read-only replay independently checks the stored plan, current capability
   metadata, and recorded output flags. It never invokes a mutation node.
-- Adapter selection is semantic and ordered from structured API to WebMCP,
-  DOM/accessibility, and vision fallback. Fallback does not widen the
-  approved capability.
+- Adapter selection is server-owned, semantic, and ordered exactly as
+  `structured-api -> webmcp -> dom-accessibility -> vision`. Vision is an
+  explicit policy opt-in. Fallback does not widen the approved capability or
+  let a caller downgrade the route.
 - HTTP has request-size, content-type, method/path, origin, and mirrored
   metadata-header checks. Each HTTP request gets an isolated protocol session;
   there is no authenticated MCP session-id mechanism in this endpoint.
@@ -189,13 +191,27 @@ The default composition root is intentionally small and in-process:
   external authorization gateway, KMS, secret manager, or credential vault in
   this checkout.
 - There is no durable database, backup/restore path, retention service, or
-  production audit sink. The built-in audit interface is an in-memory list.
-- There is no rate limiting, tenant quota, or production request scheduler.
-  HTTP has a 1 MiB body limit and stdio has a bounded line frame, but these
-  are protocol safeguards, not abuse protection.
-- There is no browser worker, browser profile manager, GPU worker, video
-  ingestion pipeline, or chat backend. Adapter contracts and deterministic
-  fixtures do not launch or manage those services.
+  production audit sink. The built-in workflow, approval, and audit state are
+  in memory and are lost on restart.
+- The implementation has local admission bounds: plans allow 128 nodes, 32
+  dependencies per node, 1,024 aggregate dependencies, 512 KiB input, and
+  bounded depth/value counts; workflow storage defaults to 10,000 records/256
+  MiB globally, 2,000 records/64 MiB per tenant, 500 records/16 MiB per
+  identity, and 4 MiB per record; the gateway allows 64 active calls globally
+  and 32 per session; stdio has 16 active tasks and bounded queues. These are
+  protocol/resource safeguards, not production rate limiting or tenant
+  fair-use quotas.
+- Cancellation is cooperative. Read-only calls may receive an `AbortSignal`
+  if adapters observe it; mutation calls do not receive cancellation and may
+  not use a non-cancelling in-process timeout. Suppressing a canceled response
+  does not prove an external side effect was undone.
+- There is no external authentication/identity provider, KMS, secret manager,
+  credential vault, browser worker/profile isolation, enforced egress policy,
+  GPU worker, video ingestion pipeline, or chat backend. Adapter contracts and
+  deterministic fixtures do not launch or manage those services.
+- The Dockerfile is non-root but its `node:20-alpine` base is tag-based rather
+  than digest-pinned. Container publication is blocked until an immutable base
+  digest and vulnerability scan are recorded.
 - The default listener is loopback HTTP without TLS. Put an authenticated,
   TLS-terminating edge and deployment controls in front of it before accepting
   traffic.

@@ -23,6 +23,12 @@ The names above are the contract. A capability being discoverable does not
 grant permission to use it, and a provider result is data rather than an
 instruction to the control plane.
 
+Capability records are authority only when explicitly supplied by the host or
+trusted catalog. Provider/page manifests and adapter observations are not
+promoted into capability authority in the default non-fixture runtime. They
+cannot set mutability, approval requirements, origin bindings, schemas, or
+execution scope.
+
 ## Trust boundaries
 
 ```mermaid
@@ -52,7 +58,8 @@ boundary and must not be treated as one.
    that the approval decision can be tied to exactly what was proposed.
 4. Execution checks policy and, for a mutating node, a trusted server-side
    approval. The approval is bound to tenant, subject, workflow, revision, node,
-   origin, adapter, canonical argument hash, expiry, and a single-use nonce.
+   origin, adapter, capability ID/version, canonical argument hash, expiry, and
+   a single-use nonce.
 5. The workflow state machine records the permitted transition. The required
    happy path is `draft -> proposed -> running -> awaiting_approval -> running
    -> completed`; `failed` and `cancelled` are terminal alternatives.
@@ -62,10 +69,13 @@ boundary and must not be treated as one.
 ## Adapter model
 
 Adapters expose semantic capabilities such as “read order” or “submit form”.
-The intended preference order is structured API, WebMCP, DOM/accessibility,
-then vision as a last resort. Fallback changes how an allowed capability is
-implemented; it must not widen the capability, skip validation, or silently
-change the approval binding.
+The fixed trust/fallback order is structured API (`structured-api`), WebMCP
+(`webmcp`), DOM/accessibility (`dom-accessibility`), then vision (`vision`) as
+a last resort. The server selects only from adapters already bound to the
+approved capability and origin. A caller cannot select a lower-trust adapter
+to bypass the server's selection policy; vision requires explicit policy
+opt-in. Fallback changes how an allowed capability is implemented; it must not
+widen the capability, skip validation, or silently change the approval binding.
 
 Raw click, shell, arbitrary JavaScript, cookie access, filesystem browsing,
 and policy-bypass primitives are not public capabilities. New adapters should
@@ -85,6 +95,29 @@ as hostile input.
   runtime between tenants without an isolation design and tests that prove it.
 - Outputs remain JSON-safe. Do not place credentials, cookies, bearer tokens, or
   raw page secrets in status responses or logs.
+
+The in-process implementation also has finite bounds: plans are capped at 128
+nodes/32 dependencies per node/1,024 aggregate dependencies/512 KiB input;
+adapter descriptors and values are bounded; workflow storage defaults to
+10,000 records/256 MiB globally, 2,000 records/64 MiB per tenant, 500
+records/16 MiB per identity, and 4 MiB per record; the MCP gateway admits at
+most 64 active calls globally and 32 per session. These bounds are not a
+replacement for external rate limiting or tenant fair-use controls.
+
+Cancellation is cooperative. The transport can pass an `AbortSignal` through
+read-only execution to an adapter that observes it. Mutating execution does
+not receive that signal and cannot be made safe by racing an in-process
+timeout; a provider side effect may already have committed. There is no
+force-kill boundary in this repository.
+
+## Explicit MVP gaps
+
+This architecture does not include external authentication, a durable
+database or durable approval/audit authority, KMS/secret-vault integration,
+isolated browser profiles/workers, enforced network egress/DNS policy,
+production rate limiting, or a media/GPU worker. The default Dockerfile is
+non-root but uses a floating `node:20-alpine` tag; an immutable digest and
+image scan are required before any container release.
 
 ## Extension rules
 

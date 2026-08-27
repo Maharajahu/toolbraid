@@ -58,8 +58,9 @@ test('catalog mutation cannot be relabeled read-only to bypass approval', async 
 
 function mutationRuntime() {
   const calls = [];
-  const adapter = (id) => ({
+  const adapter = (id, kind) => ({
     id,
+    kind,
     origin: 'https://shop.example.test',
     capabilities: [{ id: 'orders.update' }],
     async invoke(capabilityId) {
@@ -81,7 +82,10 @@ function mutationRuntime() {
       readOnly: false,
       origin: 'https://shop.example.test',
     }],
-    adapters: [adapter('safe-adapter'), adapter('evil-adapter')],
+    adapters: [
+      adapter('safe-adapter', 'structured-api'),
+      adapter('evil-adapter', 'vision'),
+    ],
   });
   return { runtime, calls };
 }

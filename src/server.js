@@ -6,6 +6,7 @@ import {
   createMcpGateway,
   createStdioTransport,
   getToolDefinitions,
+  isRequestId,
   runStdio,
 } from './mcp/index.js';
 
@@ -13,6 +14,7 @@ import {
   PUBLIC_TOOL_DEFINITIONS,
   PUBLIC_TOOL_NAMES,
   RuntimeError,
+  assertFixtureAllowed,
   createCompositionRoot,
   createFixtureRuntime,
 } from './runtime/composition-root.js';
@@ -21,6 +23,7 @@ export {
   PUBLIC_TOOL_DEFINITIONS,
   PUBLIC_TOOL_NAMES,
   RuntimeError,
+  assertFixtureAllowed,
   createCompositionRoot,
   createFixtureRuntime,
 };
@@ -40,8 +43,12 @@ const JSON_RPC = Object.freeze({
  * listen() exposes the same dispatcher over HTTP.
  */
 export function createServer(options = {}) {
+  const fixtureRequested = options.fixture === true || options.fixtures === true;
+  // Fail before selecting/constructing a runtime so production cannot reach
+  // the legacy in-memory fixture path, even when a custom root is supplied.
+  assertFixtureAllowed(fixtureRequested);
   const root = options.root || options.runtime || (
-    options.fixture || options.fixtures ? createFixtureRuntime(options) : createCompositionRoot(options)
+    fixtureRequested ? createFixtureRuntime(options) : createCompositionRoot(options)
   );
   const externalDispatcher = options.dispatcher || options.mcp?.dispatcher || options.mcp?.dispatch;
   const gateway = options.gateway || (
@@ -51,12 +58,12 @@ export function createServer(options = {}) {
     instructions: options.instructions,
     requireIdentity: options.requireIdentity !== false,
     handlers: {
-      'capabilities.search': (args) => root.callTool('capabilities.search', args),
-      'capabilities.describe': (args) => root.callTool('capabilities.describe', args),
-      'plan.propose': (args) => root.callTool('plan.propose', args),
-      'workflow.execute': (args) => root.callTool('workflow.execute', args),
-      'workflow.status': (args) => root.callTool('workflow.status', args),
-      'workflow.replay_readonly': (args) => root.callTool('workflow.replay_readonly', args),
+      'capabilities.search': (args, context) => root.callTool('capabilities.search', args, context),
+      'capabilities.describe': (args, context) => root.callTool('capabilities.describe', args, context),
+      'plan.propose': (args, context) => root.callTool('plan.propose', args, context),
+      'workflow.execute': (args, context) => root.callTool('workflow.execute', args, context),
+      'workflow.status': (args, context) => root.callTool('workflow.status', args, context),
+      'workflow.replay_readonly': (args, context) => root.callTool('workflow.replay_readonly', args, context),
     },
     })
   );
@@ -73,12 +80,12 @@ export function createServer(options = {}) {
     publicToolDefinitions: getToolDefinitions(),
 
     /** Dispatch a semantic tool directly, without JSON-RPC envelopes. */
-    async callTool(name, args = {}) {
+    async callTool(name, args = {}, context = {}) {
       if (typeof externalDispatcher === 'function') {
-        const value = await externalDispatcher.call(options.dispatcher || options.mcp, name, args, root);
+        const value = await externalDispatcher.call(options.dispatcher || options.mcp, name, args, root, context);
         if (value !== undefined) return value;
       }
-      return root.callTool(name, args);
+      return root.callTool(name, args, context);
     },
     dispatch(name, args = {}) {
       return app.callTool(name, args);
@@ -113,7 +120,10 @@ export function createServer(options = {}) {
       return app.handleRequest(request, requestContext);
     },
     createStdioTransport(transportOptions = {}) {
-      return createStdioTransport(gateway, { ...transportOptions, session });
+      return createStdioTransport(gateway, {
+        ...transportOptions,
+        session: transportOptions.session ?? session,
+      });
     },
 
     /** Internal host hook; never registered as an MCP tool. */
@@ -265,6 +275,15 @@ async function handleHttpRequest(request, response, app, httpOptions) {
     }
     const headerFailure = validateMcpHttpHeaders(request.headers, parsed);
     if (headerFailure) {
+      // A notification has no request id and therefore must not receive a
+      // JSON-RPC error body, even when its transport metadata is malformed.
+      // Keep the HTTP-level acknowledgement empty so clients cannot mistake
+      // it for a response to an absent id.
+      if (isNotificationCandidate(parsed)) {
+        response.writeHead(202, { 'cache-control': 'no-store' });
+        response.end();
+        return;
+      }
       writeJson(response, 400, protocolError(parsed.id ?? null, -32020, 'Header mismatch', {
         reason: headerFailure,
       }));
@@ -458,7 +477,19 @@ function toolResult(value) {
 function protocolError(id, code, message, data) {
   const error = { code, message };
   if (data !== undefined) error.data = jsonSafe(data);
-  return { jsonrpc: '2.0', id, error };
+  return { jsonrpc: '2.0', id: isRequestId(id) ? id : null, error };
+}
+
+function isNotificationCandidate(message) {
+  return Boolean(
+    message &&
+    typeof message === 'object' &&
+    !Array.isArray(message) &&
+    message.jsonrpc === '2.0' &&
+    !Object.prototype.hasOwnProperty.call(message, 'id') &&
+    typeof message.method === 'string' &&
+    message.method.length > 0,
+  );
 }
 
 function errorCode(error) {
@@ -514,7 +545,8 @@ async function runCli() {
 const invokedPath = process.argv[1] ? path.resolve(process.argv[1]) : '';
 if (invokedPath && invokedPath === path.resolve(fileURLToPath(import.meta.url))) {
   runCli().catch((error) => {
-    process.stderr.write(`${error?.message || error}\n`);
+    const code = typeof error?.code === 'string' ? `${error.code}: ` : '';
+    process.stderr.write(`${code}${error?.message || error}\n`);
     process.exitCode = 1;
   });
 }

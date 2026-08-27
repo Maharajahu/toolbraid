@@ -2,6 +2,7 @@ export {
   PUBLIC_TOOL_NAMES,
   PUBLIC_TOOL_DEFINITIONS,
   RuntimeError,
+  assertFixtureAllowed,
   canonicalStringify,
   createCompositionRoot,
   createFixtureRuntime,

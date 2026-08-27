@@ -24,9 +24,18 @@ export {
   DeterministicPlanner,
   validatePlan,
   hashPlan,
+  capabilityBindingHash,
+  assertPlanInputBounds,
+  MAX_PLAN_NODES,
+  MAX_NODE_DEPENDENCIES,
+  MAX_TOTAL_DEPENDENCIES,
+  MAX_PLAN_INPUT_BYTES,
+  MAX_PLAN_DEPTH,
+  MAX_PLAN_VALUES,
 } from './planner.js';
 export {
   WorkflowStore,
+  DEFAULT_WORKFLOW_STORE_LIMITS,
   WORKFLOW_STATES,
   NODE_STATES,
   workflowKey,
@@ -36,4 +45,9 @@ export {
   approvalBinding,
   approvalRequest,
 } from './execution.js';
-
+export {
+  assertCapabilitySchemas,
+  assertSchemaValue,
+  schemaCheck,
+  isSchemaObject,
+} from './schema.js';

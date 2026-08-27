@@ -3,6 +3,7 @@ import { SecurityError } from "./errors.js";
 import { redactSecrets } from "./redaction.js";
 
 const ZERO_HASH = "0".repeat(64);
+export const DEFAULT_MAX_AUDIT_ENTRIES = 10_000;
 
 /**
  * In-memory append-only, hash-chained audit log.
@@ -20,7 +21,7 @@ export class AuditLog {
   #lastHash = ZERO_HASH;
   #sink;
 
-  constructor({ clock = () => Date.now(), maxEntries = Number.POSITIVE_INFINITY, sink } = {}) {
+  constructor({ clock = () => Date.now(), maxEntries = DEFAULT_MAX_AUDIT_ENTRIES, sink } = {}) {
     if (typeof clock !== "function") throw new SecurityError("INVALID_AUDIT_OPTIONS", "clock must be a function.");
     if (!(maxEntries === Number.POSITIVE_INFINITY || (Number.isSafeInteger(maxEntries) && maxEntries > 0))) {
       throw new SecurityError("INVALID_AUDIT_OPTIONS", "maxEntries must be a positive safe integer.");
@@ -86,6 +87,10 @@ export class AuditLog {
 
   get length() {
     return this.#entries.length;
+  }
+
+  get maxEntries() {
+    return this.#maxEntries;
   }
 
   get lastHash() {

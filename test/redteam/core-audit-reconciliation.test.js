@@ -8,6 +8,7 @@ import {
   ExecutionBroker,
   WorkflowStore,
 } from '../../src/core/index.js';
+import { createCompositionRoot } from '../../src/runtime/composition-root.js';
 
 const IDENTITY = Object.freeze({ tenantId: 'tenant-a', subjectId: 'subject-a' });
 const ORIGIN = 'https://shop.example';
@@ -57,7 +58,7 @@ function makeExecution(failingEvent) {
   return { broker, calls, input, store };
 }
 
-test('node completion audit failure terminalizes a committed side effect for reconciliation', async () => {
+test('node completion audit failure terminalizes an unknown mutation outcome for reconciliation', async () => {
   const { broker, calls, input, store } = makeExecution('node_completed');
 
   await assert.rejects(
@@ -67,7 +68,8 @@ test('node completion audit failure terminalizes a committed side effect for rec
       assert.equal(error.code, 'RECONCILIATION_REQUIRED');
       assert.equal(error.retryable, false);
       assert.deepEqual(error.details, {
-        effectCommitted: true,
+        effectMayHaveCommitted: true,
+        outcome: 'unknown',
         phase: 'node_completed',
         nodeId: 'update',
       });
@@ -103,4 +105,93 @@ test('workflow completion audit failure keeps completion terminal and never repe
   const repeated = await broker.execute(input);
   assert.equal(repeated.state, 'completed');
   assert.deepEqual(calls, ['update']);
+});
+
+test('mutation output-boundary failure requires reconciliation and never repeats the side effect', async () => {
+  const origin = 'https://shop.example';
+  const identity = {
+    tenantId: 'tenant-output-boundary',
+    subject: 'subject-output-boundary',
+    origin,
+  };
+  let sideEffects = 0;
+  const adapter = {
+    id: 'mutation-api',
+    origins: [origin],
+    capabilities: [{ id: 'orders.update' }],
+    execute() {
+      sideEffects += 1;
+      return {
+        ok: true,
+        output: { values: new Array(200_000).fill('x') },
+      };
+    },
+  };
+  const runtime = createCompositionRoot({
+    identity,
+    adapters: [adapter],
+    capabilities: [{
+      id: 'orders.update',
+      version: '1',
+      mode: 'mutation',
+      readOnly: false,
+      mutates: true,
+      adapters: [{ id: adapter.id }],
+      origins: [origin],
+      inputSchema: { type: 'object', additionalProperties: true },
+      outputSchema: { type: 'object', additionalProperties: true },
+    }],
+    policyRules: [{
+      effect: 'allow',
+      capabilities: ['orders.update'],
+      origins: [origin],
+      adapters: [adapter.id],
+    }],
+  });
+  const plan = await runtime.callTool('plan.propose', {
+    ...identity,
+    request: {
+      workflowId: 'mutation-output-boundary',
+      nodes: [{ capabilityId: 'orders.update', args: { orderId: 'order-1' } }],
+    },
+  });
+  const waiting = await runtime.callTool('workflow.execute', {
+    ...identity,
+    workflowId: plan.workflowId,
+    revision: plan.revision,
+  });
+  assert.equal(waiting.status, 'awaiting_approval');
+  await runtime.injectTrustedApproval(waiting.approvalRequest);
+
+  await assert.rejects(
+    runtime.callTool('workflow.execute', {
+      ...identity,
+      workflowId: plan.workflowId,
+      revision: plan.revision,
+    }),
+    (error) => error?.code === 'RECONCILIATION_REQUIRED' &&
+      error.retryable === false &&
+      error.details?.effectMayHaveCommitted === true &&
+      error.details?.outcome === 'unknown',
+  );
+  assert.equal(sideEffects, 1);
+
+  const failed = await runtime.callTool('workflow.status', {
+    ...identity,
+    workflowId: plan.workflowId,
+    revision: plan.revision,
+  });
+  assert.equal(failed.status, 'failed');
+  assert.equal(failed.error.code, 'RECONCILIATION_REQUIRED');
+  assert.equal(failed.error.retryable, false);
+  assert.equal(failed.error.details.effectMayHaveCommitted, true);
+  assert.equal(failed.error.details.outcome, 'unknown');
+
+  const repeated = await runtime.callTool('workflow.execute', {
+    ...identity,
+    workflowId: plan.workflowId,
+    revision: plan.revision,
+  });
+  assert.equal(repeated.status, 'failed');
+  assert.equal(sideEffects, 1);
 });

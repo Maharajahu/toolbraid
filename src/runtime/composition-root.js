@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 
-import { validatePlan } from '../core/index.js';
+import { assertPlanInputBounds, validatePlan } from '../core/index.js';
 import { getToolDefinitions } from '../mcp/tools.js';
 import {
   FIXTURE_IDS,
@@ -26,7 +26,7 @@ export const PUBLIC_TOOL_NAMES = Object.freeze([
 export const PUBLIC_TOOL_DEFINITIONS = Object.freeze(getToolDefinitions().map((definition) => deepFreeze(definition)));
 
 const PUBLIC_TOOL_SET = new Set(PUBLIC_TOOL_NAMES);
-const UNSAFE_CAPABILITY_WORDS = /(?:^|[._:/-])(approval|approve|click|shell|shellcommand|exec|execute|javascript|evaluate|eval|raw|cookie|cookies|filesystem|file|fs|keypress|keystroke|mouse)(?:$|[._:/-])/i;
+const UNSAFE_CAPABILITY_WORDS = /(?:^|[._:/-])(approval|approve|browser|click|code|command|shell|shellcommand|exec|execute|javascript|evaluate|eval|raw|cookie|cookies|filesystem|file|fs|keypress|keystroke|mouse|powershell|process|script|spawn|subprocess|system|terminal)(?:$|[._:/-])/i;
 const UNSAFE_CAPABILITY_KEYS = new Set([
   'approval', 'approvalid', 'approvalnonce', 'approvalrecord', 'approvaltoken',
   'code', 'command', 'cookie', 'cookies', 'eval', 'evaluate', 'exec', 'execute',
@@ -36,6 +36,10 @@ const UNSAFE_CAPABILITY_KEYS = new Set([
 const SECRET_KEY = /(?:authorization|bearer|cookie|password|passwd|secret|token|api[_-]?key|private[_-]?key|credential|session|access[_-]?key|refresh[_-]?token)/i;
 const CAPABILITY_VERSION_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._+\-]{0,63}$/;
 const WORKFLOW_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:@/+\-]{0,199}$/;
+const CAPABILITY_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
+const NODE_ID_PATTERN = CAPABILITY_ID_PATTERN;
+const MAX_TRUSTED_APPROVALS = 4096;
+const MAX_PENDING_APPROVAL_NONCES = 1024;
 
 /**
  * Error type used at the composition boundary.  It deliberately has no stack
@@ -63,6 +67,22 @@ export class RuntimeError extends Error {
 }
 
 /**
+ * Fixture mode keeps a compatibility execution path that intentionally uses
+ * in-memory state and deterministic adapters.  It must never be enabled by a
+ * production process, where that path could treat adapter observations as
+ * capability authority.  Keep this check before fixture construction and
+ * before the legacy capability maps are populated.
+ */
+export function assertFixtureAllowed(fixtureRequested) {
+  if (fixtureRequested === true && process.env.NODE_ENV === 'production') {
+    throw new RuntimeError(
+      'INSECURE_FIXTURE_FORBIDDEN',
+      'Fixture runtime is disabled when NODE_ENV=production',
+    );
+  }
+}
+
+/**
  * Build the server's composition root.  Neighboring modules can be supplied
  * through options (catalog, planner, policy, approvals, audit, broker and
  * adapters).  The small in-memory implementations below are intentionally
@@ -71,6 +91,7 @@ export class RuntimeError extends Error {
  */
 export function createCompositionRoot(options = {}) {
   const fixtureRequested = options.fixture === true || options.fixtures === true;
+  assertFixtureAllowed(fixtureRequested);
   const fixture = fixtureRequested ? createFixtureDependencies(options) : null;
   const source = {
     ...(fixture || {}),
@@ -164,17 +185,17 @@ export function createCompositionRoot(options = {}) {
       describe: (input) => describeCapability(input),
     },
     plan: {
-      propose: (input) => proposePlan(input),
+      propose: (input, context) => proposePlan(input, context),
     },
     workflow: {
-      execute: (input) => executeWorkflow(input),
-      status: (input) => workflowStatus(input),
-      replayReadonly: (input) => replayReadonly(input),
-      replay_readonly: (input) => replayReadonly(input),
+      execute: (input, context) => executeWorkflow(input, context),
+      status: (input, context) => workflowStatus(input, context),
+      replayReadonly: (input, context) => replayReadonly(input, context),
+      replay_readonly: (input, context) => replayReadonly(input, context),
     },
 
     /** Dispatch one of the six public semantic tools. */
-    async callTool(name, input = {}) {
+    async callTool(name, input = {}, context = {}) {
       if (!PUBLIC_TOOL_SET.has(name)) {
         throw new RuntimeError('TOOL_NOT_FOUND', `Unknown public tool: ${name}`, { details: { name } });
       }
@@ -186,7 +207,7 @@ export function createCompositionRoot(options = {}) {
         'workflow.status': workflowStatus,
         'workflow.replay_readonly': replayReadonly,
       }[name];
-      return operation(input || {});
+      return operation(input || {}, context);
     },
     dispatch(name, input = {}) {
       return runtime.callTool(name, input);
@@ -310,7 +331,7 @@ export function createCompositionRoot(options = {}) {
 
   async function describeCapability(input = {}) {
     const request = assertRequestIdentity(input, identity);
-    const capabilityId = String(input.capabilityId || input.id || input.name || '').trim();
+    const capabilityId = normalizeCapabilityIdInput(input.capabilityId ?? input.id ?? input.name);
     if (!capabilityId) {
       throw new RuntimeError('INVALID_ARGUMENT', 'capabilityId is required', {
         details: { field: 'capabilityId' },
@@ -377,10 +398,15 @@ export function createCompositionRoot(options = {}) {
     };
   }
 
-  async function proposePlan(input = {}) {
+  async function proposePlan(input = {}, context = {}) {
     const requestIdentity = assertRequestIdentity(input, identity);
+    try {
+      assertPlanInputBounds(input);
+    } catch (error) {
+      throw toRuntimeError(error, 'PLAN_LIMIT_EXCEEDED', 'Workflow proposal exceeds safety limits');
+    }
     const request = normalizePlanRequest(input);
-    if (usingCore) return proposeCorePlan(input, requestIdentity, request);
+    if (usingCore) return proposeCorePlan(input, requestIdentity, request, context);
     let proposed;
     if (external.planner) {
       proposed = await invokeFirst(external.planner, ['propose', 'plan', 'createPlan'], [{
@@ -404,7 +430,7 @@ export function createCompositionRoot(options = {}) {
     return publicWorkflow(record);
   }
 
-  async function proposeCorePlan(input, requestIdentity, request) {
+  async function proposeCorePlan(input, requestIdentity, request, _context = {}) {
     const identityForCore = {
       tenantId: requestIdentity.tenantId,
       subjectId: requestIdentity.subjectId,
@@ -467,10 +493,9 @@ export function createCompositionRoot(options = {}) {
     return publicValue;
   }
 
-  async function executeCoreWorkflow(input, requestIdentity) {
+  async function executeCoreWorkflow(input, requestIdentity, context = {}) {
     rejectUntrustedApproval(input);
-    const workflowId = String(input.workflowId || input.id || '').trim();
-    if (!workflowId) throw new RuntimeError('INVALID_ARGUMENT', 'workflowId is required', { details: { field: 'workflowId' } });
+    const workflowId = normalizeWorkflowIdInput(input.workflowId ?? input.id);
     const revision = input.revision === undefined ? 1 : requestedRevision(input.revision);
     const identityForCore = {
       tenantId: requestIdentity.tenantId,
@@ -478,15 +503,17 @@ export function createCompositionRoot(options = {}) {
     };
     let result;
     try {
+      const brokerInput = {
+        identity: identityForCore,
+        workflowId,
+        revision,
+        ...(requestIdentity.origin ? { origin: requestIdentity.origin } : {}),
+      };
+      if (context?.signal !== undefined) brokerInput.context = { signal: context.signal };
       result = await invokeRequired(
         external.broker,
         ['execute', 'run', 'invoke'],
-        [{
-          identity: identityForCore,
-          workflowId,
-          revision,
-          ...(requestIdentity.origin ? { origin: requestIdentity.origin } : {}),
-        }],
+        [brokerInput],
         'WORKFLOW_EXECUTION_UNAVAILABLE',
       );
     } catch (error) {
@@ -505,9 +532,8 @@ export function createCompositionRoot(options = {}) {
     return publicValue;
   }
 
-  async function statusCoreWorkflow(input, requestIdentity) {
-    const workflowId = String(input.workflowId || input.id || '').trim();
-    if (!workflowId) throw new RuntimeError('INVALID_ARGUMENT', 'workflowId is required', { details: { field: 'workflowId' } });
+  async function statusCoreWorkflow(input, requestIdentity, _context = {}) {
+    const workflowId = normalizeWorkflowIdInput(input.workflowId ?? input.id);
     const revision = input.revision === undefined ? 1 : requestedRevision(input.revision);
     const identityForCore = { tenantId: requestIdentity.tenantId, subjectId: requestIdentity.subject };
     let result;
@@ -555,10 +581,9 @@ export function createCompositionRoot(options = {}) {
     return undefined;
   }
 
-  async function replayCoreWorkflow(input, requestIdentity) {
+  async function replayCoreWorkflow(input, requestIdentity, context = {}) {
     rejectUntrustedApproval(input);
-    const workflowId = String(input.workflowId || input.id || '').trim();
-    if (!workflowId) throw new RuntimeError('INVALID_ARGUMENT', 'workflowId is required', { details: { field: 'workflowId' } });
+    const workflowId = normalizeWorkflowIdInput(input.workflowId ?? input.id);
     const revision = input.revision === undefined ? 1 : requestedRevision(input.revision);
     const identityForCore = { tenantId: requestIdentity.tenantId, subjectId: requestIdentity.subject };
     const replayInput = {
@@ -569,13 +594,14 @@ export function createCompositionRoot(options = {}) {
       ...(input.nodeIds === undefined ? {} : { nodeIds: cloneJson(input.nodeIds) }),
       ...(input.limit === undefined ? {} : { limit: input.limit }),
     };
+    if (context?.signal !== undefined) replayInput.context = { signal: context.signal };
     const result = await invokeRequired(external.broker, ['replayReadonly', 'replay', 'replay_readonly'], [replayInput], 'WORKFLOW_REPLAY_UNAVAILABLE');
     return publicCoreReplay(result);
   }
 
-  async function executeWorkflow(input = {}) {
+  async function executeWorkflow(input = {}, context = {}) {
     const requestIdentity = assertRequestIdentity(input, identity);
-    if (usingCore) return executeCoreWorkflow(input, requestIdentity);
+    if (usingCore) return executeCoreWorkflow(input, requestIdentity, context);
     for (const key of [
       'approval',
       'approvals',
@@ -591,12 +617,7 @@ export function createCompositionRoot(options = {}) {
         throw new RuntimeError('UNTRUSTED_APPROVAL', 'Approvals must come from the trusted server-side approval store');
       }
     }
-    const workflowId = String(input.workflowId || input.id || '').trim();
-    if (!workflowId) {
-      throw new RuntimeError('INVALID_ARGUMENT', 'workflowId is required', {
-        details: { field: 'workflowId' },
-      });
-    }
+    const workflowId = normalizeWorkflowIdInput(input.workflowId ?? input.id);
     const record = workflows.get(workflowId);
     if (!record) {
       throw new RuntimeError('WORKFLOW_NOT_FOUND', `Workflow not found: ${workflowId}`, {
@@ -692,7 +713,7 @@ export function createCompositionRoot(options = {}) {
       }
 
       try {
-        const output = await invokeNode(node, record, { readOnly, capability });
+        const output = await invokeNode(node, record, { readOnly, capability, signal: context?.signal });
         const recorded = {
           nodeId: node.nodeId,
           capabilityId: node.capabilityId,
@@ -739,15 +760,10 @@ export function createCompositionRoot(options = {}) {
     }
   }
 
-  async function workflowStatus(input = {}) {
+  async function workflowStatus(input = {}, _context = {}) {
     const requestIdentity = assertRequestIdentity(input, identity);
-    if (usingCore) return statusCoreWorkflow(input, requestIdentity);
-    const workflowId = String(input.workflowId || input.id || '').trim();
-    if (!workflowId) {
-      throw new RuntimeError('INVALID_ARGUMENT', 'workflowId is required', {
-        details: { field: 'workflowId' },
-      });
-    }
+    if (usingCore) return statusCoreWorkflow(input, requestIdentity, _context);
+    const workflowId = normalizeWorkflowIdInput(input.workflowId ?? input.id);
     const record = workflows.get(workflowId);
     if (!record) {
       throw new RuntimeError('WORKFLOW_NOT_FOUND', `Workflow not found: ${workflowId}`, {
@@ -759,15 +775,10 @@ export function createCompositionRoot(options = {}) {
     return publicWorkflow(record);
   }
 
-  async function replayReadonly(input = {}) {
+  async function replayReadonly(input = {}, context = {}) {
     const requestIdentity = assertRequestIdentity(input, identity);
-    if (usingCore) return replayCoreWorkflow(input, requestIdentity);
-    const workflowId = String(input.workflowId || input.id || '').trim();
-    if (!workflowId) {
-      throw new RuntimeError('INVALID_ARGUMENT', 'workflowId is required', {
-        details: { field: 'workflowId' },
-      });
-    }
+    if (usingCore) return replayCoreWorkflow(input, requestIdentity, context);
+    const workflowId = normalizeWorkflowIdInput(input.workflowId ?? input.id);
     const record = workflows.get(workflowId);
     if (!record) {
       throw new RuntimeError('WORKFLOW_NOT_FOUND', `Workflow not found: ${workflowId}`, {
@@ -811,7 +822,7 @@ export function createCompositionRoot(options = {}) {
       // Re-run only semantic read nodes.  No approval is consulted and no
       // mutation node is ever handed to an adapter during replay.
       try {
-        const output = await invokeNode(node, record, { readOnly: true, capability, replay: true });
+        const output = await invokeNode(node, record, { readOnly: true, capability, replay: true, signal: context?.signal });
         replayedNodes.push({
           nodeId: node.nodeId,
           capabilityId: node.capabilityId,
@@ -898,8 +909,21 @@ export function createCompositionRoot(options = {}) {
       throw new RuntimeError('APPROVAL_EXPIRED', 'Approval has expired');
     }
     const key = approvalKey(bound);
+    pruneApprovalState();
     if (trustedApprovals.has(key) || pendingApprovalNonces.has(key)) {
       throw new RuntimeError('APPROVAL_NONCE_REUSED', 'Approval nonce has already been injected');
+    }
+    if (pendingApprovalNonces.size >= MAX_PENDING_APPROVAL_NONCES) {
+      throw new RuntimeError('APPROVAL_STORE_FULL', 'Too many approval insertions are in flight', {
+        retryable: true,
+        details: { maxPending: MAX_PENDING_APPROVAL_NONCES },
+      });
+    }
+    if (trustedApprovals.size >= MAX_TRUSTED_APPROVALS) {
+      throw new RuntimeError('APPROVAL_STORE_FULL', 'Trusted approval retention limit reached', {
+        retryable: true,
+        details: { maxTrusted: MAX_TRUSTED_APPROVALS },
+      });
     }
     const trusted = {
       ...bound,
@@ -987,6 +1011,13 @@ export function createCompositionRoot(options = {}) {
     if (!issuer || typeof issuer.issue !== 'function') {
       throw new RuntimeError('APPROVAL_UNAVAILABLE', 'Trusted approval issuance is not configured');
     }
+    pruneApprovalState();
+    if (trustedApprovals.size >= MAX_TRUSTED_APPROVALS) {
+      throw new RuntimeError('APPROVAL_STORE_FULL', 'Trusted approval retention limit reached', {
+        retryable: true,
+        details: { maxTrusted: MAX_TRUSTED_APPROVALS },
+      });
+    }
     let credential;
     try {
       credential = issuer.issue({
@@ -1031,8 +1062,15 @@ export function createCompositionRoot(options = {}) {
 
   function findCoreCredential(binding = {}) {
     const requestedHash = String(binding.argsHash || binding.argumentHash || binding.canonicalArgsHash || '');
-    for (const entry of trustedApprovals.values()) {
+    const current = pruneApprovalState();
+    const entries = [...trustedApprovals.values()];
+    // Map iteration is insertion ordered.  Walk newest-first so a later
+    // approval can replace an expired/invalid earlier one for the same exact
+    // binding without being shadowed by stale compatibility state.
+    for (let index = entries.length - 1; index >= 0; index -= 1) {
+      const entry = entries[index];
       if (!entry?.credential) continue;
+      if (!approvalIsUsable(entry, current)) continue;
       if (entry.tenantId !== binding.tenantId || entry.subjectId !== (binding.subjectId || binding.subject)) continue;
       if (entry.workflowId !== binding.workflowId || Number(entry.revision) !== Number(binding.revision)) continue;
       if (entry.nodeId !== binding.nodeId || entry.origin !== binding.origin || entry.adapter !== (binding.adapter || binding.adapterId)) continue;
@@ -1040,6 +1078,63 @@ export function createCompositionRoot(options = {}) {
       return cloneJson(entry.credential);
     }
     return undefined;
+  }
+
+  /**
+   * Remove stale compatibility records before they can block a newer
+   * credential or consume unbounded memory.  The core ApprovalAuthority is
+   * still the source of truth for single-use state; its status() result lets
+   * this resolver retire credentials consumed by the broker itself.
+   */
+  function pruneApprovalState() {
+    const current = now();
+    const nowMs = current.getTime();
+    for (const [key, entry] of trustedApprovals) {
+      const state = approvalState(entry, current, nowMs);
+      if (state.retire) trustedApprovals.delete(key);
+    }
+    return current;
+  }
+
+  function approvalIsUsable(entry, current) {
+    return approvalState(entry, current, current.getTime()).valid === true;
+  }
+
+  function approvalState(entry, current, nowMs) {
+    if (!entry || typeof entry !== 'object') return { retire: true };
+    if (entry.consumed === true || entry.credential?.consumed === true) {
+      return { consumed: true, retire: true };
+    }
+    const credential = entry.credential && typeof entry.credential === 'object'
+      ? entry.credential
+      : entry;
+    const approvalId = credential.approvalId;
+    if (approvalId && external.approvals && typeof external.approvals.status === 'function') {
+      let status;
+      try {
+        status = external.approvals.status(String(approvalId));
+      } catch {
+        // A status failure is not evidence of validity.  Keep the record for
+        // a later attempt, but do not let this resolver use it now.
+        return { unknown: true };
+      }
+      if (status?.found === false) return { invalid: true, retire: true };
+      if (status?.usedAt !== undefined && status.usedAt !== null) {
+        return { consumed: true, retire: true };
+      }
+    }
+    const expiresAt = credential.expiresAt ?? entry.expiresAt;
+    // ApprovalAuthority credentials use safe-integer millisecond timestamps.
+    // The legacy compatibility normalizer also accepts second timestamps, so
+    // do not run a freshly issued core credential through that heuristic (it
+    // would misclassify early-epoch test clocks such as `120000`).
+    const expiryMs = credential !== entry && typeof expiresAt === 'number'
+      ? expiresAt
+      : normalizeExpiry(expiresAt, current);
+    if (!Number.isFinite(expiryMs) || expiryMs <= nowMs) {
+      return { expired: true, retire: true };
+    }
+    return { valid: true };
   }
 
   function findTrustedApproval(record, node) {
@@ -1091,15 +1186,24 @@ export function createCompositionRoot(options = {}) {
   }
 
   async function invokeNode(node, record, context) {
+    const readOnly = context?.readOnly === true;
+    const signal = readOnly ? context?.signal : undefined;
+    const invocationContext = {
+      ...context,
+      ...(signal === undefined ? {} : { signal }),
+    };
     if (external.broker) {
-      const brokerResult = await invokeFirst(external.broker, ['execute', 'invoke', 'run'], [{
+      const brokerInput = {
         node: cloneJson(node),
         workflow: publicWorkflow(record),
         tenantId: record.tenantId,
         subject: record.subject,
         origin: record.origin,
-        ...context,
-      }]);
+        ...invocationContext,
+      };
+      delete brokerInput.signal;
+      if (signal !== undefined) brokerInput.context = { signal };
+      const brokerResult = await invokeFirst(external.broker, ['execute', 'invoke', 'run'], [brokerInput]);
       if (brokerResult !== undefined) return brokerResult;
     }
     const adapter = selectAdapter(node, record.origin);
@@ -1117,8 +1221,9 @@ export function createCompositionRoot(options = {}) {
       workflowId: record.workflowId,
       revision: record.revision,
       nodeId: node.nodeId,
-      readOnly: context.readOnly === true,
+      readOnly,
       replay: context.replay === true,
+      ...(signal === undefined ? {} : { signal }),
     });
   }
 
@@ -1253,7 +1358,19 @@ function normalizePlan(plan, identity, request, resolveCapability = () => undefi
   const goal = requestedGoal === undefined ? undefined : normalizePlanGoal(requestedGoal);
   const normalizedNodes = (Array.isArray(nodes) ? nodes : []).map((node, index) => {
     const candidate = node && typeof node === 'object' ? node : { capabilityId: node };
-    const capabilityId = String(candidate.capabilityId || candidate.operation || candidate.name || '').trim();
+    const rawNodeId = candidate.nodeId ?? candidate.id ?? `node-${index + 1}`;
+    if (typeof rawNodeId !== 'string' || !NODE_ID_PATTERN.test(rawNodeId)) {
+      throw new RuntimeError('INVALID_PLAN', `Node ${index} has an invalid id`, {
+        details: { field: 'nodeId', index },
+      });
+    }
+    const rawCapabilityId = candidate.capabilityId ?? candidate.operation ?? candidate.name ?? '';
+    const capabilityId = typeof rawCapabilityId === 'string' ? rawCapabilityId : '';
+    if (!CAPABILITY_ID_PATTERN.test(capabilityId)) {
+      throw new RuntimeError('INVALID_PLAN', `Node ${rawNodeId} has an invalid capabilityId`, {
+        details: { field: 'capabilityId', nodeId: rawNodeId },
+      });
+    }
     if (!capabilityId) {
       throw new RuntimeError('INVALID_PLAN', 'Every workflow node requires a semantic capabilityId', {
         details: { index },
@@ -1292,11 +1409,24 @@ function normalizePlan(plan, identity, request, resolveCapability = () => undefi
     // adapter/catalog may explicitly declare a read operation; ambiguity is a
     // mutation so the approval boundary fails closed.
     const readOnly = typeof catalogReadOnly === 'boolean' ? catalogReadOnly : declaredReadOnly === true;
+    const rawCapabilityVersion = candidate.capabilityVersion ?? candidate.version ?? metadata?.version;
+    if (rawCapabilityVersion !== undefined &&
+        (typeof rawCapabilityVersion !== 'string' || !CAPABILITY_VERSION_PATTERN.test(rawCapabilityVersion))) {
+      throw new RuntimeError('INVALID_PLAN', `Node ${rawNodeId} has an invalid capability version`, {
+        details: { field: 'capabilityVersion', nodeId: rawNodeId },
+      });
+    }
+    if (candidate.operation !== undefined &&
+        (typeof candidate.operation !== 'string' || !CAPABILITY_ID_PATTERN.test(candidate.operation))) {
+      throw new RuntimeError('INVALID_PLAN', `Node ${rawNodeId} has an invalid operation`, {
+        details: { field: 'operation', nodeId: rawNodeId },
+      });
+    }
     return {
-      nodeId: String(candidate.nodeId || candidate.id || `node-${index + 1}`),
+      nodeId: rawNodeId,
       capabilityId,
-      capabilityVersion: String(candidate.capabilityVersion || candidate.version || metadata?.version || ''),
-      operation: String(candidate.operation || capabilityId),
+      capabilityVersion: rawCapabilityVersion === undefined ? '' : rawCapabilityVersion,
+      operation: candidate.operation === undefined ? capabilityId : candidate.operation,
       args: cloneJson(candidate.args || candidate.arguments || {}),
       adapterId: candidate.adapterId,
       adapter: candidate.adapter,
@@ -1424,7 +1554,12 @@ function publicCoreWorkflow(record, fallbackPlan, request) {
     value.approvalRequest = approval;
     value.approvalRequired = true;
   }
-  return cloneJson(value);
+  // The core store deliberately retains the original plan, request, node
+  // states, and provider outputs so that execution and reconciliation can use
+  // them. This public projection must redact every nested branch, not only the
+  // derived outputs array above. Redact the detached projection after all
+  // compatibility fields have been assembled; never mutate the store record.
+  return cloneJson(redactSecrets(value));
 }
 
 function publicCoreExecution(result) {
@@ -1522,7 +1657,8 @@ function consistentExplicitValue(field, candidates, { required = true } = {}) {
   const values = candidates.filter((value) => value !== undefined);
   if (values.length === 0) return required ? '' : undefined;
   if (values.some((value) => typeof value !== 'string' || value.length === 0 || value.length > 2048 ||
-      value.trim() !== value || /[\u0000-\u001f\u007f]/u.test(value))) {
+      value.trim() !== value || /[\u0000-\u001f\u007f]/u.test(value) ||
+      ((field === 'tenantId' || field === 'subject') && !WORKFLOW_ID_PATTERN.test(value)))) {
     throw new RuntimeError('INVALID_IDENTITY', `${field} is invalid`);
   }
   if (!values.every((value) => value === values[0])) {
@@ -1539,10 +1675,10 @@ function assertWorkflowIdentity(record, identity) {
 }
 
 function requestedRevision(value) {
-  if (typeof value === 'number' && Number.isSafeInteger(value) && value > 0) return value;
+  if (typeof value === 'number' && Number.isSafeInteger(value) && value > 0 && value <= 2_147_483_647) return value;
   if (typeof value === 'string' && /^[1-9]\d{0,9}$/.test(value)) {
     const parsed = Number(value);
-    if (Number.isSafeInteger(parsed)) return parsed;
+    if (Number.isSafeInteger(parsed) && parsed <= 2_147_483_647) return parsed;
   }
   throw new RuntimeError('WORKFLOW_REVISION_MISMATCH', 'Workflow revision is invalid');
 }
@@ -1576,6 +1712,26 @@ function normalizeWorkflowId(value) {
   return value;
 }
 
+function normalizeWorkflowIdInput(value) {
+  if (value === undefined || value === null || value === '') return '';
+  if (typeof value !== 'string' || !WORKFLOW_ID_PATTERN.test(value)) {
+    throw new RuntimeError('INVALID_ARGUMENT', 'workflowId must be a valid non-empty identifier', {
+      details: { field: 'workflowId' },
+    });
+  }
+  return value;
+}
+
+function normalizeCapabilityIdInput(value) {
+  if (value === undefined || value === null || value === '') return '';
+  if (typeof value !== 'string' || !CAPABILITY_ID_PATTERN.test(value)) {
+    throw new RuntimeError('INVALID_ARGUMENT', 'capabilityId must be a valid identifier', {
+      details: { field: 'capabilityId' },
+    });
+  }
+  return value;
+}
+
 function normalizeCapabilityVersion(value) {
   const version = value === undefined || value === null ? '1' : value;
   if (typeof version !== 'string' || !CAPABILITY_VERSION_PATTERN.test(version)) {
@@ -1601,7 +1757,7 @@ function normalizeReplayNodeIds(value) {
   }
   const result = [];
   for (const nodeId of value) {
-    if (typeof nodeId !== 'string' || !nodeId || nodeId.length > 128) {
+    if (typeof nodeId !== 'string' || !NODE_ID_PATTERN.test(nodeId)) {
       throw new RuntimeError('INVALID_REPLAY', 'nodeIds contains an invalid node id');
     }
     if (!result.includes(nodeId)) result.push(nodeId);
@@ -1636,7 +1792,7 @@ function normalizeCapabilities(value, adapters) {
 function normalizeCapability(value, fallbackOrigin) {
   const source = value && typeof value === 'object' ? value : { id: value };
   const id = String(source.id || source.capabilityId || source.name || '').trim();
-  if (!id || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(id)) {
+  if (!id || !CAPABILITY_ID_PATTERN.test(id)) {
     throw new RuntimeError('INVALID_CAPABILITY', 'Capability id is invalid');
   }
   if (UNSAFE_CAPABILITY_WORDS.test(id)) {
@@ -1761,7 +1917,7 @@ function normalizeSearchQuery(value) {
 
 function normalizeSearchKind(value) {
   if (value === undefined || value === null || value === '') return undefined;
-  if (typeof value !== 'string' || value.trim() !== value) {
+  if (typeof value !== 'string' || value.length > 500 || value.trim() !== value) {
     throw new RuntimeError('INVALID_ARGUMENT', 'kind must be a non-empty string', { details: { field: 'kind' } });
   }
   return value.toLowerCase();
@@ -1769,7 +1925,7 @@ function normalizeSearchKind(value) {
 
 function normalizeSearchAdapter(value) {
   if (value === undefined || value === null || value === '') return undefined;
-  if (typeof value !== 'string' || value.trim() !== value) {
+  if (typeof value !== 'string' || value.length > 500 || value.trim() !== value) {
     throw new RuntimeError('INVALID_ARGUMENT', 'adapter must be a non-empty string', { details: { field: 'adapter' } });
   }
   return value;
@@ -1777,7 +1933,7 @@ function normalizeSearchAdapter(value) {
 
 function normalizeSearchTags(value) {
   if (value === undefined || value === null) return [];
-  if (!Array.isArray(value) || value.some((entry) => typeof entry !== 'string' || entry.length === 0 || entry.trim() !== entry)) {
+  if (!Array.isArray(value) || value.some((entry) => typeof entry !== 'string' || entry.length === 0 || entry.length > 200 || entry.trim() !== entry)) {
     throw new RuntimeError('INVALID_ARGUMENT', 'tags must be an array of non-empty strings', { details: { field: 'tags' } });
   }
   return [...new Set(value)];
@@ -1801,7 +1957,7 @@ function normalizeSearchLimit(value) {
 
 function normalizeSearchCursor(value) {
   if (value === undefined || value === null || value === '') return 0;
-  if (typeof value !== 'string' || !/^\d+$/.test(value)) {
+  if (typeof value !== 'string' || value.length > 15 || !/^\d+$/.test(value)) {
     throw new RuntimeError('INVALID_ARGUMENT', 'cursor must be a non-negative integer string', { details: { field: 'cursor' } });
   }
   const parsed = Number(value);
@@ -2026,7 +2182,7 @@ function redactSecrets(value, seen = new Set()) {
 }
 
 function redactCapabilityMetadata(value, key = '', seen = new Set()) {
-  if (key && UNSAFE_CAPABILITY_KEYS.has(key.toLowerCase())) return undefined;
+  if (key && isUnsafeCapabilityKey(key)) return undefined;
   if (key && SECRET_KEY.test(key)) return '[REDACTED]';
   if (value === null || typeof value === 'string' || typeof value === 'boolean') return value;
   if (typeof value === 'number') return Number.isFinite(value) ? value : '[UNSERIALIZABLE]';
@@ -2045,6 +2201,12 @@ function redactCapabilityMetadata(value, key = '', seen = new Set()) {
   }
   seen.delete(value);
   return output;
+}
+
+function isUnsafeCapabilityKey(key) {
+  const normalized = String(key).toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (UNSAFE_CAPABILITY_KEYS.has(normalized)) return true;
+  return /^(?:raw|shell|command|code|javascript|eval|exec|process|spawn|subprocess|powershell|terminal|system|cookie|filesystem|selector|xpath)/.test(normalized);
 }
 
 function cloneJson(value, seen = new Set()) {

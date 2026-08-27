@@ -13,6 +13,11 @@ const FORBIDDEN_CAPABILITY_NAMES = new Set([
   'click', 'dom.click', 'page.click', 'shell', 'shell.exec', 'javascript',
   'javascript.eval', 'page.evaluate', 'browser.evaluate', 'raw.click',
 ]);
+const FORBIDDEN_CAPABILITY_PARTS = new Set([
+  'browser', 'click', 'cmd', 'code', 'command', 'cookie', 'eval', 'exec', 'execute',
+  'file', 'filesystem', 'javascript', 'powershell', 'process', 'raw', 'script',
+  'shell', 'spawn', 'subprocess', 'system', 'terminal',
+]);
 
 /**
  * In-memory capability catalog.  The catalog is intentionally tenant scoped:
@@ -55,10 +60,21 @@ export class CapabilityCatalog {
     // Validate the complete batch before changing the catalog.  A malformed
     // provider response must not leave a partially updated catalog.
     const normalized = operation.capabilities.map((capability) => normalizeCapability(capability, identity));
+    // Apply the batch to a copy so conflicts (including duplicate keys in the
+    // same batch) cannot leave an earlier item committed when a later item
+    // fails.  Publish the new map only after every insertion succeeds.
+    const nextRecords = new Map(this.#records);
     for (const capability of normalized) {
-      this.#insert(capability, operation.replace === true);
+      const key = recordKey(capability.tenantId, capability.id, capability.version);
+      if (nextRecords.has(key) && operation.replace !== true) {
+        throw new CoreError('CAPABILITY_CONFLICT', 'Capability version is already registered', {
+          details: { capabilityId: capability.id, version: capability.version },
+        });
+      }
+      nextRecords.set(key, capability);
       result.push(jsonClone(capability));
     }
+    this.#records = nextRecords;
     return { capabilities: result };
   }
 
@@ -67,16 +83,13 @@ export class CapabilityCatalog {
     const identity = requireIdentity(operation);
     const id = requireCapabilityId(operation.capabilityId ?? operation.id);
     const version = normalizeVersion(operation.version);
-    const key = recordKey(id, version);
+    const key = recordKey(identity.tenantId, id, version);
     const record = this.#records.get(key);
-    if (!record || !visibleTo(record, identity)) {
+    if (!record) {
+      if (this.#records.has(recordKey('*', id, version))) {
+        throw new CoreError('CAPABILITY_FORBIDDEN', 'Capability is outside the tenant scope');
+      }
       throw new CoreError('CAPABILITY_NOT_FOUND', 'Capability was not found');
-    }
-    // Tenant registrations can only remove their own record.  A public record
-    // can be removed only by a caller that explicitly supplied the same public
-    // scope at construction time (there is no public mutating API for that).
-    if (record.tenantId !== identity.tenantId) {
-      throw new CoreError('CAPABILITY_FORBIDDEN', 'Capability is outside the tenant scope');
     }
     this.#records.delete(key);
     return { removed: true, capabilityId: id, version };
@@ -91,9 +104,17 @@ export class CapabilityCatalog {
     const origin = optionalString(operation.origin, 'origin');
     const readOnly = optionalBoolean(operation.readOnly, 'readOnly');
     const limit = normalizeLimit(operation.limit);
-    const candidates = [];
+    const visibleRecords = new Map();
     for (const record of this.#records.values()) {
       if (!visibleTo(record, identity)) continue;
+      const key = capabilityKey(record.id, record.version);
+      const current = visibleRecords.get(key);
+      if (!current || (current.tenantId === '*' && record.tenantId === identity.tenantId)) {
+        visibleRecords.set(key, record);
+      }
+    }
+    const candidates = [];
+    for (const record of visibleRecords.values()) {
       if (readOnly !== undefined && record.readOnly !== readOnly) continue;
       if (adapter && !record.adapters.some((entry) => entry.id === adapter)) continue;
       if (origin && !record.origins.includes(origin)) continue;
@@ -125,8 +146,8 @@ export class CapabilityCatalog {
     const identity = requireIdentity(operation);
     const id = requireCapabilityId(operation.capabilityId ?? operation.id);
     const version = normalizeVersion(operation.version);
-    const record = this.#records.get(recordKey(id, version));
-    if (!record || !visibleTo(record, identity)) {
+    const record = this.#visibleRecord(identity, id, version);
+    if (!record) {
       throw new CoreError('CAPABILITY_NOT_FOUND', 'Capability was not found');
     }
     return jsonClone(record);
@@ -142,8 +163,7 @@ export class CapabilityCatalog {
     const identity = requireIdentity(operation);
     const id = requireCapabilityId(operation.capabilityId ?? operation.id);
     const version = normalizeVersion(operation.version);
-    const record = this.#records.get(recordKey(id, version));
-    return Boolean(record && visibleTo(record, identity));
+    return Boolean(this.#visibleRecord(identity, id, version));
   }
 
   // Internal use by the planner/execution broker.  It still requires explicit
@@ -153,21 +173,26 @@ export class CapabilityCatalog {
     const identity = requireIdentity(operation);
     const id = requireCapabilityId(operation.capabilityId ?? operation.id);
     const version = normalizeVersion(operation.version);
-    const record = this.#records.get(recordKey(id, version));
-    if (!record || !visibleTo(record, identity)) {
+    const record = this.#visibleRecord(identity, id, version);
+    if (!record) {
       throw new CoreError('CAPABILITY_NOT_FOUND', 'Capability was not found');
     }
     return jsonClone(record);
   }
 
   #insert(capability, replace) {
-    const key = recordKey(capability.id, capability.version);
+    const key = recordKey(capability.tenantId, capability.id, capability.version);
     if (this.#records.has(key) && !replace) {
       throw new CoreError('CAPABILITY_CONFLICT', 'Capability version is already registered', {
         details: { capabilityId: capability.id, version: capability.version },
       });
     }
     this.#records.set(key, capability);
+  }
+
+  #visibleRecord(identity, id, version) {
+    return this.#records.get(recordKey(identity.tenantId, id, version))
+      ?? this.#records.get(recordKey('*', id, version));
   }
 }
 
@@ -181,7 +206,8 @@ export function normalizeCapability(value, scope = { tenantId: '*' }) {
     }
   }
   const id = requireCapabilityId(value.id ?? value.capabilityId);
-  if (FORBIDDEN_CAPABILITY_NAMES.has(id.toLowerCase())) {
+  if (FORBIDDEN_CAPABILITY_NAMES.has(id.toLowerCase()) ||
+      id.split(/[._:/-]/).some((part) => FORBIDDEN_CAPABILITY_PARTS.has(part.toLowerCase()))) {
     throw new CoreError('UNSAFE_CAPABILITY', 'Raw browser or shell primitives are not capabilities');
   }
   const version = normalizeVersion(value.version);
@@ -257,9 +283,12 @@ function searchView(record) {
     kind: record.kind,
     requiresApproval: record.requiresApproval,
     ...(record.risk === undefined ? {} : { risk: record.risk }),
-    adapters: record.adapters,
-    origins: record.origins,
-    tags: record.tags,
+    // Search results cross the catalog trust boundary.  Never return aliases
+    // to the stored arrays: a caller mutating its response must not rewrite
+    // the public or another tenant's descriptor.
+    adapters: jsonClone(record.adapters),
+    origins: [...record.origins],
+    tags: [...record.tags],
   };
 }
 
@@ -286,8 +315,12 @@ function compareRecord(left, right) {
   return left.id.localeCompare(right.id) || left.version.localeCompare(right.version);
 }
 
-function recordKey(id, version) {
+function capabilityKey(id, version) {
   return `${id}@${version}`;
+}
+
+function recordKey(tenantId, id, version) {
+  return `${encodeURIComponent(tenantId)}:${capabilityKey(id, version)}`;
 }
 
 function requireCapabilityId(value) {
@@ -380,8 +413,12 @@ function normalizeLimit(value) {
 
 function normalizeCursor(value) {
   if (value === undefined || value === null || value === '') return 0;
-  if (typeof value !== 'string' || !/^\d+$/.test(value)) throw new CoreError('INVALID_QUERY', 'cursor is invalid');
-  return Number(value);
+  if (typeof value !== 'string' || value.length > 15 || !/^\d+$/.test(value)) {
+    throw new CoreError('INVALID_QUERY', 'cursor is invalid');
+  }
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed)) throw new CoreError('INVALID_QUERY', 'cursor is invalid');
+  return parsed;
 }
 
 function optionalString(value, field) {

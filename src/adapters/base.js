@@ -1,6 +1,7 @@
 import {
   ADAPTER_KINDS,
   ADAPTER_PRIORITY,
+  ADAPTER_SCHEMA_LIMITS,
   DEFAULT_ADAPTER_METADATA,
   AdapterContractError,
   assertRecord,
@@ -22,6 +23,106 @@ import {
 
 const KIND_SET = new Set(ADAPTER_PRIORITY);
 const RESERVED_SPEC_KEYS = new Set(['click', 'shell', 'browser', 'javascript', 'eval', 'exec']);
+
+/** Bounds applied before provider-owned adapter data is cloned or inspected. */
+export const ADAPTER_DATA_LIMITS = Object.freeze({
+  maxCapabilities: 128,
+  maxTotalDescriptors: 512,
+  maxDepth: ADAPTER_SCHEMA_LIMITS.maxDepth,
+  maxNodes: ADAPTER_SCHEMA_LIMITS.maxNodes,
+  maxBytes: 512 * 1024,
+  maxStringLength: ADAPTER_SCHEMA_LIMITS.maxStringLength,
+  maxArrayLength: ADAPTER_SCHEMA_LIMITS.maxArrayLength,
+  maxObjectKeys: ADAPTER_SCHEMA_LIMITS.maxObjectKeys,
+  maxKeyLength: ADAPTER_SCHEMA_LIMITS.maxKeyLength,
+  maxTags: 32,
+});
+
+/**
+ * Bound JSON-like provider data without invoking getters or recursively
+ * cloning it.  The adapter contract calls this before `isJsonSafe()` and
+ * `cloneJson()`, both of which otherwise walk an attacker-sized graph.
+ */
+export function assertAdapterDataBounds(value, label = 'adapter data', options = {}) {
+  const limits = {
+    ...ADAPTER_DATA_LIMITS,
+    ...options,
+  };
+  const stack = [{ value, depth: 0, enter: true }];
+  const active = new Set();
+  let nodes = 0;
+  let bytes = 0;
+
+  const fail = (message, code = 'ADAPTER_LIMIT_EXCEEDED') => {
+    throw new AdapterContractError({ code, message: `${label} ${message}` });
+  };
+  const addBytes = (candidate) => {
+    bytes += Buffer.byteLength(candidate, 'utf8');
+    if (bytes > limits.maxBytes) fail(`exceeds the ${limits.maxBytes}-byte data bound.`);
+  };
+
+  while (stack.length) {
+    const frame = stack.pop();
+    if (!frame.enter) {
+      active.delete(frame.value);
+      continue;
+    }
+    nodes += 1;
+    if (nodes > limits.maxNodes) fail(`exceeds the ${limits.maxNodes}-node data bound.`);
+    if (frame.depth > limits.maxDepth) fail(`exceeds the ${limits.maxDepth}-level nesting bound.`);
+
+    const candidate = frame.value;
+    if (candidate === null || candidate === undefined || typeof candidate === 'boolean') continue;
+    if (typeof candidate === 'string') {
+      if (candidate.length > limits.maxStringLength) fail(`contains a string longer than ${limits.maxStringLength} characters.`);
+      addBytes(candidate);
+      continue;
+    }
+    if (typeof candidate === 'number') {
+      if (!Number.isFinite(candidate)) fail('contains a non-finite number.', 'ADAPTER_DATA_INVALID');
+      continue;
+    }
+    if (typeof candidate !== 'object') {
+      // Preserve the contract's existing non-JSON diagnostics for functions,
+      // symbols, and other unsupported values; they are not traversed here.
+      continue;
+    }
+    if (active.has(candidate)) fail('contains a cyclic value.', 'ADAPTER_DATA_INVALID');
+
+    let prototype;
+    try { prototype = Object.getPrototypeOf(candidate); } catch { fail('contains an unreadable value.', 'ADAPTER_DATA_INVALID'); }
+    if (prototype !== Object.prototype && prototype !== null && !Array.isArray(candidate)) {
+      fail('must contain only plain JSON objects.', 'ADAPTER_DATA_INVALID');
+    }
+    if (Array.isArray(candidate) && candidate.length > limits.maxArrayLength) {
+      fail(`contains an array longer than ${limits.maxArrayLength} entries.`);
+    }
+    let keys;
+    try { keys = Object.keys(candidate); } catch { fail('contains an unreadable value.', 'ADAPTER_DATA_INVALID'); }
+    if (keys.length > limits.maxObjectKeys) fail(`contains an object with more than ${limits.maxObjectKeys} keys.`);
+
+    active.add(candidate);
+    stack.push({ value: candidate, enter: false });
+    for (const key of keys) {
+      if (key.length > limits.maxKeyLength) fail(`contains a key longer than ${limits.maxKeyLength} characters.`);
+      addBytes(key);
+      let descriptor;
+      try { descriptor = Object.getOwnPropertyDescriptor(candidate, key); } catch { fail('contains an unreadable value.', 'ADAPTER_DATA_INVALID'); }
+      if (!descriptor || !Object.prototype.hasOwnProperty.call(descriptor, 'value')) {
+        fail('must not contain accessor properties.', 'ADAPTER_DATA_INVALID');
+      }
+      stack.push({ value: descriptor.value, depth: frame.depth + 1, enter: true });
+    }
+  }
+  return true;
+}
+
+function deepFreeze(value, seen = new Set()) {
+  if (value === null || typeof value !== 'object' || seen.has(value)) return value;
+  seen.add(value);
+  for (const child of Object.values(value)) deepFreeze(child, seen);
+  return Object.freeze(value);
+}
 
 function priorityForKind({ kind }) {
   const priority = ADAPTER_PRIORITY.indexOf(kind);
@@ -50,6 +151,7 @@ function normalizeCapability({ descriptor, kind }) {
   if (!isPlainObject({ value: descriptor })) {
     throw new AdapterContractError({ code: 'ADAPTER_CAPABILITY_INVALID', message: 'Each capability must be a plain object.' });
   }
+  assertAdapterDataBounds(descriptor, 'Capability descriptor');
   const name = validateCapabilityName({ name: descriptor.name ?? descriptor.id });
   if (descriptor.readOnly === undefined && descriptor.mutates === undefined) {
     throw new AdapterContractError({ code: 'ADAPTER_MUTABILITY_REQUIRED', message: `Capability ${name} must declare readOnly or mutates explicitly.` });
@@ -108,6 +210,12 @@ function normalizeCapability({ descriptor, kind }) {
     if (!Array.isArray(descriptor.tags) || descriptor.tags.some((entry) => typeof entry !== 'string')) {
       throw new AdapterContractError({ code: 'ADAPTER_CAPABILITY_INVALID', message: `Capability ${name} tags must be strings.` });
     }
+    if (descriptor.tags.length > ADAPTER_DATA_LIMITS.maxTags) {
+      throw new AdapterContractError({
+        code: 'ADAPTER_LIMIT_EXCEEDED',
+        message: `Capability ${name} may declare at most ${ADAPTER_DATA_LIMITS.maxTags} tags.`,
+      });
+    }
     capability.tags = [...new Set(descriptor.tags)].slice(0, 32);
   }
   return capability;
@@ -129,6 +237,47 @@ function normalizeExecutionRequest({ input }) {
     throw new AdapterContractError({ code: 'ADAPTER_CONTEXT_INVALID', message: 'Adapter context must be a plain object.' });
   }
   return { ...request, args, context };
+}
+
+/**
+ * Clone an adapter request for a provider handler while retaining only the
+ * live AbortSignal exception to the JSON-only contract.  Signals are
+ * capability-neutral control metadata, not provider data; they must not be
+ * stringified (which would either fail validation or lose cancellation).
+ */
+function cloneExecutionContext({ context }) {
+  if (!isPlainObject({ value: context })) {
+    throw new AdapterContractError({ code: 'ADAPTER_CONTEXT_INVALID', message: 'Adapter context must be a plain object.' });
+  }
+  const result = {};
+  for (const key of Object.keys(context)) {
+    const value = context[key];
+    if (value === undefined) continue;
+    if (key === 'signal') {
+      if (!isAbortSignalLike(value)) {
+        throw new AdapterContractError({ code: 'ADAPTER_CONTEXT_INVALID', message: 'Adapter signal must be an AbortSignal.' });
+      }
+      result.signal = value;
+      continue;
+    }
+    if (!isJsonSafe({ value })) {
+      throw new AdapterContractError({ code: 'ADAPTER_CONTEXT_INVALID', message: `Adapter context field ${key} must be JSON-safe.` });
+    }
+    result[key] = cloneJson({ value });
+  }
+  return result;
+}
+
+function cloneExecutionRequest({ request }) {
+  const { context, ...data } = request;
+  const result = cloneJson({ value: data });
+  if (context !== undefined) result.context = cloneExecutionContext({ context });
+  return result;
+}
+
+function isAbortSignalLike(value) {
+  return Boolean(value && typeof value === 'object' && typeof value.aborted === 'boolean' &&
+    typeof value.addEventListener === 'function' && typeof value.removeEventListener === 'function');
 }
 
 function serializeHandlerError({ error }) {
@@ -174,6 +323,12 @@ export function createAdapter(spec = {}) {
   if (!Array.isArray(input.capabilities) || input.capabilities.length === 0) {
     throw new AdapterContractError({ code: 'ADAPTER_CAPABILITIES_REQUIRED', message: 'An adapter must declare at least one semantic capability.' });
   }
+  if (input.capabilities.length > ADAPTER_DATA_LIMITS.maxCapabilities) {
+    throw new AdapterContractError({
+      code: 'ADAPTER_LIMIT_EXCEEDED',
+      message: `An adapter may declare at most ${ADAPTER_DATA_LIMITS.maxCapabilities} capabilities.`,
+    });
+  }
   const capabilities = input.capabilities.map((entry) => normalizeCapability({ descriptor: entry, kind }));
   const capabilityMap = new Map();
   for (const capability of capabilities) {
@@ -196,6 +351,9 @@ export function createAdapter(spec = {}) {
   });
   const source = typeof input.source === 'string' ? input.source : kind;
   const description = typeof input.description === 'string' ? input.description : `${kind} adapter`;
+
+  if (input.source !== undefined) assertAdapterDataBounds(input.source, 'Adapter source');
+  if (input.description !== undefined) assertAdapterDataBounds(input.description, 'Adapter description');
 
   const handlers = isPlainObject({ value: input.handlers }) ? input.handlers : {};
   for (const key of Object.keys(handlers)) {
@@ -245,6 +403,7 @@ export function createAdapter(spec = {}) {
     descriptor.version = input.version;
   }
   if (input.metadata !== undefined) {
+    assertAdapterDataBounds(input.metadata, 'Adapter metadata');
     if (!isJsonSafe({ value: input.metadata })) throw new AdapterContractError({ code: 'ADAPTER_METADATA_INVALID', message: 'Adapter metadata must be JSON-safe.' });
     descriptor.metadata = cloneJson({ value: input.metadata });
   }
@@ -252,7 +411,10 @@ export function createAdapter(spec = {}) {
   Object.freeze(descriptor.capabilities);
 
   const getCapability = ({ name } = {}) => {
-    try { return capabilityMap.get(validateCapabilityName({ name })) ?? null; } catch { return null; }
+    try {
+      const capability = capabilityMap.get(validateCapabilityName({ name }));
+      return capability === undefined ? null : deepFreeze(cloneJson({ value: capability }));
+    } catch { return null; }
   };
 
   const describe = () => cloneJson({ value: descriptor });
@@ -391,8 +553,8 @@ export function createAdapter(spec = {}) {
     if (typeof handler !== 'function' && typeof invoke !== 'function') return errorResult({ error: createAdapterError({ code: 'ADAPTER_HANDLER_UNAVAILABLE', message: 'No executable handler is bound to the capability.' }) });
     try {
       const value = typeof handler === 'function'
-        ? handler({ capability: capability.name, args: cloneJson({ value: request.args }), origin: canonical, context: cloneJson({ value: request.context }), request: cloneJson({ value: request }) })
-        : invoke({ capability: capability.name, args: cloneJson({ value: request.args }), origin: canonical, context: cloneJson({ value: request.context }), request: cloneJson({ value: request }) });
+        ? handler({ capability: capability.name, args: cloneJson({ value: request.args }), origin: canonical, context: cloneExecutionContext({ context: request.context }), request: cloneExecutionRequest({ request }) })
+        : invoke({ capability: capability.name, args: cloneJson({ value: request.args }), origin: canonical, context: cloneExecutionContext({ context: request.context }), request: cloneExecutionRequest({ request }) });
       if (value && typeof value.then === 'function') {
         return value.then((resolved) => finishExecution({ request, canonical, capability, value: resolved })).catch((error) => errorResult({ error: serializeHandlerError({ error }) }));
       }

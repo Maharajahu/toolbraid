@@ -460,7 +460,7 @@ test('adapter failure leaves a terminal, non-replayable workflow without retryin
   await expectCoreErrorAsync(() => broker.replayReadonly({ ...input, nodeIds: ['read'] }), 'REPLAY_NOT_AVAILABLE');
 });
 
-test('post-invocation output serialization failures recover to a terminal state', async () => {
+test('post-invocation output serialization failures require reconciliation without retry', async () => {
   const { catalog, plan, store } = seed({
     workflowId: 'invalid-output',
     nodes: [{ id: 'update', capabilityId: 'orders.update', args: { orderId: 'o-1', status: 'paid' } }],
@@ -481,11 +481,232 @@ test('post-invocation output serialization failures recover to a terminal state'
   });
   const input = workflowInput(ALICE, plan.workflowId);
 
-  await assert.rejects(() => broker.execute(input), (error) => error instanceof CoreError);
+  await assert.rejects(
+    () => broker.execute(input),
+    (error) => error instanceof CoreError &&
+      error.code === 'RECONCILIATION_REQUIRED' &&
+      error.retryable === false &&
+      error.details?.effectMayHaveCommitted === true &&
+      error.details?.outcome === 'unknown',
+  );
   assert.equal(store.get(input).state, 'failed');
-  assert.equal(store.get(input).nodeStates.update.state, 'failed');
+  // The mutation crossed the adapter boundary, but its outcome is unknown;
+  // retain the running node marker for reconciliation instead of relabeling
+  // it as a normal retryable failure.
+  assert.equal(store.get(input).nodeStates.update.state, 'running');
+  assert.equal(store.get(input).error.code, 'RECONCILIATION_REQUIRED');
   assert.deepEqual(calls, ['update']);
   const second = await broker.execute(input);
   assert.equal(second.state, 'failed');
   assert.deepEqual(calls, ['update']);
+});
+
+test('failure-persistence errors require reconciliation and retain a no-reinvoke guard', async () => {
+  const { catalog, plan, store } = seed({
+    workflowId: 'failure-persistence',
+    nodes: [{ id: 'update', capabilityId: 'orders.update', args: { orderId: 'o-1', status: 'paid' } }],
+  });
+  const failingStore = {
+    get: (input) => store.get(input),
+    start: (input) => store.start(input),
+    markNode: (input) => store.markNode(input),
+    fail: () => { throw new CoreError('STORE_QUOTA', 'workflow failure could not be persisted'); },
+  };
+  let resolverCalls = 0;
+  const broker = new ExecutionBroker({
+    catalog,
+    store: failingStore,
+    approvalVerifier: async () => true,
+    adapterResolver: async () => {
+      resolverCalls += 1;
+      throw new CoreError('ADAPTER_LOOKUP', 'adapter lookup failed before invocation');
+    },
+  });
+  const input = workflowInput(ALICE, plan.workflowId);
+
+  await assert.rejects(
+    () => broker.execute(input),
+    (error) => error instanceof CoreError &&
+      error.code === 'RECONCILIATION_REQUIRED' &&
+      error.retryable === false &&
+      error.details?.effectMayHaveCommitted === false &&
+      error.details?.outcome === 'not_started',
+  );
+  assert.equal(store.get(input).state, 'running');
+  assert.equal(resolverCalls, 1);
+
+  await assert.rejects(
+    () => broker.execute({ ...input, origin: ORIGIN, adapter: 'api' }),
+    (error) => error instanceof CoreError && error.code === 'RECONCILIATION_REQUIRED',
+  );
+  assert.equal(resolverCalls, 1, 'a persistence failure must not implicitly reinvoke the adapter boundary');
+});
+
+test('mutation completion quota failure requires reconciliation without a second approval invocation', async () => {
+  const catalog = new CapabilityCatalog({
+    capabilities: [{
+      id: 'orders.update',
+      version: '1',
+      readOnly: false,
+      adapters: [{ id: 'api' }],
+      origins: [ORIGIN],
+      inputSchema: { type: 'object', additionalProperties: true },
+      outputSchema: {
+        type: 'object',
+        properties: { receipt: { type: 'string' } },
+        additionalProperties: false,
+      },
+    }],
+  });
+  const plan = new DeterministicPlanner({ catalog }).propose({
+    identity: ALICE,
+    workflowId: 'completion-quota',
+    nodes: [{
+      id: 'update',
+      capabilityId: 'orders.update',
+      // Keep the proposal below the 2,800-byte record cap while making the
+      // successful 1,000-character receipt exceed it at node completion.
+      args: { orderId: 'o-1', payload: 'p'.repeat(200) },
+    }],
+  });
+  const store = new WorkflowStore({
+    maxRecordBytes: 2_800,
+    clock: () => '2026-01-01T00:00:00.000Z',
+  });
+  store.create({ identity: ALICE, workflowId: plan.workflowId, revision: plan.revision, plan });
+  let approvals = 0;
+  let sideEffects = 0;
+  const broker = new ExecutionBroker({
+    catalog,
+    store,
+    approvalVerifier: async () => {
+      approvals += 1;
+      return true;
+    },
+    adapters: {
+      api: {
+        execute: async () => {
+          sideEffects += 1;
+          return { receipt: 'r'.repeat(1_000) };
+        },
+      },
+    },
+  });
+  const input = workflowInput(ALICE, plan.workflowId);
+
+  await assert.rejects(
+    () => broker.execute(input),
+    (error) => error instanceof CoreError &&
+      error.code === 'RECONCILIATION_REQUIRED' &&
+      error.retryable === false &&
+      error.details?.effectMayHaveCommitted === true &&
+      error.details?.outcome === 'unknown',
+  );
+  const reconciled = store.get(input);
+  assert.equal(reconciled.state, 'failed');
+  assert.equal(reconciled.error.code, 'RECONCILIATION_REQUIRED');
+  assert.equal(reconciled.nodeStates.update.state, 'running');
+  assert.equal(sideEffects, 1);
+  assert.equal(approvals, 1);
+
+  // A caller presenting a fresh approval (the verifier remains willing) must
+  // receive the terminal reconciliation snapshot, never a second invocation.
+  const repeated = await broker.execute(input);
+  assert.equal(repeated.state, 'failed');
+  assert.equal(sideEffects, 1);
+  assert.equal(approvals, 1);
+});
+
+test('workflow completion persistence failure is terminalized after mutation receipts', async () => {
+  const { catalog, plan, store } = seed({
+    workflowId: 'workflow-completion-persistence',
+    nodes: [{ id: 'update', capabilityId: 'orders.update', args: { orderId: 'o-1', status: 'paid' } }],
+  });
+  const failingStore = {
+    get: (input) => store.get(input),
+    start: (input) => store.start(input),
+    markNode: (input) => store.markNode(input),
+    fail: (input) => store.fail(input),
+    complete: () => { throw new CoreError('STORE_UNAVAILABLE', 'workflow completion could not be persisted'); },
+  };
+  let sideEffects = 0;
+  const broker = new ExecutionBroker({
+    catalog,
+    store: failingStore,
+    approvalVerifier: async () => true,
+    adapters: {
+      api: {
+        execute: async () => {
+          sideEffects += 1;
+          return { receipt: 'ok' };
+        },
+      },
+    },
+  });
+  const input = workflowInput(ALICE, plan.workflowId);
+
+  await assert.rejects(
+    () => broker.execute(input),
+    (error) => error instanceof CoreError &&
+      error.code === 'RECONCILIATION_REQUIRED' &&
+      error.retryable === false &&
+      error.details?.phase === 'workflow_completion_persistence' &&
+      error.details?.effectMayHaveCommitted === true &&
+      error.details?.outcome === 'unknown',
+  );
+  assert.equal(store.get(input).state, 'failed');
+  assert.equal(store.get(input).error.code, 'RECONCILIATION_REQUIRED');
+  assert.equal(sideEffects, 1);
+
+  const repeated = await broker.execute(input);
+  assert.equal(repeated.state, 'failed');
+  assert.equal(sideEffects, 1);
+});
+
+test('trusted approval cannot bypass a deny-write policy action', async () => {
+  const { catalog, plan, store } = seed({
+    workflowId: 'deny-write-action',
+    nodes: [{ id: 'update', capabilityId: 'orders.update', args: { orderId: 'o-1', status: 'paid' } }],
+  });
+  let approvalAvailable = false;
+  let denyWrite = false;
+  let approvalChecks = 0;
+  let sideEffects = 0;
+  const broker = new ExecutionBroker({
+    catalog,
+    store,
+    policy: {
+      evaluate(request) {
+        assert.equal(request.action, 'write', 'policy action must come from trusted mutability');
+        if (denyWrite) return { allowed: false, code: 'POLICY_DENIED' };
+        return { allowed: true };
+      },
+    },
+    approvalVerifier: async () => {
+      approvalChecks += 1;
+      return approvalAvailable;
+    },
+    adapters: {
+      api: {
+        execute: async () => {
+          sideEffects += 1;
+          return { updated: true };
+        },
+      },
+    },
+  });
+  const input = workflowInput(ALICE, plan.workflowId);
+
+  const waiting = await broker.execute(input);
+  assert.equal(waiting.state, 'awaiting_approval');
+  approvalAvailable = true;
+  denyWrite = true;
+  await assert.rejects(
+    () => broker.execute(input),
+    (error) => error instanceof CoreError && error.code === 'POLICY_DENIED',
+  );
+  const denied = store.get(input);
+  assert.equal(denied.state, 'failed');
+  assert.equal(sideEffects, 0);
+  assert.equal(approvalChecks, 1, 'deny-write must run before consuming the available approval');
 });

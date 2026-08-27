@@ -1,6 +1,9 @@
 export {
   ADAPTER_KINDS,
   ADAPTER_PRIORITY,
+  ADAPTER_ERROR_LIMITS,
+  ADAPTER_SCHEMA_LIMITS,
+  ADAPTER_VALUE_LIMITS,
   DEFAULT_ADAPTER_METADATA,
   AdapterContractError,
   assertRecord,
@@ -8,6 +11,8 @@ export {
   createAdapterError,
   errorResult,
   isJsonSafe,
+  normalizeAdapterError,
+  isSafeRegexPattern,
   isPlainObject,
   makeMetadata,
   normalizeConfidence,
@@ -18,8 +23,9 @@ export {
   validateCapabilityName,
   validateSchema,
   validateSchemaDefinition,
+  validateJsonValueBounds,
 } from './contracts.js';
-export { createAdapter } from './base.js';
+export { ADAPTER_DATA_LIMITS, assertAdapterDataBounds, createAdapter } from './base.js';
 export { createStructuredAdapter, createStructuredApiAdapter, StructuredApiAdapter } from './structured.js';
 export { createWebMcpAdapter, createWebMCPAdapter, WebMcpAdapter, WebMCPAdapter } from './webmcp.js';
 export { createDomAccessibilityAdapter, createDomAdapter, createDomA11yAdapter, createDOMAccessibilityAdapter, DomAccessibilityAdapter } from './dom.js';

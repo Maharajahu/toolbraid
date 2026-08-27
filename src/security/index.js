@@ -31,6 +31,6 @@ export {
   normalizeRequest,
   isMutationRequest,
 } from "./policy.js";
-export { AuditLog, AppendOnlyAuditLog } from "./audit.js";
+export { AuditLog, AppendOnlyAuditLog, DEFAULT_MAX_AUDIT_ENTRIES } from "./audit.js";
 export { redactSecrets, redact, isSecretLikeKey } from "./redaction.js";
 export { SecurityError, securityError, toSecurityError } from "./errors.js";

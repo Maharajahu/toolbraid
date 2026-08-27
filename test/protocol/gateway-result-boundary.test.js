@@ -90,6 +90,19 @@ test('a top-level error marks complete MCP results as errors without leaking sta
   assert.equal(isJsonValue(response), true);
 });
 
+test('ordinary completed semantic snapshots with error:null remain successful', async () => {
+  const gateway = createMcpGateway({
+    handlers: {
+      'workflow.status': () => ({ status: 'completed', error: null, workflowId: 'workflow-boundary' }),
+    },
+  });
+
+  const response = await gateway.handleMessage(modernRequest(6, 'workflow.status', IDENTITY));
+  assert.equal(response.result.isError, false);
+  assert.equal(response.result.structuredContent.status, 'completed');
+  assert.equal(response.result.structuredContent.error, null);
+});
+
 test('legacy failed results retain the stable error code but omit modern-only fields', async () => {
   const gateway = createMcpGateway({
     handlers: {
@@ -162,4 +175,66 @@ test('provider output is bounded and accessor/cycle values stay JSON-safe', asyn
   assert.equal(safeDetails.getterSecret, '[UNSERIALIZABLE]');
   assert.equal(isJsonValue(response), true);
   assert.doesNotThrow(() => JSON.stringify(response));
+});
+
+test('provider secret aliases are redacted at the protocol boundary', async () => {
+  const gateway = createMcpGateway({
+    handlers: {
+      'workflow.status': () => ({
+        status: 'failed',
+        error: {
+          code: 'PROVIDER_FAILURE',
+          message: 'authHeader: header-inline authorization_value=authorization-inline',
+          details: {
+            authHeader: 'header-secret',
+            authorization_value: 'authorization-secret',
+            privateKeyPem: 'private-key-secret',
+            sessionTokenValue: 'session-token-secret',
+            nestedJson: '{"authHeader":"json-header-secret","privateKeyPem":"json-private-secret"}',
+            safe: 'keep this context',
+          },
+        },
+      }),
+    },
+  });
+
+  const response = await gateway.handleMessage(modernRequest(7, 'workflow.status', IDENTITY));
+  const details = response.result.structuredContent.error.details;
+  assert.equal(details.authHeader, '[REDACTED]');
+  assert.equal(details.authorization_value, '[REDACTED]');
+  assert.equal(details.privateKeyPem, '[REDACTED]');
+  assert.equal(details.sessionTokenValue, '[REDACTED]');
+  assert.equal(details.safe, 'keep this context');
+  assert.doesNotMatch(JSON.stringify(response), /header-secret|authorization-secret|private-key-secret|session-token-secret|json-header-secret|json-private-secret|header-inline|authorization-inline/);
+});
+
+test('aggregate provider results over 512 KiB fail closed before the wire', async () => {
+  const oversized = Array.from({ length: 256 }, () => 'x'.repeat(8192));
+  const gateway = createMcpGateway({
+    handlers: {
+      'workflow.status': () => ({
+        status: 'completed',
+        payload: oversized,
+      }),
+    },
+  });
+
+  const response = await gateway.handleMessage(modernRequest(8, 'workflow.status', IDENTITY));
+  assert.equal(response.result.isError, true);
+  assert.equal(response.result.structuredContent.code, 'result_too_large');
+  assert.equal(Buffer.byteLength(JSON.stringify(response.result), 'utf8') < 1024, true);
+});
+
+test('aliased provider strings cannot amplify sanitization beyond the aggregate cap', async () => {
+  const shared = 'x'.repeat(8192);
+  const aliased = Array.from({ length: 960 }, () => shared);
+  const gateway = createMcpGateway({
+    handlers: {
+      'workflow.status': () => ({ payload: aliased }),
+    },
+  });
+
+  const response = await gateway.handleMessage(modernRequest(9, 'workflow.status', IDENTITY));
+  assert.equal(response.result.isError, true);
+  assert.equal(response.result.structuredContent.code, 'result_too_large');
 });

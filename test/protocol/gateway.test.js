@@ -6,6 +6,7 @@ import {
   JSON_RPC_ERROR_CODES,
   PUBLIC_TOOL_NAMES,
   createMcpGateway,
+  getToolSchema,
 } from '../../src/mcp/index.js';
 
 function meta(version = CURRENT_PROTOCOL_VERSION) {
@@ -38,6 +39,33 @@ test('public tool registry is exactly the six frozen tools', async () => {
   response.result.tools[0].name = 'mutated';
   const second = await gateway.handleMessage(modernRequest(2, 'tools/list'));
   assert.equal(second.result.tools[0].name, PUBLIC_TOOL_NAMES[0]);
+});
+
+test('malformed notifications never receive a JSON-RPC response', async () => {
+  const gateway = createMcpGateway({ requireIdentity: false });
+  assert.equal(await gateway.handleMessage({
+    jsonrpc: '2.0',
+    method: 'notifications/initialized',
+    params: [],
+  }), null);
+  assert.equal(await gateway.handleMessage({
+    jsonrpc: '2.0',
+    method: 'tools/call',
+    params: 'not-an-object',
+  }), null);
+});
+
+test('getToolSchema returns an isolated deeply frozen schema boundary', () => {
+  const first = getToolSchema('capabilities.search');
+  const second = getToolSchema('capabilities.search');
+  assert.notEqual(first, second);
+  assert.equal(Object.isFrozen(first), true);
+  assert.equal(Object.isFrozen(first.properties), true);
+  assert.equal(Object.isFrozen(first.properties.cursor), true);
+  assert.throws(() => {
+    first.properties.cursor.maxLength = 1;
+  }, TypeError);
+  assert.equal(second.properties.cursor.maxLength, 15);
 });
 
 test('modern server/discover advertises the current protocol and tools capability', async () => {

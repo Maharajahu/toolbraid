@@ -1,9 +1,11 @@
 import { CoreError, errorShape } from './errors.js';
 import { identityKey, requireIdentity } from './identity.js';
 import { canonicalHash, jsonClone } from './serialization.js';
-import { validatePlan } from './planner.js';
+import { capabilityBindingHash, validatePlan } from './planner.js';
+import { assertCapabilitySchemas, assertSchemaValue } from './schema.js';
 
 const TERMINAL_WORKFLOW_STATES = new Set(['completed', 'failed', 'cancelled']);
+const MAX_REPLAY_NODES = 100;
 const APPROVAL_MISS_CODES = new Set([
   'APPROVAL_REQUIRED',
   'APPROVAL_NOT_FOUND',
@@ -26,6 +28,9 @@ export class ExecutionBroker {
     this.store = options.store ?? options.workflowStore;
     if (!this.store || typeof this.store.get !== 'function') throw new CoreError('INVALID_EXECUTION', 'A workflow store is required');
     this.catalog = options.catalog;
+    if (!this.catalog || typeof this.catalog.resolve !== 'function') {
+      throw new CoreError('INVALID_EXECUTION', 'A capability catalog with resolve() is required');
+    }
     this.policy = options.policy ?? options.policyEngine;
     if (this.policy !== undefined &&
         typeof this.policy?.evaluate !== 'function' &&
@@ -47,25 +52,39 @@ export class ExecutionBroker {
     this.clock = typeof options.clock === 'function' ? options.clock : () => new Date().toISOString();
     this.replaySequence = 0;
     this.inFlightExecutions = new Map();
+    // If a workflow store cannot persist a failure/reconciliation transition,
+    // retain a process-local no-reinvoke guard.  A later call must not gamble
+    // on a side effect whose durable outcome is still unknown.
+    this.reconciliationExecutions = new Map();
   }
 
-  async execute(input) {
+  async execute(input, context = {}) {
     const operation = requireObject(input, 'execute input');
     const identity = requireIdentity(operation);
     rejectCallerApproval(operation);
+    const executionContext = invocationContext(operation.context ?? context);
     const workflowId = requireWorkflowId(operation.workflowId);
     const revision = normalizeRevision(operation.revision);
-    const executionKey = `${identityKey(identity)}:${encodeURIComponent(workflowId)}:${revision}`;
+    const constraints = normalizeExecutionConstraints(operation);
+    const workflow = this.store.get({ identity, workflowId, revision });
+    const plan = workflow?.plan ? this.#validateStoredPlan(identity, workflow) : undefined;
+    if (plan) assertExecutionContext({ operation, plan, constraints });
+    const executionOperation = applyExecutionConstraints(operation, constraints);
+    const executionKey = executionKeyFor({ identity, workflowId, revision, constraints });
     const pending = this.inFlightExecutions.get(executionKey);
     if (pending) return pending;
+    const blocked = this.reconciliationExecutions.get(executionKey);
+    if (blocked && !TERMINAL_WORKFLOW_STATES.has(workflow?.state)) throw blocked;
 
     // Defer the state-machine entry until after the promise is registered so
     // two calls made in the same turn cannot both observe a runnable node.
     const execution = Promise.resolve().then(() => this.#executeOnce({
-      operation,
+      operation: executionOperation,
       identity,
       workflowId,
       revision,
+      context: executionContext,
+      executionKey,
     }));
     this.inFlightExecutions.set(executionKey, execution);
     try {
@@ -77,11 +96,12 @@ export class ExecutionBroker {
     }
   }
 
-  async #executeOnce({ operation, identity, workflowId, revision }) {
+  async #executeOnce({ operation, identity, workflowId, revision, context, executionKey }) {
     let workflow = this.store.get({ identity, workflowId, revision });
-    if (TERMINAL_WORKFLOW_STATES.has(workflow.state)) return executionView(workflow);
     if (!workflow.plan) throw new CoreError('WORKFLOW_NOT_PROPOSED', 'Workflow has no proposed plan');
     const plan = this.#validateStoredPlan(identity, workflow);
+    assertExecutionContext({ operation, plan, constraints: normalizeExecutionConstraints(operation) });
+    if (TERMINAL_WORKFLOW_STATES.has(workflow.state)) return executionView(workflow);
     if (workflow.state === 'draft') throw new CoreError('WORKFLOW_NOT_PROPOSED', 'Draft workflows cannot execute');
     if (workflow.state === 'proposed') {
       workflow = this.store.start({ identity, workflowId, revision });
@@ -140,20 +160,68 @@ export class ExecutionBroker {
       workflow = this.store.markNode({ identity, workflowId, revision, nodeId, state: 'running' });
       await this.#audit({ type: 'node_started', identity, workflowId, revision, nodeId, readOnly: node.readOnly });
       let safeOutput;
+      let invocationStarted = false;
       try {
-        const output = await this.#invoke({ identity, workflow, plan, node, operation, replay: false });
+        const output = await this.#invoke({
+          identity,
+          workflow,
+          plan,
+          node,
+          operation,
+          replay: false,
+          context,
+          onInvocationStart: () => { invocationStarted = true; },
+        });
         // Treat boundary normalization as part of execution.  An adapter that
         // returns an unsupported value must not strand a node in `running`.
         safeOutput = normalizeOutput(output);
       } catch (error) {
+        // A mutation has an unknown outcome as soon as its trusted adapter is
+        // called.  The adapter may have committed an external side effect and
+        // then failed while returning (or while its output was normalized), so
+        // never convert this boundary error into an ordinary retryable node
+        // failure.  Terminalize the workflow before releasing the in-flight
+        // promise; a later execute call can only inspect the reconciliation
+        // record and cannot invoke the mutation again.
+        if (invocationStarted && !node.readOnly) {
+          throw this.#terminalizeReconciliation({
+            identity,
+            workflowId,
+            revision,
+            nodeId,
+            phase: 'node_invocation',
+            cause: error,
+            executionKey,
+          });
+        }
         const policyDenied = error instanceof CoreError && error.code === 'POLICY_DENIED';
         const safe = errorShape(error, {
           code: policyDenied ? 'POLICY_DENIED' : 'ADAPTER_FAILURE',
           message: policyDenied ? `Policy denied node ${nodeId}` : `Capability ${node.capabilityId} failed`,
           retryable: policyDenied ? false : true,
         });
-        this.store.markNode({ identity, workflowId, revision, nodeId, state: 'failed', error: safe });
-        this.store.fail({ identity, workflowId, revision, error: safe });
+        try {
+          this.store.markNode({ identity, workflowId, revision, nodeId, state: 'failed', error: safe });
+          this.store.fail({ identity, workflowId, revision, error: safe });
+        } catch (persistenceError) {
+          // A failed persistence transition can leave a running node behind.
+          // Treat that boundary as reconciliation-required too: even when the
+          // provider was not called in this attempt, the broker cannot safely
+          // assume the store's state is retryable.  The process-local guard in
+          // #terminalizeReconciliation prevents an implicit reinvocation when
+          // a non-standard store cannot persist the terminal marker.
+          throw this.#terminalizeReconciliation({
+            identity,
+            workflowId,
+            revision,
+            nodeId,
+            phase: 'failure_persistence',
+            cause: persistenceError,
+            executionKey,
+            effectMayHaveCommitted: invocationStarted && !node.readOnly,
+            outcome: invocationStarted && !node.readOnly ? 'unknown' : 'not_started',
+          });
+        }
         await this.#audit({ type: 'node_failed', identity, workflowId, revision, nodeId, error: safe });
         throw new CoreError(
           policyDenied ? 'POLICY_DENIED' : 'EXECUTION_FAILED',
@@ -161,7 +229,28 @@ export class ExecutionBroker {
           { retryable: safe.retryable === true, details: { nodeId, cause: safe }, cause: error },
         );
       }
-      workflow = this.store.markNode({ identity, workflowId, revision, nodeId, state: 'completed', output: safeOutput });
+      try {
+        workflow = this.store.markNode({ identity, workflowId, revision, nodeId, state: 'completed', output: safeOutput });
+      } catch (persistenceError) {
+        // Completion persistence is still part of the side-effect boundary:
+        // the trusted adapter has already returned successfully, but a quota
+        // or durable-store error can leave the node running.  Never expose
+        // that state as retryable for a mutation, because a fresh approval
+        // could invoke the external effect a second time.  Read-only nodes
+        // use the same terminalization path to avoid a stuck workflow while
+        // accurately recording that no mutation effect was possible.
+        throw this.#terminalizeReconciliation({
+          identity,
+          workflowId,
+          revision,
+          nodeId,
+          phase: 'completion_persistence',
+          cause: persistenceError,
+          executionKey,
+          effectMayHaveCommitted: !node.readOnly && invocationStarted,
+          outcome: !node.readOnly && invocationStarted ? 'unknown' : 'completed',
+        });
+      }
       try {
         await this.#audit({ type: 'node_completed', identity, workflowId, revision, nodeId, readOnly: node.readOnly });
       } catch (error) {
@@ -176,10 +265,31 @@ export class ExecutionBroker {
           nodeId,
           phase: 'node_completed',
           cause: error,
+          executionKey,
+          effectMayHaveCommitted: !node.readOnly,
+          outcome: node.readOnly ? 'completed' : 'unknown',
         });
       }
     }
-    workflow = this.store.complete({ identity, workflowId, revision });
+    const hasMutation = plan.nodes.some((node) => !node.readOnly);
+    try {
+      workflow = this.store.complete({ identity, workflowId, revision });
+    } catch (persistenceError) {
+      // The final workflow transition can fail after every adapter has
+      // returned and its node receipts are present.  Terminalize explicitly
+      // so a retry cannot repeat an external mutation while completion
+      // persistence is ambiguous.
+      throw this.#terminalizeReconciliation({
+        identity,
+        workflowId,
+        revision,
+        phase: 'workflow_completion_persistence',
+        cause: persistenceError,
+        executionKey,
+        effectMayHaveCommitted: hasMutation,
+        outcome: hasMutation ? 'unknown' : 'completed',
+      });
+    }
     try {
       await this.#audit({ type: 'workflow_completed', identity, workflowId, revision });
     } catch (error) {
@@ -187,7 +297,12 @@ export class ExecutionBroker {
       // completed state and surface a non-retryable reconciliation signal;
       // executing again will return the completed snapshot without invoking an
       // adapter.
-      throw reconciliationError({ phase: 'workflow_completed', cause: error });
+      throw reconciliationError({
+        phase: 'workflow_completed',
+        cause: error,
+        effectMayHaveCommitted: hasMutation,
+        outcome: hasMutation ? 'unknown' : 'completed',
+      });
     }
     return executionView(workflow);
   }
@@ -197,26 +312,36 @@ export class ExecutionBroker {
     const identity = requireIdentity(operation);
     const workflowId = requireWorkflowId(operation.workflowId);
     const revision = normalizeRevision(operation.revision);
-    return executionView(this.store.get({ identity, workflowId, revision }));
+    const workflow = this.store.get({ identity, workflowId, revision });
+    // Status is also a public exposure boundary. Validate the live catalog
+    // binding and every already-recorded output before returning a snapshot;
+    // a legacy store/provider must not leak an output that violates its
+    // declared schema merely because no new execution was requested.
+    if (workflow?.plan) this.#validateStoredPlan(identity, workflow);
+    return executionView(workflow);
   }
 
-  async replayReadonly(input) {
+  async replayReadonly(input, context = {}) {
     const operation = requireObject(input, 'replayReadonly input');
     const identity = requireIdentity(operation);
     rejectCallerApproval(operation);
+    const executionContext = invocationContext(operation.context ?? context);
     const workflowId = requireWorkflowId(operation.workflowId);
     const revision = normalizeRevision(operation.revision);
     const workflow = this.store.get({ identity, workflowId, revision });
     if (!workflow.plan) throw new CoreError('REPLAY_NOT_AVAILABLE', 'Workflow has no recorded plan');
     const plan = this.#validateStoredPlan(identity, workflow);
     const requested = operation.nodeIds ?? operation.nodes;
+    const limit = normalizeReplayLimit(operation.limit);
     let nodeIds;
     if (requested === undefined) {
       nodeIds = plan.order.filter((nodeId) => plan.nodes.find((node) => node.id === nodeId)?.readOnly && workflow.nodeStates[nodeId]?.state === 'completed');
     } else {
       if (!Array.isArray(requested) || requested.length === 0) throw new CoreError('INVALID_REPLAY', 'nodeIds must be a non-empty array');
+      if (requested.length > MAX_REPLAY_NODES) throw new CoreError('INVALID_REPLAY', `nodeIds may contain at most ${MAX_REPLAY_NODES} entries`);
       nodeIds = [...new Set(requested)];
     }
+    nodeIds = nodeIds.slice(0, limit);
     const byId = new Map(plan.nodes.map((node) => [node.id, node]));
     for (const nodeId of nodeIds) {
       if (typeof nodeId !== 'string' || !byId.has(nodeId)) throw new CoreError('REPLAY_NOT_AVAILABLE', `Node ${nodeId} is not recorded`);
@@ -231,7 +356,7 @@ export class ExecutionBroker {
       const recorded = workflow.nodeStates[nodeId];
       let output;
       try {
-        output = await this.#invoke({ identity, workflow, plan, node, operation, replay: true, recordedOutput: recorded.output });
+        output = await this.#invoke({ identity, workflow, plan, node, operation, replay: true, recordedOutput: recorded.output, context: executionContext });
       } catch (error) {
         const safe = errorShape(error, { code: 'ADAPTER_FAILURE', message: `Replay of ${nodeId} failed`, retryable: true });
         await this.#audit({ type: 'replay_failed', identity, workflowId, revision, nodeId, error: safe });
@@ -272,13 +397,89 @@ export class ExecutionBroker {
       throw new CoreError('INVALID_PLAN', 'Stored workflow plan is invalid', { cause: error });
     }
     if (plan.workflowId !== workflow.workflowId || plan.revision !== workflow.revision) throw new CoreError('INVALID_PLAN', 'Stored plan workflow identity is invalid');
-    if (this.catalog && typeof this.catalog.resolve === 'function') {
-      for (const node of plan.nodes) {
-        const descriptor = this.catalog.resolve({ identity, capabilityId: node.capabilityId, version: node.capabilityVersion });
-        if (descriptor.readOnly !== node.readOnly || descriptor.mutates !== node.mutates) throw new CoreError('INVALID_PLAN', `Node ${node.id} mutability no longer matches catalog`);
-      }
+    for (const node of plan.nodes) {
+      this.#resolveAndValidateNode({ identity, plan, workflow, node, validateStoredOutput: true });
     }
     return plan;
+  }
+
+  /**
+   * Resolve the live capability descriptor at the security boundary and
+   * re-check every execution-relevant binding. This is deliberately called
+   * both when loading a stored workflow and immediately before invoking an
+   * adapter: policy and approval callbacks may yield while a same-version
+   * catalog record is replaced.
+   */
+  #resolveAndValidateNode({ identity, plan, workflow, node, validateStoredOutput = false }) {
+    let descriptor;
+    try {
+      descriptor = this.catalog.resolve({ identity, capabilityId: node.capabilityId, version: node.capabilityVersion });
+    } catch (error) {
+      if (error instanceof CoreError) throw error;
+      throw new CoreError('INVALID_PLAN', `Node ${node.id} capability could not be resolved`, { cause: error });
+    }
+
+    let schemas;
+    try {
+      schemas = assertCapabilitySchemas({ capability: descriptor, label: `Capability ${node.capabilityId}` });
+    } catch (error) {
+      throw new CoreError('INVALID_PLAN', `Node ${node.id} capability schema is invalid`, {
+        retryable: false,
+        details: {
+          reason: 'CAPABILITY_SCHEMA_INVALID',
+          ...(error instanceof CoreError ? { cause: error.toJSON() } : {}),
+        },
+        cause: error,
+      });
+    }
+
+    let bindingHash;
+    try {
+      bindingHash = capabilityBindingHash(descriptor);
+    } catch (error) {
+      throw new CoreError('INVALID_PLAN', `Node ${node.id} capability binding is invalid`, { cause: error });
+    }
+    if (node.capabilityBindingHash !== bindingHash) {
+      throw new CoreError('INVALID_PLAN', `Node ${node.id} capability binding no longer matches the catalog`, {
+        details: { reason: 'CAPABILITY_BINDING_DRIFT', nodeId: node.id },
+      });
+    }
+    if (descriptor.readOnly !== node.readOnly || descriptor.mutates !== node.mutates) {
+      throw new CoreError('INVALID_PLAN', `Node ${node.id} mutability no longer matches catalog`);
+    }
+    const adapters = Array.isArray(descriptor.adapters)
+      ? descriptor.adapters.map((entry) => typeof entry === 'string' ? entry : entry?.id)
+      : [];
+    if (node.adapter !== undefined && !adapters.includes(node.adapter)) {
+      throw new CoreError('INVALID_PLAN', `Node ${node.id} adapter no longer matches catalog`);
+    }
+    const origins = Array.isArray(descriptor.origins)
+      ? descriptor.origins
+      : descriptor.origin === undefined ? [] : [descriptor.origin];
+    if (node.origin !== undefined && !origins.includes(node.origin)) {
+      throw new CoreError('INVALID_PLAN', `Node ${node.id} origin no longer matches catalog`);
+    }
+
+    assertSchemaValue({
+      value: node.args,
+      schema: schemas.inputSchema,
+      code: 'INVALID_PLAN',
+      reason: 'ARGUMENT_SCHEMA_INVALID',
+      label: `Arguments for node ${node.id}`,
+      message: `Arguments for node ${node.id} do not match the capability input schema`,
+    });
+
+    if (validateStoredOutput && workflow?.nodeStates?.[node.id]?.state === 'completed') {
+      assertSchemaValue({
+        value: workflow.nodeStates[node.id].output,
+        schema: schemas.outputSchema,
+        code: 'INVALID_PLAN',
+        reason: 'STORED_OUTPUT_SCHEMA_INVALID',
+        label: `Stored output for node ${node.id}`,
+        message: `Stored output for node ${node.id} does not match the capability output schema`,
+      });
+    }
+    return descriptor;
   }
 
   #assertDependenciesCompleted(plan, workflow, node) {
@@ -351,13 +552,27 @@ export class ExecutionBroker {
     return this.approvalCredential;
   }
 
-  async #invoke({ identity, workflow, plan, node, operation, replay, recordedOutput }) {
+  async #invoke({ identity, workflow, plan, node, operation, replay, recordedOutput, context = {}, onInvocationStart }) {
+    // Re-resolve immediately before authorization/invocation. The first
+    // check happens while loading the stored plan, but policy and approval
+    // callbacks are asynchronous and may observe a changed catalog.
+    let capability = this.#resolveAndValidateNode({ identity, plan, workflow, node });
     const adapterId = node.adapter;
     const origin = node.origin;
     if (operation.adapter !== undefined && operation.adapter !== adapterId) throw new CoreError('EXECUTION_CONTEXT', 'Caller adapter does not match the proposed plan');
-    if (operation.origin !== undefined && operation.origin !== origin) throw new CoreError('EXECUTION_CONTEXT', 'Caller origin does not match the proposed plan');
-    if (node.readOnly) await this.#evaluatePolicy({ identity, workflow, node });
+    if (operation.origin !== undefined && !sameCanonicalOrigin(operation.origin, origin)) throw new CoreError('EXECUTION_CONTEXT', 'Caller origin does not match the proposed plan');
+    if (node.readOnly) {
+      await this.#evaluatePolicy({ identity, workflow, node });
+      // A policy implementation is trusted constructor state, but it may
+      // yield while a catalog record is replaced. Rebind the descriptor after
+      // the callback and before selecting/invoking the adapter.
+      capability = this.#resolveAndValidateNode({ identity, plan, workflow, node });
+    }
     const adapter = await this.#resolveAdapter({ adapterId, origin, node, identity, replay });
+    // Adapter resolution is another asynchronous trust boundary. A resolver
+    // must not be able to swap the same id/version schema after the final
+    // catalog check and still receive provider arguments.
+    capability = this.#resolveAndValidateNode({ identity, plan, workflow, node });
     const request = {
       capabilityId: node.capabilityId,
       capabilityVersion: node.capabilityVersion,
@@ -379,16 +594,44 @@ export class ExecutionBroker {
         planHash: plan.planHash,
       },
     };
+    // AbortSignal is a cooperative read-side hint.  It is intentionally not
+    // attached to mutation requests: a cancellation notification must never
+    // race an already-authorized side effect or pretend that it was rolled
+    // back.  The broker/adapter boundary receives the live signal object so an
+    // adapter can stop at a safe semantic checkpoint if it supports aborts.
+    if (node.readOnly && context?.signal !== undefined) {
+      request.context = { signal: context.signal };
+    }
+    const invokeTrustedAdapter = (call) => {
+      if (typeof onInvocationStart === 'function') onInvocationStart();
+      return this.#withTimeout(Promise.resolve().then(call), node.timeoutMs);
+    };
+    let output;
     if (typeof adapter === 'function') {
       // Functions can only come from the trusted broker constructor/resolver,
       // never from a plan or provider metadata.
-      return this.#withTimeout(Promise.resolve(adapter(request)), node.timeoutMs);
+      output = await invokeTrustedAdapter(() => adapter(request));
+    } else if (adapter && typeof adapter.execute === 'function') {
+      output = await invokeTrustedAdapter(() => adapter.execute(request));
+    } else if (adapter && typeof adapter.invoke === 'function') {
+      output = await invokeTrustedAdapter(() => adapter.invoke(request));
+    } else if (typeof this.executor === 'function') {
+      output = await invokeTrustedAdapter(() => this.executor(request));
+    } else if (this.executor && typeof this.executor.execute === 'function') {
+      output = await invokeTrustedAdapter(() => this.executor.execute(request));
+    } else {
+      throw new CoreError('ADAPTER_UNAVAILABLE', `No executor is configured for adapter ${adapterId ?? '(none)'}`, { retryable: true });
     }
-    if (adapter && typeof adapter.execute === 'function') return this.#withTimeout(Promise.resolve(adapter.execute(request)), node.timeoutMs);
-    if (adapter && typeof adapter.invoke === 'function') return this.#withTimeout(Promise.resolve(adapter.invoke(request)), node.timeoutMs);
-    if (typeof this.executor === 'function') return this.#withTimeout(Promise.resolve(this.executor(request)), node.timeoutMs);
-    if (this.executor && typeof this.executor.execute === 'function') return this.#withTimeout(Promise.resolve(this.executor.execute(request)), node.timeoutMs);
-    throw new CoreError('ADAPTER_UNAVAILABLE', `No executor is configured for adapter ${adapterId ?? '(none)'}`, { retryable: true });
+    const normalized = normalizeOutput(output);
+    assertSchemaValue({
+      value: normalized,
+      schema: capability.outputSchema,
+      code: 'OUTPUT_SCHEMA_INVALID',
+      reason: 'OUTPUT_SCHEMA_INVALID',
+      label: `Output for node ${node.id}`,
+      message: `Output for node ${node.id} does not match the capability output schema`,
+    });
+    return normalized;
   }
 
   async #evaluatePolicy({ identity, workflow, node, credential }) {
@@ -397,7 +640,12 @@ export class ExecutionBroker {
     const request = {
       ...binding,
       capability: node.capabilityId,
-      action: node.operation ?? (node.readOnly ? 'read' : 'write'),
+      // Action is a tiny trusted policy vocabulary, not a provider- or
+      // plan-supplied operation label.  The stored plan's mutability has
+      // already been checked against the catalog binding, so a rehashed plan
+      // cannot relabel a write as an arbitrary capability name and bypass a
+      // denyActions: ['write'] rule.
+      action: node.readOnly ? 'read' : 'write',
       mutation: !node.readOnly,
       ...(credential === undefined || credential === null ? {} : { approval: jsonClone(credential) }),
     };
@@ -413,9 +661,9 @@ export class ExecutionBroker {
         cause: error,
       });
     }
-    if (result === true || result?.allowed === true || result?.authorized === true) return result;
+    if (result === true || result?.allowed === true) return result;
     const code = typeof result?.code === 'string' ? result.code : 'POLICY_DENIED';
-    if (APPROVAL_MISS_CODES.has(code)) return { approvalMissing: true, code };
+    if (!node.readOnly && APPROVAL_MISS_CODES.has(code)) return { approvalMissing: true, code };
     throw new CoreError('POLICY_DENIED', 'Policy denied workflow node', {
       retryable: false,
       details: {
@@ -470,20 +718,25 @@ export class ExecutionBroker {
     }
   }
 
-  #terminalizeReconciliation({ identity, workflowId, revision, nodeId, phase, cause }) {
-    const error = reconciliationError({ nodeId, phase, cause });
+  #terminalizeReconciliation({ identity, workflowId, revision, nodeId, phase, cause, executionKey, effectMayHaveCommitted, outcome }) {
+    const error = reconciliationError({ nodeId, phase, cause, effectMayHaveCommitted, outcome });
+    let terminalized = false;
     try {
       const current = this.store.get({ identity, workflowId, revision });
-      if (!TERMINAL_WORKFLOW_STATES.has(current.state)) {
+      if (TERMINAL_WORKFLOW_STATES.has(current.state)) {
+        terminalized = true;
+      } else {
         this.store.fail({ identity, workflowId, revision, error: error.toJSON() });
+        terminalized = true;
       }
     } catch (terminalizationError) {
-      // Never replace the committed-side-effect signal with a retryable store
-      // or audit error.  The node itself is already completed, so even a
-      // non-standard store that cannot transition the workflow will not cause
-      // this broker to execute that node again.
+      // Never replace the unknown-outcome signal with a retryable store or
+      // audit error.  A normal store transitions the workflow to a terminal
+      // reconciliation state; a non-standard store that cannot do so still
+      // leaves the original unknown-outcome error visible to the caller.
       if (terminalizationError !== cause) error.terminalizationCause = terminalizationError;
     }
+    if (!terminalized && executionKey) this.reconciliationExecutions.set(executionKey, error);
     return error;
   }
 
@@ -508,6 +761,14 @@ export class ExecutionBroker {
       });
     });
   }
+}
+
+function normalizeReplayLimit(value) {
+  if (value === undefined) return MAX_REPLAY_NODES;
+  if (!Number.isInteger(value) || value < 1 || value > MAX_REPLAY_NODES) {
+    throw new CoreError('INVALID_REPLAY', `limit must be an integer from 1 to ${MAX_REPLAY_NODES}`);
+  }
+  return value;
 }
 
 export function approvalBinding({ identity, workflow, node }) {
@@ -559,14 +820,19 @@ function normalizeOutput(value) {
   return value === undefined ? null : jsonClone(value);
 }
 
-function reconciliationError({ nodeId, phase, cause }) {
+function reconciliationError({ nodeId, phase, cause, effectMayHaveCommitted = true, outcome = 'unknown' }) {
   return new CoreError(
     'RECONCILIATION_REQUIRED',
-    'Execution completed but its audit record could not be appended; manual reconciliation is required',
+    'Execution outcome is unknown; manual reconciliation is required',
     {
       retryable: false,
       details: {
-        effectCommitted: true,
+        // The broker knows when a trusted mutation invocation crossed the
+        // side-effect boundary, but cannot prove whether a provider committed
+        // before returning or throwing.  Keep the record explicitly unknown;
+        // callers must reconcile it instead of retrying implicitly.
+        effectMayHaveCommitted: effectMayHaveCommitted === true,
+        outcome,
         phase,
         ...(nodeId === undefined ? {} : { nodeId }),
       },
@@ -595,4 +861,82 @@ function rejectCallerApproval(operation) {
 function requireObject(value, label) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new CoreError('INVALID_INPUT', `${label} must be an object`);
   return value;
+}
+
+function invocationContext(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return value;
+}
+
+function normalizeExecutionConstraints(operation) {
+  const origin = operation.origin === undefined
+    ? undefined
+    : canonicalExecutionOrigin(operation.origin);
+  const adapter = operation.adapter === undefined
+    ? undefined
+    : canonicalExecutionAdapter(operation.adapter);
+  return { origin, adapter };
+}
+
+function applyExecutionConstraints(operation, constraints) {
+  if (constraints.origin === operation.origin && constraints.adapter === operation.adapter) return operation;
+  return {
+    ...operation,
+    ...(constraints.origin === undefined ? {} : { origin: constraints.origin }),
+    ...(constraints.adapter === undefined ? {} : { adapter: constraints.adapter }),
+  };
+}
+
+function executionKeyFor({ identity, workflowId, revision, constraints }) {
+  // Context constraints are validated before this key is consulted.  Keep
+  // idempotency and the reconciliation no-reinvoke guard workflow-scoped so
+  // an omitted origin/adapter cannot evade a guard by retrying with the
+  // explicit planned values.  `constraints` remains an input here for a
+  // single canonical call shape and to make the non-partitioning intentional.
+  void constraints;
+  return `${identityKey(identity)}:${encodeURIComponent(workflowId)}:${revision}`;
+}
+
+function assertExecutionContext({ operation, plan, constraints }) {
+  if (!plan || !Array.isArray(plan.nodes)) return;
+  for (const node of plan.nodes) {
+    if (constraints.adapter !== undefined && constraints.adapter !== node.adapter) {
+      throw new CoreError('EXECUTION_CONTEXT', `Caller adapter does not match the proposed plan for node ${node.id}`);
+    }
+    if (constraints.origin !== undefined && !sameCanonicalOrigin(constraints.origin, node.origin)) {
+      throw new CoreError('EXECUTION_CONTEXT', `Caller origin does not match the proposed plan for node ${node.id}`);
+    }
+  }
+}
+
+function canonicalExecutionAdapter(value) {
+  if (typeof value !== 'string' || value.length === 0 || value.trim() !== value || /[\u0000-\u001f\u007f]/u.test(value)) {
+    throw new CoreError('EXECUTION_CONTEXT', 'Caller adapter is invalid');
+  }
+  return value;
+}
+
+function canonicalExecutionOrigin(value) {
+  if (typeof value !== 'string' || value.length === 0 || value.trim() !== value || /[\u0000-\u001f\u007f]/u.test(value)) {
+    throw new CoreError('EXECUTION_CONTEXT', 'Caller origin is invalid');
+  }
+  try {
+    const parsed = new URL(value);
+    if ((parsed.protocol !== 'http:' && parsed.protocol !== 'https:') || parsed.username || parsed.password ||
+        parsed.pathname !== '/' || parsed.search || parsed.hash || !parsed.hostname) {
+      throw new Error('origin must be an HTTP(S) origin');
+    }
+    return parsed.origin;
+  } catch (error) {
+    throw new CoreError('EXECUTION_CONTEXT', 'Caller origin is invalid', { cause: error });
+  }
+}
+
+function sameCanonicalOrigin(left, right) {
+  if (left === undefined || right === undefined) return left === right;
+  try {
+    return canonicalExecutionOrigin(left) === canonicalExecutionOrigin(right);
+  } catch {
+    return false;
+  }
 }

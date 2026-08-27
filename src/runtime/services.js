@@ -15,6 +15,11 @@ import {
   AuditLog,
   PolicyEngine,
 } from '../security/index.js';
+import { ADAPTER_DATA_LIMITS, assertAdapterDataBounds } from '../adapters/base.js';
+import { normalizeAdapterError } from '../adapters/contracts.js';
+
+const RISK_LEVELS = new Set(['low', 'medium', 'high', 'critical']);
+const RISK_RANK = Object.freeze({ low: 0, medium: 1, high: 2, critical: 3 });
 
 /**
  * Construct the default in-memory service graph.  This graph is optional for
@@ -26,11 +31,27 @@ export function createCoreServices(options = {}) {
   const identity = options.identity || {};
   const adapters = normalizeAdapters(options.adapters || options.adapter);
   const fallbackOrigin = options.origin || identity.origin || undefined;
+  // Adapter/page descriptors are observations, never catalog authority.
+  // Hosts must supply the capability records explicitly so a provider cannot
+  // choose its own mutability, operation, or execution scope.
   const capabilities = options.capabilities === undefined
-    ? normalizeCatalogCapabilities(discoverAdapterCapabilities(adapters), fallbackOrigin, adapters)
+    ? []
     : normalizeCatalogCapabilities(options.capabilities || [], fallbackOrigin, adapters);
   const adapterIndex = indexAdapters(adapters);
-  const audit = options.audit || new AuditLog({ clock: () => now().getTime() });
+  const auditOptions = options.auditOptions &&
+    typeof options.auditOptions === 'object' &&
+    !Array.isArray(options.auditOptions)
+    ? { ...options.auditOptions }
+    : {};
+  // Keep the default audit clock owned by this service graph while allowing a
+  // host to bound retention (directly or through auditOptions).  A direct
+  // maxAuditEntries setting is intentionally authoritative at the composition
+  // boundary, just like the direct workflow quota settings below.
+  if (options.maxAuditEntries !== undefined) auditOptions.maxEntries = options.maxAuditEntries;
+  const audit = options.audit || new AuditLog({
+    ...auditOptions,
+    clock: () => now().getTime(),
+  });
   const approvalAuthority = options.approvalAuthority || options.approvals || new ApprovalAuthority({
     clock: () => now().getTime(),
     audit,
@@ -42,7 +63,41 @@ export function createCoreServices(options = {}) {
     catalog,
     idFactory: options.workflowIdFactory,
   });
+  const workflowStoreOptions = options.workflowStoreOptions &&
+    typeof options.workflowStoreOptions === 'object' &&
+    !Array.isArray(options.workflowStoreOptions)
+    ? { ...options.workflowStoreOptions }
+    : {};
+  // Keep quota configuration at the composition boundary.  A host may pass
+  // it directly alongside the other core options or group it under
+  // workflowStoreOptions; in both cases the trusted clock/id factory remain
+  // owned by this service graph.
+  for (const name of [
+    'maxHistory',
+    'maxRecords',
+    'maxWorkflowRecords',
+    'maxBytes',
+    'maxWorkflowBytes',
+    'maxRecordsPerTenant',
+    'maxTenantRecords',
+    'maxWorkflowsPerTenant',
+    'maxBytesPerTenant',
+    'maxTenantBytes',
+    'maxWorkflowBytesPerTenant',
+    'maxRecordsPerIdentity',
+    'maxIdentityRecords',
+    'maxWorkflowsPerIdentity',
+    'maxBytesPerIdentity',
+    'maxIdentityBytes',
+    'maxWorkflowBytesPerIdentity',
+    'maxRecordBytes',
+    'maxBytesPerRecord',
+    'maxWorkflowRecordBytes',
+  ]) {
+    if (options[name] !== undefined) workflowStoreOptions[name] = options[name];
+  }
   const workflowStore = options.workflowStore || options.store || new WorkflowStore({
+    ...workflowStoreOptions,
     clock: () => now().toISOString(),
     idFactory: options.workflowIdFactory,
   });
@@ -104,7 +159,10 @@ export function normalizeCatalogCapabilities(value, fallbackOrigin, adapters = [
     const adapter = source.adapters || source.adapter || matchingAdapters || [{ id: 'structured.api' }];
     const adapterBindings = (Array.isArray(adapter) ? adapter : [adapter]).map((candidate) => {
       if (typeof candidate === 'string') return { id: candidate };
-      return { id: candidate?.id || candidate?.adapterId || candidate?.name || 'structured.api' };
+      const binding = { id: candidate?.id || candidate?.adapterId || candidate?.name || 'structured.api' };
+      if (typeof candidate?.version === 'string') binding.version = candidate.version;
+      if (typeof candidate?.kind === 'string') binding.kind = candidate.kind;
+      return binding;
     });
     const matchingOrigins = originsForAdapters(adapterBindings, id, adapters);
     const origin = source.origins || source.origin || matchingOrigins || fallbackOrigin;
@@ -133,53 +191,52 @@ export function normalizeCatalogCapabilities(value, fallbackOrigin, adapters = [
       outputSchema: source.outputSchema || source.resultSchema || {},
       metadata: source.metadata,
       tenantId: source.tenantId || '*',
-      ...(source.risk === undefined ? {} : { risk: source.risk }),
+      ...(() => {
+        const risk = normalizeRiskLevel(source.riskLevel ?? source.risk);
+        return risk === undefined ? {} : { risk };
+      })(),
       ...(source.provider === undefined ? {} : { provider: source.provider }),
       ...(source.providerMetadata === undefined ? {} : { providerMetadata: source.providerMetadata }),
     };
   });
 }
 
-/**
- * Discover semantic capability descriptors from typed or legacy adapters.
- * Typed adapters expose a JSON descriptor through describe({}); older hosts
- * commonly expose a capabilities array directly.  Discovery is constructor
- * time only: provider/page output is never allowed to register a capability
- * through an MCP request.
- */
-function discoverAdapterCapabilities(adapters) {
-  const discovered = [];
-  for (const adapter of adapters) {
-    const descriptor = adapterDescriptor(adapter);
-    const capabilities = descriptor?.capabilities ?? adapter?.capabilities;
-    if (!Array.isArray(capabilities)) continue;
-    for (const capability of capabilities) {
-      if (!capability || typeof capability !== 'object') continue;
-      const id = capability.id || capability.capabilityId || capability.name;
-      if (!id) continue;
-      discovered.push({
-        ...capability,
-        id,
-        version: capability.version || descriptor?.version || adapter?.version || '1',
-        adapters: capability.adapters || capability.adapter || [{
-          id: descriptor?.id || adapter?.id || adapter?.name,
-          kind: descriptor?.kind || adapter?.kind,
-        }],
-        origins: capability.origins || capability.origin || descriptor?.origins || descriptor?.origin || adapter?.origins || adapter?.origin,
-      });
-    }
+function normalizeRiskLevel(value) {
+  const supplied = typeof value === 'string'
+    ? value.toLowerCase()
+    : value && typeof value === 'object' && typeof value.level === 'string'
+      ? value.level.toLowerCase()
+      : undefined;
+  let derived;
+  const score = value && typeof value === 'object' ? value.score : undefined;
+  if (typeof score === 'number' && Number.isFinite(score) && score >= 0 && score <= 1) {
+    derived = score >= 0.85 ? 'critical' : score >= 0.6 ? 'high' : score >= 0.3 ? 'medium' : 'low';
   }
-  return discovered;
+  if (!RISK_LEVELS.has(supplied)) return derived;
+  if (!derived || RISK_RANK[supplied] >= RISK_RANK[derived]) return supplied;
+  return derived;
 }
 
 function adapterDescriptor(adapter) {
   if (!adapter || typeof adapter !== 'object' || typeof adapter.describe !== 'function') return undefined;
+  let descriptor;
   try {
-    const descriptor = adapter.describe({});
-    return descriptor && typeof descriptor === 'object' ? descriptor : undefined;
+    descriptor = adapter.describe({});
   } catch {
     return undefined;
   }
+  if (!descriptor || typeof descriptor !== 'object') return undefined;
+  if (Array.isArray(descriptor.capabilities) && descriptor.capabilities.length > ADAPTER_DATA_LIMITS.maxCapabilities) {
+    throw new CoreError(
+      'CAPABILITY_LIMIT_EXCEEDED',
+      `An adapter may declare at most ${ADAPTER_DATA_LIMITS.maxCapabilities} capabilities`,
+    );
+  }
+  assertAdapterDataBounds(descriptor, 'Adapter descriptor', {
+    maxNodes: ADAPTER_DATA_LIMITS.maxNodes * ADAPTER_DATA_LIMITS.maxCapabilities,
+    maxBytes: ADAPTER_DATA_LIMITS.maxBytes * 8,
+  });
+  return descriptor;
 }
 
 function adaptersForCapability(adapters, capabilityId) {
@@ -191,7 +248,15 @@ function adaptersForCapability(adapters, capabilityId) {
     if (!Array.isArray(capabilities)) continue;
     if (capabilities.some((entry) => String(entry?.id || entry?.capabilityId || entry?.name || '') === String(capabilityId))) {
       const id = descriptor?.id || adapter?.id || adapter?.name;
-      if (id) matches.push({ id, ...(descriptor?.kind || adapter?.kind ? { kind: descriptor?.kind || adapter?.kind } : {}) });
+      if (id) {
+        const version = descriptor?.version || adapter?.version;
+        const kind = descriptor?.kind || adapter?.kind;
+        matches.push({
+          id,
+          ...(typeof version === 'string' ? { version } : {}),
+          ...(typeof kind === 'string' ? { kind } : {}),
+        });
+      }
     }
   }
   return matches.length ? matches : undefined;
@@ -262,11 +327,18 @@ function createBrokerAdapter(adapter) {
           capability: request.capabilityId,
         };
       }
-      const result = await adapter.execute({
-        ...request,
-        capability: request.capabilityId,
-        context,
-      });
+      let result;
+      try {
+        result = await adapter.execute({
+          ...request,
+          capability: request.capabilityId,
+          context,
+        });
+      } catch (error) {
+        // Provider exceptions are untrusted data.  Normalize them before the
+        // core broker can persist or attach the value to a workflow error.
+        throw adapterError(error);
+      }
       if (result && result.ok === false) throw adapterError(result.error);
       if (result && result.ok === true && Object.prototype.hasOwnProperty.call(result, 'output')) return sanitizeAdapterOutput(result.output);
       if (result && result.ok === true && Object.prototype.hasOwnProperty.call(result, 'value')) return sanitizeAdapterOutput(result.value);
@@ -275,6 +347,7 @@ function createBrokerAdapter(adapter) {
     const method = adapter?.invoke || adapter?.execute || adapter?.call || adapter?.run;
     if (typeof method !== 'function') throw new CoreError('ADAPTER_UNAVAILABLE', 'Adapter does not expose a semantic invocation method');
     const context = {
+      ...(request.context && typeof request.context === 'object' ? request.context : {}),
       tenantId: request.tenantId,
       subjectId: request.subjectId,
       workflowId: request.workflowId,
@@ -286,12 +359,17 @@ function createBrokerAdapter(adapter) {
       replay: request.replay === true,
     };
     const oneObject = method === adapter?.execute && typeof adapter?.invoke !== 'function' && method.length <= 1;
-    const result = oneObject
-      ? method.call(adapter, { ...request, context })
-      : method.call(adapter, request.capabilityId, request.args || {}, context);
-    return result && typeof result.then === 'function'
-      ? result.then((value) => normalizeLegacyEnvelope(value))
-      : normalizeLegacyEnvelope(result);
+    try {
+      const result = oneObject
+        ? method.call(adapter, { ...request, context })
+        : method.call(adapter, request.capabilityId, request.args || {}, context);
+      return normalizeLegacyEnvelope(await result);
+    } catch (error) {
+      // Legacy providers may reject or throw with an Error carrying an
+      // attacker-sized message.  Keep the same bounded envelope as typed
+      // adapters before returning control to the broker.
+      throw adapterError(error);
+    }
   };
   return { execute };
 }
@@ -307,32 +385,122 @@ function normalizeLegacyEnvelope(value) {
   return sanitizeAdapterOutput(value);
 }
 
-function sanitizeAdapterOutput(value, seen = new Set()) {
-  if (value === null || typeof value === 'string' || typeof value === 'boolean') return value;
-  if (typeof value === 'number') return Number.isFinite(value) ? value : '[UNSERIALIZABLE]';
-  if (value === undefined) return null;
-  if (typeof value === 'bigint') return String(value);
-  if (typeof value !== 'object') return '[UNSERIALIZABLE]';
-  if (seen.has(value)) return '[Circular]';
-  seen.add(value);
-  let output;
-  if (Array.isArray(value)) output = value.map((entry) => sanitizeAdapterOutput(entry, seen));
-  else {
-    const prototype = Object.getPrototypeOf(value);
-    if (prototype !== Object.prototype && prototype !== null) {
-      seen.delete(value);
-      return '[UNSERIALIZABLE]';
+function sanitizeAdapterOutput(value) {
+  const state = { nodes: 0, bytes: 0 };
+  const root = { value: undefined };
+  const active = new Set();
+  const stack = [{ input: value, parent: root, key: 'value', depth: 0, enter: true }];
+
+  const fail = (message) => {
+    throw new CoreError('ADAPTER_OUTPUT_LIMIT', `Adapter output ${message}`);
+  };
+  const addBytes = (candidate) => {
+    state.bytes += Buffer.byteLength(candidate, 'utf8');
+    if (state.bytes > ADAPTER_DATA_LIMITS.maxBytes) fail(`exceeds the ${ADAPTER_DATA_LIMITS.maxBytes}-byte bound`);
+  };
+  const marker = (value) => {
+    addBytes(value);
+    return value;
+  };
+  const write = (parent, key, child) => {
+    if (Array.isArray(parent)) parent[key] = child;
+    else Object.defineProperty(parent, key, {
+      configurable: true,
+      enumerable: true,
+      writable: true,
+      value: child,
+    });
+  };
+  const primitive = (input) => {
+    if (input === null || typeof input === 'boolean') return input;
+    if (typeof input === 'string') {
+      if (input.length > ADAPTER_DATA_LIMITS.maxStringLength) fail(`contains a string longer than ${ADAPTER_DATA_LIMITS.maxStringLength} characters`);
+      addBytes(input);
+      return input;
     }
-    output = {};
-    for (const key of Object.keys(value)) {
-      const descriptor = Object.getOwnPropertyDescriptor(value, key);
-      output[key] = descriptor && Object.prototype.hasOwnProperty.call(descriptor, 'value')
-        ? sanitizeAdapterOutput(descriptor.value, seen)
-        : '[UNSERIALIZABLE]';
+    if (typeof input === 'number') return Number.isFinite(input) ? input : marker('[UNSERIALIZABLE]');
+    if (input === undefined) return null;
+    if (typeof input === 'bigint') {
+      const text = String(input);
+      if (text.length > ADAPTER_DATA_LIMITS.maxStringLength) fail(`contains a string longer than ${ADAPTER_DATA_LIMITS.maxStringLength} characters`);
+      addBytes(text);
+      return text;
+    }
+    return marker('[UNSERIALIZABLE]');
+  };
+
+  while (stack.length) {
+    const frame = stack.pop();
+    if (!frame.enter) {
+      active.delete(frame.input);
+      continue;
+    }
+    state.nodes += 1;
+    if (state.nodes > ADAPTER_DATA_LIMITS.maxNodes) fail(`exceeds the ${ADAPTER_DATA_LIMITS.maxNodes}-node bound`);
+    if (frame.depth > ADAPTER_DATA_LIMITS.maxDepth) fail(`exceeds the ${ADAPTER_DATA_LIMITS.maxDepth}-level nesting bound`);
+
+    const input = frame.input;
+    if (input === null || typeof input !== 'object') {
+      write(frame.parent, frame.key, primitive(input));
+      continue;
+    }
+    if (active.has(input)) {
+      write(frame.parent, frame.key, marker('[Circular]'));
+      continue;
+    }
+
+    let prototype;
+    let keys;
+    try {
+      prototype = Object.getPrototypeOf(input);
+      keys = Object.keys(input);
+    } catch {
+      write(frame.parent, frame.key, marker('[UNSERIALIZABLE]'));
+      continue;
+    }
+    if (!Array.isArray(input) && prototype !== Object.prototype && prototype !== null) {
+      write(frame.parent, frame.key, marker('[UNSERIALIZABLE]'));
+      continue;
+    }
+    if (Array.isArray(input) && input.length > ADAPTER_DATA_LIMITS.maxArrayLength) {
+      fail(`contains an array longer than ${ADAPTER_DATA_LIMITS.maxArrayLength} entries`);
+    }
+    if (keys.length > ADAPTER_DATA_LIMITS.maxObjectKeys) {
+      fail(`contains an object with more than ${ADAPTER_DATA_LIMITS.maxObjectKeys} keys`);
+    }
+
+    const output = Array.isArray(input) ? new Array(input.length) : {};
+    write(frame.parent, frame.key, output);
+    active.add(input);
+    stack.push({ input, parent: null, key: null, depth: frame.depth, enter: false });
+    if (Array.isArray(input)) {
+      for (let index = input.length - 1; index >= 0; index -= 1) {
+        const descriptor = Object.getOwnPropertyDescriptor(input, String(index));
+        stack.push({
+          input: descriptor && Object.prototype.hasOwnProperty.call(descriptor, 'value') ? descriptor.value : undefined,
+          parent: output,
+          key: index,
+          depth: frame.depth + 1,
+          enter: true,
+        });
+      }
+    } else {
+      for (let index = keys.length - 1; index >= 0; index -= 1) {
+        const key = keys[index];
+        if (key.length > ADAPTER_DATA_LIMITS.maxKeyLength) fail(`contains a key longer than ${ADAPTER_DATA_LIMITS.maxKeyLength} characters`);
+        addBytes(key);
+        const descriptor = Object.getOwnPropertyDescriptor(input, key);
+        stack.push({
+          input: descriptor && Object.prototype.hasOwnProperty.call(descriptor, 'value') ? descriptor.value : '[UNSERIALIZABLE]',
+          parent: output,
+          key,
+          depth: frame.depth + 1,
+          enter: true,
+        });
+      }
     }
   }
-  seen.delete(value);
-  return output;
+  return root.value;
 }
 
 function isTypedAdapter(adapter) {
@@ -369,10 +537,11 @@ function canonicalOrigin(value) {
 }
 
 function adapterError(value) {
-  const error = new Error(value?.message || 'Adapter execution failed');
-  if (value?.code) error.code = value.code;
-  error.retryable = value?.retryable === true;
-  if (value?.details !== undefined) error.details = value.details;
+  const normalized = normalizeAdapterError({ error: value });
+  const error = new Error(normalized.message);
+  error.code = normalized.code;
+  error.retryable = normalized.retryable;
+  if (normalized.details !== undefined) error.details = normalized.details;
   return error;
 }
 

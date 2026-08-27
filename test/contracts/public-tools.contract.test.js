@@ -261,6 +261,42 @@ test('schema-declared fields are accepted by the corresponding runtime handler',
   assert.equal(replay.readOnly, true);
 });
 
+test('public schemas reject cursor, whitespace, and identifier values rejected by runtime', async () => {
+  const definitions = definitionMap(getToolDefinitions());
+  const identity = { tenantId: 'tenant-a', subjectId: 'subject-a' };
+  const search = definitions.get('capabilities.search').inputSchema;
+  assertInvalid(search, { ...identity, kind: ' read' }, 'search kind leading whitespace');
+  assertInvalid(search, { ...identity, adapter: 'structured ' }, 'search adapter trailing whitespace');
+  assertInvalid(search, { ...identity, tags: [' tag'] }, 'search tag leading whitespace');
+  assertInvalid(search, { ...identity, cursor: 'abc' }, 'search cursor non-numeric');
+  assertInvalid(search, { ...identity, cursor: '1234567890123456' }, 'search cursor beyond safe schema bound');
+
+  const describe = definitions.get('capabilities.describe').inputSchema;
+  assertInvalid(describe, { ...identity, capabilityId: 'cart read' }, 'describe capability ID whitespace');
+  assertInvalid(describe, { ...identity, capabilityId: 'cart.read', version: '1 beta' }, 'describe version whitespace');
+
+  const propose = definitions.get('plan.propose').inputSchema;
+  assertInvalid(propose, { ...identity, workflowId: 'workflow id' }, 'propose workflow ID whitespace');
+  assertInvalid(propose, { ...identity, goal: ' Read the cart' }, 'propose goal leading whitespace');
+
+  const replay = definitions.get('workflow.replay_readonly').inputSchema;
+  assertInvalid(replay, { ...identity, workflowId: 'workflow-1', nodeIds: ['node id'] }, 'replay node ID whitespace');
+
+  const runtime = createFixtureRuntime();
+  await assert.rejects(
+    runtime.callTool('capabilities.search', { ...identity, kind: ' read' }),
+    (error) => error?.code === 'INVALID_ARGUMENT',
+  );
+  await assert.rejects(
+    runtime.callTool('capabilities.search', { ...identity, cursor: '1234567890123456' }),
+    (error) => error?.code === 'INVALID_ARGUMENT',
+  );
+  await assert.rejects(
+    runtime.callTool('workflow.status', { ...identity, workflowId: 'workflow id' }),
+    (error) => error?.code === 'INVALID_ARGUMENT',
+  );
+});
+
 test('fallback capability search honors kind, adapter, tags, readOnly, limit, and cursor', async () => {
   const identity = { tenantId: 'tenant-a', subjectId: 'subject-a' };
   const runtime = createCompositionRoot({
@@ -392,6 +428,8 @@ test('unsafe capability IDs are rejected and unsafe or secret descriptor metadat
     'raw.click',
     'cookie.read',
     'filesystem.read',
+    'command.run',
+    'process.spawn',
   ];
   for (const id of unsafeIds) {
     assert.throws(
@@ -410,7 +448,13 @@ test('unsafe capability IDs are rejected and unsafe or secret descriptor metadat
       shell: 'must-not-leak',
       metadata: {
         apiToken: 'secret-token',
-        nested: { password: 'secret-password', shell: 'must-not-leak' },
+        nested: {
+          password: 'secret-password',
+          shell: 'must-not-leak',
+          shell_command: 'punctuation-bypass',
+          'java-script': 'punctuation-bypass',
+          raw_action: 'punctuation-bypass',
+        },
       },
       providerMetadata: { cookie: 'secret-cookie' },
     }],
@@ -423,6 +467,7 @@ test('unsafe capability IDs are rejected and unsafe or secret descriptor metadat
     assert.equal(encoded.includes('secret-token'), false);
     assert.equal(encoded.includes('secret-password'), false);
     assert.equal(encoded.includes('secret-cookie'), false);
+    assert.equal(encoded.includes('punctuation-bypass'), false);
   }
   assert.equal(described.command, undefined);
   assert.equal(described.shell, undefined);

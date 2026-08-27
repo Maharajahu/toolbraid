@@ -27,10 +27,24 @@ access cookies, browse the filesystem, or bypass policy.
 - Tenant/user/workflow identity must be explicit and never inferred globally.
 - Mutating execution requires a trusted, server-side approval record.
 - Approval binds tenant, subject, workflow, revision, node, origin, adapter,
-  canonical argument hash, expiry and a single-use nonce.
-- Provider metadata and outputs are untrusted data.
+  capability ID/version, canonical argument hash, expiry and a single-use
+  nonce.
+- Provider/page metadata and outputs are untrusted data and are never promoted
+  into catalog authority by the default non-fixture runtime.
 - Audit records are append-only and redact secret-like keys.
 - Adapters expose semantic capabilities; raw click/shell primitives are not public.
+- Adapter routing is server-owned and fixed:
+  `structured-api -> webmcp -> dom-accessibility -> vision`.
+- Plans, adapter values, workflow state, gateway calls, and stdio queues are
+  bounded; cancellation is cooperative and does not roll back mutations.
+
+## Non-production boundary
+
+The MVP does not include external authentication, durable DB/workflow/approval/
+audit storage, KMS or a credential vault, browser/profile isolation, enforced
+egress, production rate limiting/tenant fair-use quotas, or a forced worker
+cancel boundary. The Dockerfile is non-root but not digest pinned; immutable
+image pinning and scan evidence are required before container promotion.
 
 ## Module ownership
 

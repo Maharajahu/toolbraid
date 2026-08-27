@@ -32,12 +32,59 @@ const SECRET_KEYS = new Set([
   "totp",
 ]);
 
+const SECRET_TOKENS = new Set([
+  "accesskey",
+  "accesstoken",
+  "apikey",
+  "auth",
+  "authorization",
+  "authz",
+  "bearer",
+  "clientsecret",
+  "cookie",
+  "credential",
+  "credentials",
+  "cvv",
+  "jwt",
+  "key",
+  "nonce",
+  "oauth",
+  "password",
+  "passcode",
+  "passwd",
+  "passphrase",
+  "privatekey",
+  "refreshkey",
+  "refreshtoken",
+  "secret",
+  "secretkey",
+  "session",
+  "sessionid",
+  "setcookie",
+  "signature",
+  "ssn",
+  "token",
+  "totp",
+]);
+
+const SECRET_COMPOUND_PATTERN = /(?:auth(?:orization|z)?|access|api|bearer|client|cookie|credential|jwt|nonce|oauth|pass(?:word|code|phrase)?|private|refresh|secret|session|signature|ssn|token)(?:key|token|secret|credential|authorization|header|value|id|pem|hash)/u;
+
+function keyTokens(key) {
+  return key
+    .replace(/([a-z0-9])([A-Z])/gu, "$1 $2")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/gu)
+    .filter(Boolean);
+}
+
 /** Return true for object keys that should never appear in audit output. */
 export function isSecretLikeKey(key) {
   if (typeof key !== "string") return false;
   const normalized = key.toLowerCase().replace(/[^a-z0-9]/gu, "");
   if (!normalized) return false;
   if (SECRET_KEYS.has(normalized)) return true;
+  if (keyTokens(key).some((token) => SECRET_TOKENS.has(token))) return true;
+  if (SECRET_COMPOUND_PATTERN.test(normalized)) return true;
   return [
     "key",
     "token",

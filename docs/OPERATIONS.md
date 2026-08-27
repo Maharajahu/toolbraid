@@ -1,9 +1,10 @@
 # ToolBraid operator runbook
 
 This runbook covers the repository's local/reference process and the controls
-needed before placing it behind a production endpoint. Starting `src/server.js`
-is not, by itself, evidence of authentication, TLS, durable state, or safe
-internet exposure.
+needed before placing it behind any real endpoint. Starting `src/server.js` is
+not, by itself, evidence of authentication, TLS, durable state, browser
+isolation, egress enforcement, or safe internet exposure. The checkout is a
+non-production MVP.
 
 ## Prerequisites and verification
 
@@ -15,6 +16,7 @@ run:
 npm test
 npm run check
 node --test test/release/*.test.js
+npm run smoke
 ```
 
 The first two commands are the repository's normal gates. The release suite
@@ -28,6 +30,9 @@ For a local process, use:
 ```sh
 NODE_ENV=production node src/server.js
 ```
+
+Production refuses `fixture=true` and `TOOLBRAID_FIXTURE=1` with
+`INSECURE_FIXTURE_FORBIDDEN`; use fixture mode only for local tests and demos.
 
 Only configuration documented by the source and deployment environment should
 be supplied. Do not put secrets on command lines or commit `.env` files. Keep a
@@ -43,7 +48,8 @@ Before accepting traffic, an operator should have evidence for each item:
   subject, and workflow identity; it cannot be omitted or inherited from a
   process-global default.
 - **Transport:** TLS, request-size limits, timeouts, rate limits, and an
-  egress allowlist are enforced at the edge or runtime.
+  egress allowlist are enforced at the edge or runtime. The repository's
+  request/concurrency bounds are not a substitute for these controls.
 - **Authorization:** mutating calls require a trusted server-side approval
   record bound to all fields in the architecture contract. Approval records
   have expiry and a single-use nonce, and the backing store prevents races.
@@ -62,6 +68,12 @@ Before accepting traffic, an operator should have evidence for each item:
   health/error metrics without logging page content or secret-like values.
 - **Recovery:** document how to stop ingress, revoke outstanding approvals,
   preserve evidence, restore state, and verify no mutation was replayed.
+
+The repository itself does not supply external authentication, a durable
+database/approval/audit authority, KMS or a credential vault, browser/profile
+isolation, enforced egress/DNS policy, production rate limiting, or a forced
+worker kill boundary. Record each as a deployment gap until independently
+implemented and tested.
 
 If an item is not implemented or evidenced, record it as a deployment gap. Do
 not describe the service as production-ready on the basis of tests alone.
@@ -83,6 +95,26 @@ surface. Use the hosting/process supervisor and the configured approval store's
 operator controls for emergency containment, then verify workflow state after
 the process is healthy again.
 
+Cancellation is cooperative. Read-only adapter calls may observe an
+`AbortSignal`; a handler that ignores it can continue consuming an admitted
+slot until it completes. Mutation calls do not receive the signal, and a
+client-side cancellation or timeout does not prove that a provider mutation was
+rolled back. Do not blindly retry a mutation after an ambiguous timeout; use
+workflow status and reconciliation evidence.
+
+The built-in admission safeguards are finite but local: plans are bounded at
+128 nodes/32 dependencies per node/1,024 aggregate dependencies/512 KiB;
+workflow storage defaults to 10,000 records/256 MiB globally, 2,000 records/64
+MiB per tenant, 500 records/16 MiB per identity, and 4 MiB per record; the
+gateway allows 64 active calls globally and 32 per session. Stdio allows 16
+active tasks with a bounded queue. There is no production rate limiter or
+tenant fair-use service.
+
+Capabilities must be explicitly registered by the host/catalog. Provider/page
+manifests are observations and are not authority. Adapter routing is fixed in
+this order: `structured-api -> webmcp -> dom-accessibility -> vision`;
+vision requires explicit policy opt-in.
+
 ## Incident procedure
 
 1. Stop new ingress or isolate the affected tenant/origin.
@@ -101,5 +133,7 @@ the process is healthy again.
 The release record should include the exact commit SHA, Node versions tested,
 the output of `npm test`, `npm run check`, and `node --test test/release/*.test.js`, plus
 the container image digest and vulnerability-scan result when a container is
-published. Keep this evidence with the deployment change; a green local run
+published. The current Dockerfile uses a floating `node:20-alpine` tag, so
+container publication is blocked until an immutable digest is pinned and
+scanned. Keep this evidence with the deployment change; a green local run
 without a persisted commit is not a release.

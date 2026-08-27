@@ -29,11 +29,232 @@ export const DEFAULT_ADAPTER_METADATA = Object.freeze({
   [ADAPTER_KINDS.VISION]: Object.freeze({ confidence: 0.55, riskScore: 0.8 }),
 });
 
+// Adapter schemas are supplied by integrations and are evaluated on every
+// adapter invocation.  Keep both the schema and the strings it can inspect
+// bounded so a contract cannot turn validation into an unbounded resource
+// sink.  The regular-expression subset below is deliberately conservative:
+// rejected patterns can always be represented by a semantic capability
+// handler instead of making the adapter execute an arbitrary backtracking
+// expression.
+export const ADAPTER_SCHEMA_LIMITS = Object.freeze({
+  maxDepth: 16,
+  maxNodes: 512,
+  maxArrayLength: 128,
+  maxObjectKeys: 256,
+  maxKeyLength: 256,
+  maxStringLength: 4096,
+  maxPatternLength: 512,
+  maxRepeat: 64,
+  maxQuantifiers: 3,
+});
+
+// These limits apply to values independently of their declared schema.  A
+// permissive `{ type: 'object' }` schema must not be able to smuggle an
+// unbounded provider response into cloning, persistence, or a regex check.
+export const ADAPTER_VALUE_LIMITS = Object.freeze({
+  maxDepth: 16,
+  maxNodes: 4096,
+  maxBytes: 256 * 1024,
+  maxStringLength: 4096,
+  maxArrayLength: 128,
+  maxObjectKeys: 256,
+  maxKeyLength: 256,
+});
+
+// Provider failures cross the adapter boundary as data too.  Keep the two
+// human-readable fields small and identifier-like before a broker can attach
+// them to a workflow, audit record, or protocol response.
+export const ADAPTER_ERROR_LIMITS = Object.freeze({
+  maxCodeLength: 128,
+  maxMessageLength: 2048,
+});
+
 const RISK_LEVELS = Object.freeze(['low', 'medium', 'high', 'critical']);
 const PROTOCOLS = Object.freeze(['http:', 'https:']);
-const RESERVED_CAPABILITY_PARTS = /^(?:click|shell|browser|javascript|eval|exec|keypress|keystroke|mouse)$/i;
+const RESERVED_CAPABILITY_PARTS = /^(?:click|shell|browser|javascript|eval|exec|keypress|keystroke|mouse|command|code|process|spawn|subprocess|powershell|terminal|system|cmd)$/i;
 
 const hasOwn = (value, key) => Object.prototype.hasOwnProperty.call(value, key);
+
+/**
+ * Parse just enough of JavaScript's regular-expression syntax to reject the
+ * constructs most likely to cause catastrophic backtracking.  This is not a
+ * regex compiler.  Syntax validity is still checked with RegExp after this
+ * pass, but no untrusted pattern reaches RegExp unless it is already inside
+ * this bounded, conservative subset.  In particular, the subset has no
+ * unbounded quantifiers: only finite `{m}` / `{m,n}` repeats are accepted.
+ */
+function safeRegexSequence({ pattern, start, endChar }) {
+  let index = start;
+  let hasQuantifier = false;
+  let hasAlternation = false;
+  let quantifierCount = 0;
+
+  while (index < pattern.length) {
+    const token = pattern[index];
+    if (token === endChar) {
+      return {
+        next: index,
+        hasQuantifier,
+        hasAlternation,
+        quantifierCount,
+        closed: true,
+      };
+    }
+    if (token === '|') {
+      hasAlternation = true;
+      index += 1;
+      continue;
+    }
+    if (token === ')' || token === '*' || token === '+' || token === '?') return null;
+    // A brace followed by a digit is a quantifier candidate.  Do not let an
+    // oversized or malformed candidate fall through as literal text: the JS
+    // engine may still interpret it as a very large repeat.
+    if (token === '{' && /[0-9]/.test(pattern[index + 1] ?? '')) return null;
+
+    let atom;
+    if (token === '(') {
+      index += 1;
+      if (pattern[index] === '?') {
+        // Non-capturing groups are sufficient for adapter schemas.  Look
+        // arounds, named groups, inline flags, and other extensions are
+        // rejected because they make matching behaviour harder to bound.
+        if (pattern[index + 1] !== ':') return null;
+        index += 2;
+      }
+      const nested = safeRegexSequence({ pattern, start: index, endChar: ')' });
+      if (!nested || !nested.closed) return null;
+      atom = {
+        kind: 'group',
+        hasQuantifier: nested.hasQuantifier,
+        hasAlternation: nested.hasAlternation,
+        quantifierCount: nested.quantifierCount,
+      };
+      index = nested.next + 1;
+    } else if (token === '[') {
+      // Character classes are atoms.  Their contents must not be parsed as
+      // groups or quantifiers, but escaped brackets still need skipping.
+      let classIndex = index + 1;
+      if (pattern[classIndex] === '^') classIndex += 1;
+      let closed = false;
+      while (classIndex < pattern.length) {
+        if (pattern[classIndex] === '\\') {
+          classIndex += 2;
+          continue;
+        }
+        if (pattern[classIndex] === ']') {
+          closed = true;
+          classIndex += 1;
+          break;
+        }
+        classIndex += 1;
+      }
+      if (!closed) return null;
+      atom = { kind: 'class', hasQuantifier: false, hasAlternation: false };
+      index = classIndex;
+    } else if (token === '\\') {
+      const escaped = pattern[index + 1];
+      if (
+        escaped === undefined
+        || /[0-9]/.test(escaped)
+        || (escaped === 'k' && pattern[index + 2] === '<')
+        || escaped === 'b'
+        || escaped === 'B'
+      ) {
+        // Backreferences can force the engine to revisit arbitrary prior
+        // matches.  Treat even otherwise valid forms as unsafe.
+        return null;
+      }
+      atom = { kind: 'escape', hasQuantifier: false, hasAlternation: false };
+      index += 2;
+    } else {
+      if (token === '.') return null;
+      atom = {
+        kind: 'literal',
+        hasQuantifier: false,
+        hasAlternation: false,
+      };
+      index += 1;
+    }
+
+    const quantifier = readRegexQuantifier({ pattern, start: index });
+    if (quantifier) {
+      // Groups are never repeated, even with a finite upper bound.  Keeping
+      // repetition attached to one literal/class atom gives the matcher a
+      // simple, finite amount of work per token.
+      if (atom.hasQuantifier || atom.kind === 'group' || atom.kind === 'dot') return null;
+      if (quantifier.unbounded
+        || quantifier.max > ADAPTER_SCHEMA_LIMITS.maxRepeat
+        || quantifier.min > ADAPTER_SCHEMA_LIMITS.maxRepeat
+        || quantifierCount + 1 > ADAPTER_SCHEMA_LIMITS.maxQuantifiers) return null;
+      atom.hasQuantifier = true;
+      hasQuantifier = true;
+      quantifierCount += 1;
+      index = quantifier.next;
+    } else {
+      if (atom.hasQuantifier) {
+        hasQuantifier = true;
+        quantifierCount += atom.quantifierCount ?? 0;
+      }
+    }
+  }
+
+  if (endChar !== undefined) return null;
+  return {
+    next: index,
+    hasQuantifier,
+    hasAlternation,
+    quantifierCount,
+    closed: true,
+  };
+}
+
+function readRegexQuantifier({ pattern, start }) {
+  const token = pattern[start];
+  // Unbounded and shorthand quantifiers are outside the safe subset.  The
+  // caller will encounter the token on the next iteration and fail closed.
+  if (token === '*' || token === '+' || token === '?') return null;
+  if (token !== '{') return null;
+
+  let index = start + 1;
+  const minStart = index;
+  while (/[0-9]/.test(pattern[index] ?? '')) index += 1;
+  if (index === minStart) return null;
+  const minText = pattern.slice(minStart, index);
+  const min = Number(minText);
+  if (!Number.isSafeInteger(min)) return null;
+  let max = min;
+  if (pattern[index] === ',') {
+    index += 1;
+    const maxStart = index;
+    while (/[0-9]/.test(pattern[index] ?? '')) index += 1;
+    max = index === maxStart ? Infinity : Number(pattern.slice(maxStart, index));
+    if (max !== Infinity && !Number.isSafeInteger(max)) return null;
+  }
+  if (pattern[index] !== '}') return null;
+  if (max !== Infinity && min > max) return null;
+  return { next: index + 1, min, max, unbounded: max === Infinity };
+}
+
+export function isSafeRegexPattern({ pattern } = {}) {
+  if (
+    typeof pattern !== 'string'
+    || pattern.length > ADAPTER_SCHEMA_LIMITS.maxPatternLength
+    || pattern.length < 2
+    || pattern[0] !== '^'
+    || pattern[pattern.length - 1] !== '$'
+    || pattern.includes('*')
+    || pattern.includes('+')
+    || isEscapedRegexCharacter({ pattern, index: pattern.length - 1 })
+  ) return false;
+  const parsed = safeRegexSequence({ pattern, start: 0 });
+  return parsed?.closed === true && parsed.next === pattern.length;
+}
+
+function isEscapedRegexCharacter({ pattern, index }) {
+  let backslashes = 0;
+  for (let cursor = index - 1; cursor >= 0 && pattern[cursor] === '\\'; cursor -= 1) backslashes += 1;
+  return backslashes % 2 === 1;
+}
 
 export function isPlainObject({ value }) {
   if (value === null || typeof value !== 'object') return false;
@@ -41,28 +262,89 @@ export function isPlainObject({ value }) {
   return prototype === Object.prototype || prototype === null;
 }
 
-export function isJsonSafe({ value, allowUndefined = false }) {
+/**
+ * Validate JSON-safe values with an iterative, bounded walk.  This is kept
+ * independent from schema validation so a broad schema cannot bypass the
+ * adapter's resource limits.  The byte count is intentionally conservative
+ * (UTF-16 code units plus JSON punctuation) and is only used as an upper
+ * bound; JSON.stringify remains the final serializer after this check.
+ */
+export function validateJsonValueBounds({ value, allowUndefined = false } = {}) {
   const seen = new Set();
+  const pending = [{ candidate: value, depth: 0 }];
+  let nodes = 0;
+  let bytes = 0;
 
-  const visit = (candidate) => {
-    if (candidate === null) return true;
-    if (candidate === undefined) return allowUndefined;
-    if (typeof candidate === 'string' || typeof candidate === 'boolean') return true;
-    if (typeof candidate === 'number') return Number.isFinite(candidate);
-    if (typeof candidate === 'bigint' || typeof candidate === 'function' || typeof candidate === 'symbol') {
-      return false;
-    }
-    if (typeof candidate !== 'object') return false;
-    if (seen.has(candidate)) return false;
-    seen.add(candidate);
-    if (Array.isArray(candidate)) {
-      return candidate.every(visit);
-    }
-    if (!isPlainObject({ value: candidate })) return false;
-    return Object.entries(candidate).every(([key, item]) => typeof key === 'string' && visit(item));
+  const addBytes = (amount) => {
+    bytes += amount;
+    return bytes <= ADAPTER_VALUE_LIMITS.maxBytes;
   };
 
-  return visit(value);
+  while (pending.length > 0) {
+    const { candidate, depth } = pending.pop();
+    if (depth > ADAPTER_VALUE_LIMITS.maxDepth) return { valid: false, reason: 'maximum depth exceeded' };
+    nodes += 1;
+    if (nodes > ADAPTER_VALUE_LIMITS.maxNodes) return { valid: false, reason: 'maximum node count exceeded' };
+
+    if (candidate === null) {
+      if (!addBytes(4)) return { valid: false, reason: 'maximum byte size exceeded' };
+      continue;
+    }
+    if (candidate === undefined) {
+      if (!allowUndefined || !addBytes(9)) return { valid: false, reason: 'undefined is not JSON-safe' };
+      continue;
+    }
+    if (typeof candidate === 'string') {
+      if (candidate.length > ADAPTER_VALUE_LIMITS.maxStringLength) return { valid: false, reason: 'maximum string length exceeded' };
+      // A JSON escaped UTF-16 code unit can occupy up to six bytes (for
+      // example, a control character represented as `\\u0000`).
+      if (!addBytes(candidate.length * 6 + 2)) return { valid: false, reason: 'maximum byte size exceeded' };
+      continue;
+    }
+    if (typeof candidate === 'boolean') {
+      if (!addBytes(candidate ? 4 : 5)) return { valid: false, reason: 'maximum byte size exceeded' };
+      continue;
+    }
+    if (typeof candidate === 'number') {
+      if (!Number.isFinite(candidate) || !addBytes(24)) return { valid: false, reason: 'number is not JSON-safe' };
+      continue;
+    }
+    if (typeof candidate === 'bigint' || typeof candidate === 'function' || typeof candidate === 'symbol') {
+      return { valid: false, reason: 'value is not JSON-safe' };
+    }
+    if (typeof candidate !== 'object' || seen.has(candidate)) {
+      return { valid: false, reason: 'value must not contain cycles or repeated references' };
+    }
+    seen.add(candidate);
+
+    if (Array.isArray(candidate)) {
+      if (candidate.length > ADAPTER_VALUE_LIMITS.maxArrayLength) return { valid: false, reason: 'maximum array length exceeded' };
+      // Reserve a conservative slot for each item, including sparse holes
+      // which JSON.stringify emits as `null`.
+      if (!addBytes(2 + candidate.length * 6)) return { valid: false, reason: 'maximum byte size exceeded' };
+      for (let index = candidate.length - 1; index >= 0; index -= 1) {
+        // Preserve the previous JSON-safe contract: sparse array holes are
+        // serializable by JSON.stringify as null and need no child walk.
+        if (index in candidate) pending.push({ candidate: candidate[index], depth: depth + 1 });
+      }
+      continue;
+    }
+    if (!isPlainObject({ value: candidate })) return { valid: false, reason: 'object must be plain' };
+    const entries = Object.entries(candidate);
+    if (entries.length > ADAPTER_VALUE_LIMITS.maxObjectKeys) return { valid: false, reason: 'maximum object key count exceeded' };
+    if (!addBytes(2 + entries.length)) return { valid: false, reason: 'maximum byte size exceeded' };
+    for (let index = entries.length - 1; index >= 0; index -= 1) {
+      const [key, item] = entries[index];
+      if (key.length > ADAPTER_VALUE_LIMITS.maxKeyLength) return { valid: false, reason: 'maximum key length exceeded' };
+      if (!addBytes(key.length * 6 + 3)) return { valid: false, reason: 'maximum byte size exceeded' };
+      pending.push({ candidate: item, depth: depth + 1 });
+    }
+  }
+  return { valid: true };
+}
+
+export function isJsonSafe({ value, allowUndefined = false } = {}) {
+  return validateJsonValueBounds({ value, allowUndefined }).valid;
 }
 
 export function cloneJson({ value }) {
@@ -77,15 +359,101 @@ export function cloneJson({ value }) {
   return JSON.parse(JSON.stringify(value));
 }
 
+const DEFAULT_ADAPTER_ERROR_CODE = 'ADAPTER_CONTRACT_ERROR';
+const DEFAULT_ADAPTER_ERROR_MESSAGE = 'Adapter contract rejected the request.';
+const ADAPTER_EXECUTION_ERROR_CODE = 'ADAPTER_EXECUTION_FAILED';
+const ADAPTER_EXECUTION_ERROR_MESSAGE = 'Adapter execution failed.';
+const ADAPTER_ERROR_CODE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/u;
+const ADAPTER_BEARER_SECRET_PATTERN = /\bBearer\s+[^\s,;]+/giu;
+const ADAPTER_KEYED_SECRET_PATTERN = /\b([A-Za-z][A-Za-z0-9_-]{0,127})(\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s,;]+)/gu;
+const ADAPTER_SECRET_KEY_PATTERN = /(?:access(?:[_-]?key|[_-]?token)?|api[_-]?key|auth(?:orization)?|bearer|client[_-]?secret|cookie|credential|jwt|nonce|oauth|pass(?:word|code|phrase)?|private[_-]?key|refresh[_-]?token|secret|session|signature|ssn|token|totp)/iu;
+
+function ownData({ value, key } = {}) {
+  if (value === null || (typeof value !== 'object' && typeof value !== 'function')) {
+    return { present: false, value: undefined };
+  }
+  try {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (!descriptor || !hasOwn(descriptor, 'value')) return { present: false, value: undefined };
+    return { present: true, value: descriptor.value };
+  } catch {
+    return { present: false, value: undefined };
+  }
+}
+
+function sanitizeAdapterErrorCode(value, fallback = ADAPTER_EXECUTION_ERROR_CODE) {
+  if (
+    typeof value !== 'string'
+    || value.length === 0
+    || value.length > ADAPTER_ERROR_LIMITS.maxCodeLength
+    || !ADAPTER_ERROR_CODE_PATTERN.test(value)
+  ) return fallback;
+  return value;
+}
+
+function isSecretErrorKey(value) {
+  return typeof value === 'string' && ADAPTER_SECRET_KEY_PATTERN.test(value.replace(/[^A-Za-z0-9_-]/gu, ''));
+}
+
+/**
+ * Remove control characters and redact common credential forms from a
+ * provider-owned error message.  Check the bound before running replacements
+ * so even an accidentally supplied multi-megabyte string is handled in
+ * constant, bounded work and replaced with a generic diagnostic.
+ */
+function sanitizeAdapterErrorMessage(value, fallback = ADAPTER_EXECUTION_ERROR_MESSAGE) {
+  if (typeof value !== 'string' || value.length === 0) return fallback;
+  if (value.length > ADAPTER_ERROR_LIMITS.maxMessageLength) return fallback;
+  const text = value
+    .replace(/[\u0000-\u001f\u007f-\u009f]/gu, ' ')
+    .replace(ADAPTER_BEARER_SECRET_PATTERN, 'Bearer [REDACTED]')
+    .replace(ADAPTER_KEYED_SECRET_PATTERN, (match, key, separator) =>
+      isSecretErrorKey(key) ? `${key}${separator}[REDACTED]` : match);
+  if (text.length === 0) return fallback;
+  return text.length > ADAPTER_ERROR_LIMITS.maxMessageLength
+    ? fallback
+    : text;
+}
+
+/**
+ * Normalize an adapter/provider error envelope before it reaches the core
+ * broker.  Only the documented fields survive; details are retained only
+ * when they pass the same bounded JSON walk used for adapter values.
+ */
+export function normalizeAdapterError({
+  error,
+  fallbackCode = ADAPTER_EXECUTION_ERROR_CODE,
+  fallbackMessage = ADAPTER_EXECUTION_ERROR_MESSAGE,
+} = {}) {
+  const source = error && (typeof error === 'object' || typeof error === 'function') ? error : {};
+  const rawCode = ownData({ value: source, key: 'code' });
+  const rawMessage = ownData({ value: source, key: 'message' });
+  const rawRetryable = ownData({ value: source, key: 'retryable' });
+  const rawDetails = ownData({ value: source, key: 'details' });
+  const safeFallbackCode = sanitizeAdapterErrorCode(fallbackCode, ADAPTER_EXECUTION_ERROR_CODE);
+  const safeFallbackMessage = sanitizeAdapterErrorMessage(fallbackMessage, ADAPTER_EXECUTION_ERROR_MESSAGE);
+  const normalized = {
+    code: sanitizeAdapterErrorCode(rawCode.present ? rawCode.value : undefined, safeFallbackCode),
+    message: sanitizeAdapterErrorMessage(rawMessage.present ? rawMessage.value : undefined, safeFallbackMessage),
+    retryable: rawRetryable.present && rawRetryable.value === true,
+  };
+  if (rawDetails.present && rawDetails.value !== undefined && isJsonSafe({ value: rawDetails.value })) {
+    normalized.details = cloneJson({ value: rawDetails.value });
+  }
+  return normalized;
+}
+
 export function createAdapterError({
-  code = 'ADAPTER_CONTRACT_ERROR',
-  message = 'Adapter contract rejected the request.',
+  code = DEFAULT_ADAPTER_ERROR_CODE,
+  message = DEFAULT_ADAPTER_ERROR_MESSAGE,
   retryable = false,
   details,
 } = {}) {
-  const error = { code, message, retryable: retryable === true };
-  if (details !== undefined && isJsonSafe({ value: details })) error.details = cloneJson({ value: details });
-  return error;
+  return normalizeAdapterError({
+    error: { code, message, retryable, details },
+    fallbackCode: DEFAULT_ADAPTER_ERROR_CODE,
+    fallbackMessage: DEFAULT_ADAPTER_ERROR_MESSAGE,
+  });
 }
 
 export class AdapterContractError extends Error {
@@ -109,14 +477,11 @@ export class AdapterContractError extends Error {
 }
 
 export function errorResult({ error, details } = {}) {
-  const normalized = error instanceof AdapterContractError
-    ? error.toJSON()
-    : createAdapterError({
-      code: error?.code,
-      message: error?.message,
-      retryable: error?.retryable,
-      details: error?.details,
-    });
+  const normalized = normalizeAdapterError({
+    error,
+    fallbackCode: DEFAULT_ADAPTER_ERROR_CODE,
+    fallbackMessage: DEFAULT_ADAPTER_ERROR_MESSAGE,
+  });
   if (details !== undefined && normalized.details === undefined && isJsonSafe({ value: details })) {
     normalized.details = cloneJson({ value: details });
   }
@@ -154,6 +519,48 @@ function schemaTypes({ schema }) {
   return undefined;
 }
 
+// This validator intentionally implements a small JSON Schema vocabulary.
+// Unknown keywords must never be treated as harmless annotations: doing so
+// can make a schema look restrictive to its author while the dependency-free
+// validator silently accepts values the author meant to forbid (for example,
+// `unevaluatedProperties: false`).  A small, bounded set of standard annotation
+// keywords is recognized explicitly; annotations never change validation.
+// Property names inside a `properties` map are data, not schema keywords;
+// schemaDefinitionErrors only applies this set to actual schema objects and
+// recurses into each property's schema value.
+const SUPPORTED_SCHEMA_KEYWORDS = new Set([
+  'type',
+  'const',
+  'enum',
+  'properties',
+  'required',
+  'additionalProperties',
+  'items',
+  'minimum',
+  'maximum',
+  'exclusiveMinimum',
+  'exclusiveMaximum',
+  'minLength',
+  'maxLength',
+  'pattern',
+  'format',
+  'minItems',
+  'maxItems',
+  'minProperties',
+  'maxProperties',
+  'allOf',
+  'anyOf',
+  'oneOf',
+  'not',
+  'title',
+  'description',
+  '$comment',
+  'default',
+  'examples',
+]);
+
+const SUPPORTED_SCHEMA_FORMATS = new Set(['uri', 'uri-reference']);
+
 function jsonTypeMatches({ value, type }) {
   if (type === 'null') return value === null;
   if (type === 'object') return isPlainObject({ value });
@@ -165,15 +572,110 @@ function jsonTypeMatches({ value, type }) {
   return false;
 }
 
-function schemaDefinitionErrors({ schema, path = '$', seen = new Set() }) {
+// Walk schema literals as well as nested schema objects.  JSON Schema permits
+// arbitrary JSON in const/enum/default/example values; leaving those values
+// unbounded would let an otherwise harmless-looking contract retain a very
+// large string or collection next to its pattern.
+function schemaValueBoundsErrors({ value, path, depth = 0, state = { nodes: 0 }, seen = new Set() }) {
+  const errors = [];
+  if (typeof value === 'string') {
+    if (value.length > ADAPTER_SCHEMA_LIMITS.maxStringLength) {
+      errors.push(schemaError({ path, keyword: 'schema', message: 'Schema strings must be bounded.' }));
+    }
+    return errors;
+  }
+  if (Array.isArray(value)) {
+    if (value.length > ADAPTER_SCHEMA_LIMITS.maxArrayLength) {
+      errors.push(schemaError({ path, keyword: 'schema', message: 'Schema arrays have too many entries.' }));
+      return errors;
+    }
+    if (depth > ADAPTER_SCHEMA_LIMITS.maxDepth) {
+      return [schemaError({ path, keyword: 'schema', message: 'Schema exceeds the maximum nesting depth.' })];
+    }
+    if (seen.has(value)) {
+      errors.push(schemaError({ path, keyword: 'schema', message: 'Schema must not contain cycles.' }));
+      return errors;
+    }
+    seen.add(value);
+    state.nodes += 1;
+    if (state.nodes > ADAPTER_SCHEMA_LIMITS.maxNodes) {
+      seen.delete(value);
+      return [schemaError({ path, keyword: 'schema', message: 'Schema exceeds the maximum complexity.' })];
+    }
+    for (let index = 0; index < value.length; index += 1) {
+      errors.push(...schemaValueBoundsErrors({ value: value[index], path: `${path}[${index}]`, depth: depth + 1, state, seen }));
+    }
+    seen.delete(value);
+    return errors;
+  }
+  if (!isPlainObject({ value })) return errors;
+  if (depth > ADAPTER_SCHEMA_LIMITS.maxDepth) {
+    return [schemaError({ path, keyword: 'schema', message: 'Schema exceeds the maximum nesting depth.' })];
+  }
+  if (seen.has(value)) {
+    errors.push(schemaError({ path, keyword: 'schema', message: 'Schema must not contain cycles.' }));
+    return errors;
+  }
+  seen.add(value);
+  state.nodes += 1;
+  if (state.nodes > ADAPTER_SCHEMA_LIMITS.maxNodes) {
+    seen.delete(value);
+    return [schemaError({ path, keyword: 'schema', message: 'Schema exceeds the maximum complexity.' })];
+  }
+  const entries = Object.entries(value);
+  if (entries.length > ADAPTER_SCHEMA_LIMITS.maxObjectKeys) {
+    errors.push(schemaError({ path, keyword: 'schema', message: 'Schema objects have too many entries.' }));
+  }
+  for (const [key, child] of entries.slice(0, ADAPTER_SCHEMA_LIMITS.maxObjectKeys)) {
+    if (key.length > ADAPTER_SCHEMA_LIMITS.maxKeyLength) {
+      errors.push(schemaError({ path, keyword: 'schema', message: 'Schema key names must be bounded strings.' }));
+      continue;
+    }
+    errors.push(...schemaValueBoundsErrors({ value: child, path: `${path}.${key}`, depth: depth + 1, state, seen }));
+  }
+  seen.delete(value);
+  return errors;
+}
+
+function schemaDefinitionErrors({ schema, path = '$', seen = new Set(), state = { nodes: 0 }, depth = 0 }) {
   const errors = [];
   if (!isPlainObject({ value: schema })) {
     return [schemaError({ path, keyword: 'schema', message: 'Schema must be a plain JSON object.' })];
   }
+  if (depth > ADAPTER_SCHEMA_LIMITS.maxDepth) {
+    return [schemaError({ path, keyword: 'schema', message: 'Schema exceeds the maximum nesting depth.' })];
+  }
+  if (state.nodes >= ADAPTER_SCHEMA_LIMITS.maxNodes) {
+    return [schemaError({ path, keyword: 'schema', message: 'Schema exceeds the maximum complexity.' })];
+  }
+  state.nodes += 1;
   if (seen.has(schema)) {
     return [schemaError({ path, keyword: 'schema', message: 'Schema must not contain cycles.' })];
   }
   seen.add(schema);
+
+  const entries = Object.entries(schema);
+  if (entries.length > ADAPTER_SCHEMA_LIMITS.maxObjectKeys) {
+    errors.push(schemaError({ path, keyword: 'schema', message: 'Schema has too many keywords.' }));
+  }
+  for (const [key, value] of entries.slice(0, ADAPTER_SCHEMA_LIMITS.maxObjectKeys)) {
+    if (key.length > ADAPTER_SCHEMA_LIMITS.maxKeyLength) {
+      errors.push(schemaError({ path, keyword: 'schema', message: 'Schema keyword names must be bounded strings.' }));
+    }
+    if (key !== 'pattern' && typeof value === 'string' && value.length > ADAPTER_SCHEMA_LIMITS.maxStringLength) {
+      errors.push(schemaError({ path, keyword: key, message: 'Schema strings must be bounded.' }));
+    }
+    if (Array.isArray(value) && value.length > ADAPTER_SCHEMA_LIMITS.maxArrayLength) {
+      errors.push(schemaError({ path, keyword: key, message: `${key} has too many entries.` }));
+    }
+    if (!SUPPORTED_SCHEMA_KEYWORDS.has(key)) {
+      errors.push(schemaError({
+        path,
+        keyword: key,
+        message: `Unsupported JSON Schema keyword: ${key}.`,
+      }));
+    }
+  }
 
   const types = schemaTypes({ schema });
   if (hasOwn(schema, 'type') && !types) {
@@ -185,6 +687,14 @@ function schemaDefinitionErrors({ schema, path = '$', seen = new Set() }) {
       if (!allowedTypes.has(type)) errors.push(schemaError({ path, keyword: 'type', message: `Unsupported JSON Schema type: ${type}.` }));
     }
   }
+  for (const keyword of ['title', 'description', '$comment']) {
+    if (hasOwn(schema, keyword) && typeof schema[keyword] !== 'string') {
+      errors.push(schemaError({ path, keyword, message: `${keyword} must be a string.` }));
+    }
+  }
+  if (hasOwn(schema, 'examples') && !Array.isArray(schema.examples)) {
+    errors.push(schemaError({ path, keyword: 'examples', message: 'examples must be an array.' }));
+  }
   for (const keyword of ['required', 'enum', 'oneOf', 'anyOf', 'allOf']) {
     if (hasOwn(schema, keyword) && !Array.isArray(schema[keyword])) {
       errors.push(schemaError({ path, keyword, message: `${keyword} must be an array.` }));
@@ -192,8 +702,9 @@ function schemaDefinitionErrors({ schema, path = '$', seen = new Set() }) {
   }
   if (Array.isArray(schema.required)) {
     const duplicates = new Set();
-    for (const key of schema.required) {
-      if (typeof key !== 'string' || key.length === 0) errors.push(schemaError({ path, keyword: 'required', message: 'required entries must be non-empty strings.' }));
+    const required = schema.required.slice(0, ADAPTER_SCHEMA_LIMITS.maxArrayLength);
+    for (const key of required) {
+      if (typeof key !== 'string' || key.length === 0 || key.length > ADAPTER_SCHEMA_LIMITS.maxKeyLength) errors.push(schemaError({ path, keyword: 'required', message: 'required entries must be bounded, non-empty strings.' }));
       if (duplicates.has(key)) errors.push(schemaError({ path, keyword: 'required', message: `Duplicate required property: ${key}.` }));
       duplicates.add(key);
     }
@@ -202,44 +713,95 @@ function schemaDefinitionErrors({ schema, path = '$', seen = new Set() }) {
     if (!isPlainObject({ value: schema.properties })) {
       errors.push(schemaError({ path, keyword: 'properties', message: 'properties must be an object.' }));
     } else {
-      for (const [key, child] of Object.entries(schema.properties)) {
-        errors.push(...schemaDefinitionErrors({ schema: child, path: `${path}.properties.${key}`, seen }));
+      const properties = Object.entries(schema.properties);
+      if (properties.length > ADAPTER_SCHEMA_LIMITS.maxObjectKeys) {
+        errors.push(schemaError({ path, keyword: 'properties', message: 'properties has too many entries.' }));
+      }
+      for (const [key, child] of properties.slice(0, ADAPTER_SCHEMA_LIMITS.maxObjectKeys)) {
+        if (key.length > ADAPTER_SCHEMA_LIMITS.maxKeyLength) {
+          errors.push(schemaError({ path, keyword: 'properties', message: 'Property names must be bounded strings.' }));
+          continue;
+        }
+        errors.push(...schemaDefinitionErrors({ schema: child, path: `${path}.properties.${key}`, seen, state, depth: depth + 1 }));
       }
     }
   }
   if (hasOwn(schema, 'items') && !isPlainObject({ value: schema.items })) {
     errors.push(schemaError({ path, keyword: 'items', message: 'items must be a schema object.' }));
   } else if (hasOwn(schema, 'items')) {
-    errors.push(...schemaDefinitionErrors({ schema: schema.items, path: `${path}.items`, seen }));
+    errors.push(...schemaDefinitionErrors({ schema: schema.items, path: `${path}.items`, seen, state, depth: depth + 1 }));
   }
-  for (const keyword of ['additionalProperties', 'additionalItems']) {
+  for (const keyword of ['additionalProperties']) {
     if (hasOwn(schema, keyword) && typeof schema[keyword] !== 'boolean' && !isPlainObject({ value: schema[keyword] })) {
       errors.push(schemaError({ path, keyword, message: `${keyword} must be a boolean or schema object.` }));
     } else if (hasOwn(schema, keyword) && isPlainObject({ value: schema[keyword] })) {
-      errors.push(...schemaDefinitionErrors({ schema: schema[keyword], path: `${path}.${keyword}`, seen }));
+      errors.push(...schemaDefinitionErrors({ schema: schema[keyword], path: `${path}.${keyword}`, seen, state, depth: depth + 1 }));
     }
   }
   for (const keyword of ['minimum', 'maximum', 'exclusiveMinimum', 'exclusiveMaximum', 'minLength', 'maxLength', 'minItems', 'maxItems', 'minProperties', 'maxProperties']) {
     if (hasOwn(schema, keyword) && (typeof schema[keyword] !== 'number' || !Number.isFinite(schema[keyword]) || schema[keyword] < 0 && keyword.startsWith('min'))) {
       errors.push(schemaError({ path, keyword, message: `${keyword} must be a finite non-negative number.` }));
     }
+    if (hasOwn(schema, keyword) && typeof schema[keyword] === 'number' && Number.isFinite(schema[keyword])) {
+      const limit = keyword.endsWith('Length')
+        ? ADAPTER_SCHEMA_LIMITS.maxStringLength
+        : keyword.endsWith('Items')
+          ? ADAPTER_SCHEMA_LIMITS.maxArrayLength
+          : keyword.endsWith('Properties')
+            ? ADAPTER_SCHEMA_LIMITS.maxObjectKeys
+            : undefined;
+      if (limit !== undefined && schema[keyword] > limit) {
+        errors.push(schemaError({ path, keyword, message: `${keyword} exceeds the adapter contract bound.` }));
+      }
+    }
   }
   if (hasOwn(schema, 'pattern')) {
     if (typeof schema.pattern !== 'string') errors.push(schemaError({ path, keyword: 'pattern', message: 'pattern must be a string.' }));
+    else if (schema.pattern.length > ADAPTER_SCHEMA_LIMITS.maxPatternLength) {
+      errors.push(schemaError({ path, keyword: 'pattern', message: 'pattern must be a bounded safe regular expression.' }));
+    } else if (!isSafeRegexPattern({ pattern: schema.pattern })) {
+      errors.push(schemaError({ path, keyword: 'pattern', message: 'pattern uses unsupported or potentially unsafe regular-expression features.' }));
+    }
     else {
       try { new RegExp(schema.pattern); } catch { errors.push(schemaError({ path, keyword: 'pattern', message: 'pattern must be a valid regular expression.' })); }
     }
   }
-  if (hasOwn(schema, 'additionalProperties') && schema.additionalProperties === true && schema.strict === true) {
-    errors.push(schemaError({ path, keyword: 'strict', message: 'A strict schema cannot allow arbitrary additional properties.' }));
+  if (hasOwn(schema, 'format')) {
+    if (typeof schema.format !== 'string' || !SUPPORTED_SCHEMA_FORMATS.has(schema.format)) {
+      errors.push(schemaError({
+        path,
+        keyword: 'format',
+        message: 'format must be one of the explicitly supported formats: uri or uri-reference.',
+      }));
+    }
   }
-  if (hasOwn(schema, '$ref')) errors.push(schemaError({ path, keyword: '$ref', message: '$ref is not supported by the dependency-free validator.' }));
+  for (const keyword of ['oneOf', 'anyOf', 'allOf']) {
+    if (!Array.isArray(schema[keyword])) continue;
+    for (let index = 0; index < Math.min(schema[keyword].length, ADAPTER_SCHEMA_LIMITS.maxArrayLength); index += 1) {
+      errors.push(...schemaDefinitionErrors({
+        schema: schema[keyword][index],
+        path: `${path}.${keyword}[${index}]`,
+        seen,
+        state,
+        depth: depth + 1,
+      }));
+    }
+  }
+  if (hasOwn(schema, 'not')) {
+    if (!isPlainObject({ value: schema.not })) {
+      errors.push(schemaError({ path, keyword: 'not', message: 'not must be a schema object.' }));
+    } else {
+      errors.push(...schemaDefinitionErrors({ schema: schema.not, path: `${path}.not`, seen, state, depth: depth + 1 }));
+    }
+  }
   seen.delete(schema);
   return errors;
 }
 
 export function validateSchemaDefinition({ schema, name = 'schema' } = {}) {
-  const errors = schemaDefinitionErrors({ schema, path: name });
+  const errors = isPlainObject({ value: schema })
+    ? [...schemaValueBoundsErrors({ value: schema, path: name }), ...schemaDefinitionErrors({ schema, path: name })]
+    : schemaDefinitionErrors({ schema, path: name });
   return { valid: errors.length === 0, errors };
 }
 
@@ -260,9 +822,26 @@ function validateValue({ value, schema, path, errors }) {
     return;
   }
   if (typeof value === 'string') {
+    if (value.length > ADAPTER_SCHEMA_LIMITS.maxStringLength) {
+      errors.push(schemaError({ path, keyword: 'maxLength', message: 'String exceeds the adapter contract bound.' }));
+      return;
+    }
     if (typeof schema.minLength === 'number' && value.length < schema.minLength) errors.push(schemaError({ path, keyword: 'minLength', message: 'String is shorter than minLength.' }));
     if (typeof schema.maxLength === 'number' && value.length > schema.maxLength) errors.push(schemaError({ path, keyword: 'maxLength', message: 'String is longer than maxLength.' }));
-    if (typeof schema.pattern === 'string' && !new RegExp(schema.pattern).test(value)) errors.push(schemaError({ path, keyword: 'pattern', message: 'String does not match pattern.' }));
+    if (typeof schema.pattern === 'string') {
+      // Re-check at the point of use as a defense against callers mutating a
+      // schema after definition validation.  Unsafe patterns never reach the
+      // JavaScript RegExp engine.
+      if (!isSafeRegexPattern({ pattern: schema.pattern })) {
+        errors.push(schemaError({ path, keyword: 'pattern', message: 'Pattern is unsupported or potentially unsafe.' }));
+      } else {
+        try {
+          if (!new RegExp(schema.pattern).test(value)) errors.push(schemaError({ path, keyword: 'pattern', message: 'String does not match pattern.' }));
+        } catch {
+          errors.push(schemaError({ path, keyword: 'pattern', message: 'Pattern is not a valid regular expression.' }));
+        }
+      }
+    }
     if (schema.format === 'uri' || schema.format === 'uri-reference') {
       try { new URL(value); } catch { errors.push(schemaError({ path, keyword: 'format', message: 'String is not a valid URI.' })); }
     }
@@ -274,18 +853,32 @@ function validateValue({ value, schema, path, errors }) {
     if (typeof schema.exclusiveMaximum === 'number' && value >= schema.exclusiveMaximum) errors.push(schemaError({ path, keyword: 'exclusiveMaximum', message: 'Number is not below exclusiveMaximum.' }));
   }
   if (Array.isArray(value)) {
+    if (value.length > ADAPTER_SCHEMA_LIMITS.maxArrayLength) {
+      errors.push(schemaError({ path, keyword: 'maxItems', message: 'Array exceeds the adapter contract bound.' }));
+      return;
+    }
     if (typeof schema.minItems === 'number' && value.length < schema.minItems) errors.push(schemaError({ path, keyword: 'minItems', message: 'Array has fewer than minItems entries.' }));
     if (typeof schema.maxItems === 'number' && value.length > schema.maxItems) errors.push(schemaError({ path, keyword: 'maxItems', message: 'Array has more than maxItems entries.' }));
     if (isPlainObject({ value: schema.items })) value.forEach((entry, index) => validateValue({ value: entry, schema: schema.items, path: formatPath({ path, key: index }), errors }));
   }
   if (isPlainObject({ value })) {
     const properties = isPlainObject({ value: schema.properties }) ? schema.properties : {};
-    if (Array.isArray(schema.required)) {
-      for (const key of schema.required) if (!hasOwn(value, key)) errors.push(schemaError({ path, keyword: 'required', message: `Missing required property: ${key}.` }));
+    const valueKeys = Object.keys(value);
+    if (valueKeys.length > ADAPTER_SCHEMA_LIMITS.maxObjectKeys) {
+      errors.push(schemaError({ path, keyword: 'maxProperties', message: 'Object exceeds the adapter contract bound.' }));
+      return;
     }
-    if (typeof schema.minProperties === 'number' && Object.keys(value).length < schema.minProperties) errors.push(schemaError({ path, keyword: 'minProperties', message: 'Object has fewer than minProperties entries.' }));
-    if (typeof schema.maxProperties === 'number' && Object.keys(value).length > schema.maxProperties) errors.push(schemaError({ path, keyword: 'maxProperties', message: 'Object has more than maxProperties entries.' }));
-    for (const [key, entry] of Object.entries(value)) {
+    if (Array.isArray(schema.required)) {
+      for (const key of schema.required.slice(0, ADAPTER_SCHEMA_LIMITS.maxArrayLength)) if (!hasOwn(value, key)) errors.push(schemaError({ path, keyword: 'required', message: `Missing required property: ${key}.` }));
+    }
+    if (typeof schema.minProperties === 'number' && valueKeys.length < schema.minProperties) errors.push(schemaError({ path, keyword: 'minProperties', message: 'Object has fewer than minProperties entries.' }));
+    if (typeof schema.maxProperties === 'number' && valueKeys.length > schema.maxProperties) errors.push(schemaError({ path, keyword: 'maxProperties', message: 'Object has more than maxProperties entries.' }));
+    for (const key of valueKeys) {
+      const entry = value[key];
+      if (key.length > ADAPTER_SCHEMA_LIMITS.maxKeyLength) {
+        errors.push(schemaError({ path: formatPath({ path, key }), keyword: 'propertyName', message: 'Property names must be bounded strings.' }));
+        continue;
+      }
       if (hasOwn(properties, key)) {
         validateValue({ value: entry, schema: properties[key], path: formatPath({ path, key }), errors });
       } else if (schema.additionalProperties === false) {
@@ -420,4 +1013,3 @@ export function assertRecord({ value, name = 'value' } = {}) {
   }
   return value;
 }
-

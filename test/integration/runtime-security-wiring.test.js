@@ -201,6 +201,164 @@ test('mutation deny rules win before an approval can be requested or consumed', 
   assert.equal(calls, 0);
 });
 
+test('mutation plans reject non-cancelling in-process timeouts', async () => {
+  let calls = 0;
+  const runtime = runtimeWithCore({
+    capabilities: [capability('orders.write', { readOnly: false })],
+    adapters: {
+      [ADAPTER_ID]: typedAdapter({
+        capabilityIds: ['orders.write'],
+        execute() {
+          calls += 1;
+          return { ok: true, output: { committed: true } };
+        },
+      }),
+    },
+  });
+  await assert.rejects(
+    runtime.callTool('plan.propose', {
+      ...callIdentity(),
+      nodes: [{
+        nodeId: 'timed-mutation',
+        capabilityId: 'orders.write',
+        args: { orderId: 'o-1' },
+        timeoutMs: 10,
+      }],
+    }),
+    (error) => errorCode(error) === 'INVALID_PLAN',
+  );
+  assert.equal(calls, 0);
+});
+
+test('malformed custom policy results cannot authorize reads or replay', async () => {
+  for (const denied of [
+    { allowed: false, authorized: true, code: 'POLICY_DENIED' },
+    { allowed: false, code: 'APPROVAL_REQUIRED' },
+  ]) {
+    let calls = 0;
+    const runtime = runtimeWithCore({
+      policy: { evaluate: () => denied },
+      adapters: {
+        [ADAPTER_ID]: typedAdapter({
+          execute() {
+            calls += 1;
+            return { ok: true, output: {} };
+          },
+        }),
+      },
+    });
+    const plan = await runtime.callTool('plan.propose', {
+      ...callIdentity(),
+      nodes: [{ capabilityId: 'orders.read', args: {} }],
+    });
+    await assert.rejects(
+      runtime.callTool('workflow.execute', {
+        ...callIdentity(),
+        workflowId: plan.workflowId,
+      }),
+      (error) => errorCode(error) === 'POLICY_DENIED',
+    );
+    assert.equal(calls, 0);
+  }
+
+  let allow = true;
+  let replayCalls = 0;
+  const replayRuntime = runtimeWithCore({
+    policy: { evaluate: () => allow ? { allowed: true } : { allowed: false, code: 'POLICY_DENIED' } },
+    adapters: {
+      [ADAPTER_ID]: typedAdapter({
+        execute() {
+          replayCalls += 1;
+          return { ok: true, output: {} };
+        },
+      }),
+    },
+  });
+  const replayPlan = await replayRuntime.callTool('plan.propose', {
+    ...callIdentity(),
+    nodes: [{ capabilityId: 'orders.read', args: {} }],
+  });
+  await replayRuntime.callTool('workflow.execute', {
+    ...callIdentity(),
+    workflowId: replayPlan.workflowId,
+  });
+  allow = false;
+  await assert.rejects(
+    replayRuntime.callTool('workflow.replay_readonly', {
+      ...callIdentity(),
+      workflowId: replayPlan.workflowId,
+    }),
+    (error) => errorCode(error) === 'REPLAY_FAILED' && error.details?.cause?.code === 'POLICY_DENIED',
+  );
+  assert.equal(replayCalls, 1);
+});
+
+test('stored plan adapter and origin must still match the current catalog', async () => {
+  let calls = 0;
+  const runtime = runtimeWithCore({
+    adapters: {
+      [ADAPTER_ID]: typedAdapter({
+        execute() {
+          calls += 1;
+          return { ok: true, output: {} };
+        },
+      }),
+    },
+  });
+  const plan = await runtime.callTool('plan.propose', {
+    ...callIdentity(),
+    nodes: [{ capabilityId: 'orders.read', args: {} }],
+  });
+  runtime.services.catalog.register({
+    identity: { tenantId: IDENTITY.tenantId, subjectId: IDENTITY.subject },
+    replace: true,
+    capability: capability('orders.read', {
+      tenantId: IDENTITY.tenantId,
+      adapter: 'replacement-adapter',
+      adapters: [{ id: 'replacement-adapter' }],
+      origin: OTHER_ORIGIN,
+      origins: [OTHER_ORIGIN],
+    }),
+  });
+  await assert.rejects(
+    runtime.callTool('workflow.execute', {
+      ...callIdentity(),
+      workflowId: plan.workflowId,
+    }),
+    (error) => errorCode(error) === 'INVALID_PLAN',
+  );
+  assert.equal(calls, 0);
+});
+
+test('read-only replay applies the validated limit before invoking adapters', async () => {
+  const calls = [];
+  const runtime = runtimeWithCore({
+    adapters: {
+      [ADAPTER_ID]: typedAdapter({
+        execute(request) {
+          calls.push({ nodeId: request.nodeId, replay: request.replay });
+          return { ok: true, output: { nodeId: request.nodeId } };
+        },
+      }),
+    },
+  });
+  const plan = await runtime.callTool('plan.propose', {
+    ...callIdentity(),
+    nodes: ['a', 'b', 'c'].map((nodeId) => ({ nodeId, capabilityId: 'orders.read', args: {} })),
+  });
+  await runtime.callTool('workflow.execute', {
+    ...callIdentity(),
+    workflowId: plan.workflowId,
+  });
+  const replay = await runtime.callTool('workflow.replay_readonly', {
+    ...callIdentity(),
+    workflowId: plan.workflowId,
+    limit: 1,
+  });
+  assert.equal(replay.replayedNodes.length, 1);
+  assert.equal(calls.filter(({ replay: isReplay }) => isReplay === true).length, 1);
+});
+
 test('withCore runtime can describe, plan, and execute through the service graph', async () => {
   const calls = [];
   const adapter = typedAdapter({

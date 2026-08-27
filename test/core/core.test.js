@@ -11,6 +11,7 @@ import {
   stableStringify,
   validatePlan,
 } from '../../src/core/index.js';
+import { createCoreServices } from '../../src/runtime/services.js';
 
 const alice = { tenantId: 'tenant-a', subjectId: 'user-a' };
 const bob = { tenantId: 'tenant-b', subjectId: 'user-b' };
@@ -99,6 +100,34 @@ test('catalog requires explicit identity and isolates tenant registrations', () 
   assertCoreError(() => catalog.describe({ identity: bob, capabilityId: 'private.lookup', version: '1' }), 'CAPABILITY_NOT_FOUND');
 });
 
+test('tenant registrations cannot overwrite public or neighboring tenant records', () => {
+  const catalog = new CapabilityCatalog({
+    capabilities: [readCapability({ id: 'shared.lookup', description: 'public-original' })],
+  });
+  catalog.register({
+    identity: bob,
+    replace: true,
+    capability: readCapability({ id: 'shared.lookup', description: 'bob-private' }),
+  });
+  assert.equal(catalog.describe({ identity: alice, capabilityId: 'shared.lookup', version: '1' }).description, 'public-original');
+  assert.equal(catalog.describe({ identity: bob, capabilityId: 'shared.lookup', version: '1' }).description, 'bob-private');
+
+  catalog.register({
+    identity: alice,
+    capability: readCapability({ id: 'shared.lookup', description: 'alice-private' }),
+  });
+  assert.equal(catalog.describe({ identity: alice, capabilityId: 'shared.lookup', version: '1' }).description, 'alice-private');
+  assert.equal(catalog.search({ identity: alice, query: 'shared.lookup' }).capabilities.length, 1);
+  assert.equal(catalog.search({ identity: bob, query: 'shared.lookup' }).capabilities.length, 1);
+
+  catalog.remove({ identity: bob, capabilityId: 'shared.lookup', version: '1' });
+  assert.equal(catalog.describe({ identity: bob, capabilityId: 'shared.lookup', version: '1' }).description, 'public-original');
+  assertCoreError(
+    () => catalog.remove({ identity: bob, capabilityId: 'shared.lookup', version: '1' }),
+    'CAPABILITY_FORBIDDEN',
+  );
+});
+
 test('catalog search is deterministic, filtered, and describe returns full schema', () => {
   const catalog = makeCatalog();
   const first = catalog.search({ identity: alice, query: 'orders', tags: ['read'], adapter: 'api', origin: 'https://shop.example' });
@@ -116,6 +145,111 @@ test('catalog rejects executable/raw capability primitives and conflicting mutab
   assertCoreError(() => catalog.register({ identity: alice, capability: { id: 'safe.read', readOnly: true, script: 'x' } }), 'UNSAFE_CAPABILITY');
   assertCoreError(() => catalog.register({ identity: alice, capability: { id: 'safe.read', readOnly: true, mutates: true } }), 'INVALID_CAPABILITY');
   assertCoreError(() => catalog.register({ identity: alice, capability: { id: 'safe.read' } }), 'INVALID_CAPABILITY');
+});
+
+test('catalog registerMany is atomic when a later capability conflicts', () => {
+  const catalog = new CapabilityCatalog();
+  catalog.register({
+    identity: alice,
+    capability: readCapability({ id: 'existing.read', description: 'original' }),
+  });
+
+  assertCoreError(() => catalog.registerMany({
+    identity: alice,
+    capabilities: [
+      readCapability({ id: 'new.read', description: 'must not persist' }),
+      readCapability({ id: 'existing.read', description: 'must not replace' }),
+    ],
+  }), 'CAPABILITY_CONFLICT');
+
+  assert.equal(catalog.has({ identity: alice, capabilityId: 'new.read', version: '1' }), false);
+  assert.equal(catalog.describe({ identity: alice, capabilityId: 'existing.read', version: '1' }).description, 'original');
+});
+
+test('catalog registerMany is atomic when duplicate keys occur in one batch', () => {
+  const catalog = new CapabilityCatalog();
+
+  assertCoreError(() => catalog.registerMany({
+    identity: alice,
+    capabilities: [
+      readCapability({ id: 'duplicate.read', description: 'first' }),
+      readCapability({ id: 'duplicate.read', description: 'second' }),
+    ],
+  }), 'CAPABILITY_CONFLICT');
+
+  assert.equal(catalog.has({ identity: alice, capabilityId: 'duplicate.read', version: '1' }), false);
+});
+
+test('catalog registerMany is atomic when a later capability is invalid', () => {
+  const catalog = new CapabilityCatalog();
+
+  assertCoreError(() => catalog.registerMany({
+    identity: alice,
+    capabilities: [
+      readCapability({ id: 'valid.read' }),
+      { id: 'invalid.read', readOnly: true, script: 'not allowed' },
+    ],
+  }), 'UNSAFE_CAPABILITY');
+
+  assert.equal(catalog.has({ identity: alice, capabilityId: 'valid.read', version: '1' }), false);
+});
+
+test('catalog registerMany rolls back replacements when a later capability is invalid', () => {
+  const catalog = new CapabilityCatalog();
+  catalog.register({
+    identity: alice,
+    capability: readCapability({ id: 'replace.read', description: 'original' }),
+  });
+
+  assertCoreError(() => catalog.registerMany({
+    identity: alice,
+    replace: true,
+    capabilities: [
+      readCapability({ id: 'replace.read', description: 'replacement' }),
+      { id: 'invalid.read', readOnly: true, script: 'not allowed' },
+    ],
+  }), 'UNSAFE_CAPABILITY');
+
+  assert.equal(catalog.describe({ identity: alice, capabilityId: 'replace.read', version: '1' }).description, 'original');
+  assert.equal(catalog.has({ identity: alice, capabilityId: 'invalid.read', version: '1' }), false);
+});
+
+test('catalog registerMany keeps versions and tenant scopes independent', () => {
+  const catalog = new CapabilityCatalog();
+  catalog.registerMany({
+    identity: alice,
+    capabilities: [
+      readCapability({ id: 'scoped.lookup', version: '1', description: 'alice v1' }),
+      readCapability({ id: 'scoped.lookup', version: '2', description: 'alice v2' }),
+    ],
+  });
+
+  catalog.registerMany({
+    identity: bob,
+    capabilities: [
+      readCapability({ id: 'scoped.lookup', version: '1', description: 'bob v1' }),
+    ],
+  });
+
+  assert.equal(catalog.describe({ identity: alice, capabilityId: 'scoped.lookup', version: '1' }).description, 'alice v1');
+  assert.equal(catalog.describe({ identity: alice, capabilityId: 'scoped.lookup', version: '2' }).description, 'alice v2');
+  assert.equal(catalog.describe({ identity: bob, capabilityId: 'scoped.lookup', version: '1' }).description, 'bob v1');
+  assert.equal(catalog.has({ identity: bob, capabilityId: 'scoped.lookup', version: '2' }), false);
+});
+
+test('catalog registerMany replace:true keeps last duplicate in the batch', () => {
+  const catalog = new CapabilityCatalog();
+  const result = catalog.registerMany({
+    identity: alice,
+    replace: true,
+    capabilities: [
+      readCapability({ id: 'latest.read', description: 'first' }),
+      readCapability({ id: 'latest.read', description: 'last' }),
+    ],
+  });
+
+  assert.equal(result.capabilities.length, 2);
+  assert.equal(catalog.describe({ identity: alice, capabilityId: 'latest.read', version: '1' }).description, 'last');
 });
 
 test('planner validates graph and uses lexical Kahn ordering for ties', () => {
@@ -293,4 +427,127 @@ test('stored plans are identity-bound and tampering is detected', () => {
   const tampered = structuredClone(plan);
   tampered.nodes[0].args.page = 999;
   assertCoreError(() => validatePlan({ identity: alice, plan: tampered }), 'INVALID_PLAN');
+});
+
+test('workflow store enforces global, tenant, and identity record quotas without eviction', () => {
+  const store = new WorkflowStore({
+    clock: () => '2026-01-01T00:00:00.000Z',
+    maxRecords: 10,
+    maxBytes: 100_000,
+    maxRecordBytes: 10_000,
+    maxRecordsPerTenant: 2,
+    maxBytesPerTenant: 100_000,
+    maxRecordsPerIdentity: 1,
+    maxBytesPerIdentity: 100_000,
+  });
+  store.create({ identity: alice, workflowId: 'alice-one', revision: 1 });
+  assertCoreError(
+    () => store.create({ identity: alice, workflowId: 'alice-two', revision: 1 }),
+    'WORKFLOW_QUOTA_EXCEEDED',
+  );
+
+  // A different subject in the same tenant has a separate identity budget,
+  // but still consumes the tenant budget.
+  const aliceOtherSubject = { tenantId: alice.tenantId, subjectId: 'user-b' };
+  store.create({ identity: aliceOtherSubject, workflowId: 'tenant-two', revision: 1 });
+  assertCoreError(
+    () => store.create({ identity: { tenantId: alice.tenantId, subjectId: 'user-c' }, workflowId: 'tenant-three', revision: 1 }),
+    'WORKFLOW_QUOTA_EXCEEDED',
+  );
+
+  // Tenant quotas do not consume another tenant's budget.
+  store.create({ identity: bob, workflowId: 'bob-one', revision: 1 });
+  assert.equal(store.list({ identity: alice }).workflows.length, 1);
+  assert.equal(store.list({ identity: aliceOtherSubject }).workflows.length, 1);
+  assert.equal(store.list({ identity: bob }).workflows.length, 1);
+
+  const global = new WorkflowStore({
+    clock: () => '2026-01-01T00:00:00.000Z',
+    maxRecords: 2,
+    maxBytes: 100_000,
+    maxRecordBytes: 10_000,
+    maxRecordsPerTenant: 10,
+    maxBytesPerTenant: 100_000,
+    maxRecordsPerIdentity: 10,
+    maxBytesPerIdentity: 100_000,
+  });
+  global.create({ identity: alice, workflowId: 'global-one', revision: 1 });
+  global.create({ identity: bob, workflowId: 'global-two', revision: 1 });
+  assertCoreError(
+    () => global.create({ identity: { tenantId: 'tenant-c', subjectId: 'user-c' }, workflowId: 'global-three', revision: 1 }),
+    'WORKFLOW_QUOTA_EXCEEDED',
+  );
+  assert.equal(global.list({ identity: alice }).workflows.length, 1);
+  assert.equal(global.list({ identity: bob }).workflows.length, 1);
+});
+
+test('workflow store rejects oversized candidates before retaining or mutating records', () => {
+  const oversized = new WorkflowStore({
+    clock: () => '2026-01-01T00:00:00.000Z',
+    maxRecordBytes: 1,
+    maxBytes: 100_000,
+    maxBytesPerTenant: 100_000,
+    maxBytesPerIdentity: 100_000,
+  });
+  assertCoreError(
+    () => oversized.create({ identity: alice, workflowId: 'too-large', revision: 1 }),
+    'WORKFLOW_QUOTA_EXCEEDED',
+  );
+  assert.equal(oversized.list({ identity: alice }).workflows.length, 0);
+
+  const plan = makePlan();
+  const draft = new WorkflowStore({
+    clock: () => '2026-01-01T00:00:00.000Z',
+    maxRecordBytes: 1_000,
+    maxBytes: 100_000,
+    maxBytesPerTenant: 100_000,
+    maxBytesPerIdentity: 100_000,
+  });
+  draft.create({ identity: alice, workflowId: plan.workflowId, revision: 1 });
+  assertCoreError(
+    () => draft.propose({ identity: alice, workflowId: plan.workflowId, revision: 1, plan }),
+    'WORKFLOW_QUOTA_EXCEEDED',
+  );
+  const unchanged = draft.get({ identity: alice, workflowId: plan.workflowId, revision: 1 });
+  assert.equal(unchanged.state, 'draft');
+  assert.equal(unchanged.plan, null);
+
+  const invalid = new WorkflowStore({ clock: () => '2026-01-01T00:00:00.000Z' });
+  assertCoreError(
+    () => invalid.create({
+      identity: alice,
+      workflowId: 'invalid-create',
+      revision: 1,
+      plan: { workflowId: 'invalid-create', revision: 1, tenantId: alice.tenantId, subjectId: alice.subjectId, nodes: [] },
+    }),
+    'INVALID_PLAN',
+  );
+  assert.equal(invalid.list({ identity: alice }).workflows.length, 0);
+});
+
+test('createCoreServices propagates workflow store quota options', () => {
+  const services = createCoreServices({
+    maxRecords: 7,
+    maxBytes: 8_000,
+    maxRecordsPerTenant: 5,
+    maxBytesPerTenant: 7_000,
+    maxRecordsPerIdentity: 3,
+    maxBytesPerIdentity: 6_000,
+    maxRecordBytes: 5_000,
+  });
+  assert.equal(services.workflowStore.maxRecords, 7);
+  assert.equal(services.workflowStore.maxBytes, 8_000);
+  assert.equal(services.workflowStore.maxRecordsPerTenant, 5);
+  assert.equal(services.workflowStore.maxBytesPerTenant, 7_000);
+  assert.equal(services.workflowStore.maxRecordsPerIdentity, 3);
+  assert.equal(services.workflowStore.maxBytesPerIdentity, 6_000);
+  assert.equal(services.workflowStore.maxRecordBytes, 5_000);
+});
+
+test('createCoreServices propagates bounded audit options', () => {
+  const direct = createCoreServices({ maxAuditEntries: 7 });
+  assert.equal(direct.audit.maxEntries, 7);
+
+  const nested = createCoreServices({ auditOptions: { maxEntries: 3 } });
+  assert.equal(nested.audit.maxEntries, 3);
 });

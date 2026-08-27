@@ -78,6 +78,40 @@ test('HTTP MCP endpoint rejects missing and mismatched metadata headers', async 
   });
 });
 
+test('HTTP protocol errors never echo non-JSON-RPC request IDs', async () => {
+  await withServer({}, async ({ url }) => {
+    for (const id of [{ forged: true }, [1], true, null]) {
+      const body = request('tools/list', {}, id);
+      const response = await fetch(`${url}/mcp`, {
+        method: 'POST',
+        headers: headers('tools/call'),
+        body: JSON.stringify(body),
+      });
+      assert.equal(response.status, 400);
+      const value = await response.json();
+      assert.equal(value.id, null);
+      assert.equal(value.error.code, -32020);
+    }
+  });
+});
+
+test('HTTP malformed notifications are acknowledged without a response body', async () => {
+  await withServer({}, async ({ url }) => {
+    const notification = {
+      jsonrpc: '2.0',
+      method: 'tools/list',
+      params: [],
+    };
+    const response = await fetch(`${url}/mcp`, {
+      method: 'POST',
+      headers: headers('tools/list'),
+      body: JSON.stringify(notification),
+    });
+    assert.equal(response.status, 202);
+    assert.equal(await response.text(), '');
+  });
+});
+
 test('HTTP MCP endpoint maps unknown methods to 404 and notifications to 202', async () => {
   await withServer({}, async ({ url }) => {
     const unknown = await fetch(`${url}/mcp`, {
@@ -140,4 +174,13 @@ test('HTTP MCP endpoint enforces its path, method, media type and body limit', a
     assert.equal(oversized.status, 413);
     assert.equal((await oversized.json()).error.code, 'REQUEST_TOO_LARGE');
   });
+});
+
+test('stdio transport preserves an explicitly supplied caller session', () => {
+  const app = createServer({ fixture: true });
+  const callerSession = app.gateway.createSession();
+  const transport = app.createStdioTransport({ session: callerSession });
+  assert.equal(transport.session, callerSession);
+  assert.notEqual(transport.session, app.session);
+  transport.close();
 });

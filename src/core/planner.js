@@ -1,6 +1,7 @@
 import { CoreError } from './errors.js';
 import { requireIdentity } from './identity.js';
-import { canonicalHash, jsonClone } from './serialization.js';
+import { canonicalHash, jsonClone, stableStringify } from './serialization.js';
+import { assertCapabilitySchemas, assertSchemaValue } from './schema.js';
 
 const NODE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const WORKFLOW_ID = /^[A-Za-z0-9][A-Za-z0-9._:@/+\-]{0,199}$/;
@@ -8,6 +9,13 @@ const UNSAFE_NODE_KEYS = new Set([
   'code', 'command', 'eval', 'evaluate', 'exec', 'execute', 'function',
   'javascript', 'raw', 'script', 'shell', 'shellcommand', 'source',
 ]);
+
+export const MAX_PLAN_NODES = 128;
+export const MAX_NODE_DEPENDENCIES = 32;
+export const MAX_TOTAL_DEPENDENCIES = 1_024;
+export const MAX_PLAN_INPUT_BYTES = 512 * 1_024;
+export const MAX_PLAN_DEPTH = 32;
+export const MAX_PLAN_VALUES = 20_000;
 
 /**
  * Produces a canonical, deterministic plan from semantic capability nodes.
@@ -37,12 +45,14 @@ export class DeterministicPlanner {
     if (!Array.isArray(rawNodes) || rawNodes.length === 0) {
       throw new CoreError('INVALID_PLAN', 'A plan must contain at least one node');
     }
+    assertPlanInputBounds(operation);
 
     const nodes = rawNodes.map((rawNode, index) => this.#normalizeNode(rawNode, index, identity));
     const workflowId = requestedWorkflowId === undefined
       ? this.#generatedWorkflowId({ identity, revision, nodes, source })
       : normalizeWorkflowId(requestedWorkflowId);
     assertUniqueNodeIds(nodes);
+    assertTotalDependencies(nodes);
     const byId = new Map(nodes.map((node) => [node.id, node]));
     const edges = [];
     for (const node of nodes) {
@@ -134,6 +144,19 @@ export class DeterministicPlanner {
       if (error instanceof CoreError) throw error;
       throw new CoreError('CAPABILITY_NOT_FOUND', `Capability ${capabilityId} could not be resolved`, { cause: error });
     }
+    let schemas;
+    try {
+      schemas = assertCapabilitySchemas({ capability, label: `Capability ${capabilityId}` });
+    } catch (error) {
+      if (error instanceof CoreError) {
+        throw new CoreError('INVALID_PLAN', `Capability ${capabilityId} has invalid schemas`, {
+          retryable: false,
+          details: { reason: 'CAPABILITY_SCHEMA_INVALID', cause: error.toJSON() },
+          cause: error,
+        });
+      }
+      throw new CoreError('INVALID_PLAN', `Capability ${capabilityId} has invalid schemas`, { cause: error });
+    }
     const args = rawNode.args ?? rawNode.arguments ?? {};
     if (!args || typeof args !== 'object' || Array.isArray(args)) {
       throw new CoreError('INVALID_PLAN', `Arguments for node ${id} must be an object`);
@@ -141,6 +164,14 @@ export class DeterministicPlanner {
     // Hash the exact canonical args used in approvals.  Clone now so a caller
     // cannot mutate a plan after it has been proposed.
     const clonedArgs = jsonClone(args);
+    assertSchemaValue({
+      value: clonedArgs,
+      schema: schemas.inputSchema,
+      code: 'INVALID_PLAN',
+      reason: 'ARGUMENT_SCHEMA_INVALID',
+      label: `Arguments for node ${id}`,
+      message: `Arguments for node ${id} do not match the capability input schema`,
+    });
     const dependsOn = normalizeDependencies(rawNode.dependsOn ?? rawNode.dependencies ?? rawNode.after, id);
     const readOnly = capability.readOnly;
     if (rawNode.readOnly !== undefined && rawNode.readOnly !== readOnly) {
@@ -156,6 +187,7 @@ export class DeterministicPlanner {
       nodeId: id,
       capabilityId: capability.id,
       capabilityVersion: capability.version,
+      capabilityBindingHash: capabilityBindingHash(capability),
       operation: capability.id,
       args: clonedArgs,
       argumentHash: canonicalHash(clonedArgs),
@@ -177,6 +209,12 @@ export class DeterministicPlanner {
       if (!Number.isInteger(rawNode.timeoutMs) || rawNode.timeoutMs < 1 || rawNode.timeoutMs > 86_400_000) {
         throw new CoreError('INVALID_PLAN', `Node ${id} timeoutMs is invalid`);
       }
+      if (!readOnly) {
+        throw new CoreError(
+          'INVALID_PLAN',
+          `Mutation node ${id} cannot use a non-cancelling in-process timeout`,
+        );
+      }
       node.timeoutMs = rawNode.timeoutMs;
     }
     return node;
@@ -188,6 +226,7 @@ export function validatePlan(input) {
   const identity = requireIdentity(operation);
   const plan = operation.plan;
   if (!plan || typeof plan !== 'object' || Array.isArray(plan)) throw new CoreError('INVALID_PLAN', 'plan must be an object');
+  assertPlanInputBounds(plan);
   if (typeof plan.planHash !== 'string' || !/^[a-f0-9]{64}$/.test(plan.planHash)) {
     throw new CoreError('INVALID_PLAN', 'Plan integrity hash is required');
   }
@@ -199,6 +238,7 @@ export function validatePlan(input) {
   if (!Array.isArray(plan.nodes) || plan.nodes.length === 0) throw new CoreError('INVALID_PLAN', 'Plan nodes are required');
   const nodes = plan.nodes.map((node, index) => normalizeStoredNode(node, index));
   assertUniqueNodeIds(nodes);
+  assertTotalDependencies(nodes);
   const byId = new Map(nodes.map((node) => [node.id, node]));
   const edges = [];
   for (const node of nodes) {
@@ -232,13 +272,77 @@ export function hashPlan(plan) {
   return canonicalHash(copy);
 }
 
+/**
+ * Hash only the capability fields that affect execution authorization.  The
+ * hash is stored on each planned node so a same-version catalog replacement
+ * cannot silently change mutability, routing, origin, schemas, or risk after
+ * approval.  Display-only fields such as name and description deliberately do
+ * not participate in this binding.
+ */
+export function capabilityBindingHash(capability) {
+  if (!capability || typeof capability !== 'object' || Array.isArray(capability)) {
+    throw new CoreError('INVALID_CAPABILITY', 'Capability binding must be an object');
+  }
+  return canonicalHash({
+    id: capability.id,
+    version: capability.version,
+    readOnly: capability.readOnly === true,
+    mutates: capability.mutates === undefined ? capability.readOnly !== true : capability.mutates === true,
+    requiresApproval: capability.requiresApproval === undefined
+      ? capability.readOnly !== true
+      : capability.requiresApproval === true,
+    adapters: normalizeBindingAdapters(capability.adapters ?? capability.adapter),
+    origins: normalizeBindingOrigins(capability.origins ?? capability.origin),
+    inputSchema: capability.inputSchema ?? {},
+    outputSchema: capability.outputSchema ?? {},
+    risk: capability.risk ?? null,
+  });
+}
+
+function normalizeBindingAdapters(value) {
+  const list = value === undefined ? [] : Array.isArray(value) ? value : [value];
+  return list.map((entry) => {
+    if (typeof entry === 'string') return { id: entry, kind: null, version: null };
+    return {
+      id: entry?.id ?? entry?.adapterId ?? entry?.name ?? null,
+      kind: entry?.kind ?? null,
+      version: entry?.version ?? null,
+    };
+  }).sort((left, right) => left.id.localeCompare(right.id) ||
+    String(left.version).localeCompare(String(right.version)) ||
+    String(left.kind).localeCompare(String(right.kind)));
+}
+
+function normalizeBindingOrigins(value) {
+  const list = value === undefined ? [] : Array.isArray(value) ? value : [value];
+  return [...new Set(list.filter((entry) => typeof entry === 'string'))].sort((left, right) => left.localeCompare(right));
+}
+
 function normalizeStoredNode(rawNode, index) {
   if (!rawNode || typeof rawNode !== 'object' || Array.isArray(rawNode)) throw new CoreError('INVALID_PLAN', `Node ${index} is invalid`);
   for (const key of Object.keys(rawNode)) if (UNSAFE_NODE_KEYS.has(key.toLowerCase())) throw new CoreError('UNSAFE_PLAN', `Node field ${key} is not allowed`);
+  // Aliases are accepted only at the untrusted proposal boundary.  Persisted
+  // plans are canonical and must contain `dependsOn`; otherwise an attacker
+  // who can rewrite/re-hash storage could leave an ignored alias that changes
+  // the apparent graph without changing execution order.
+  if (Object.prototype.hasOwnProperty.call(rawNode, 'dependencies') || Object.prototype.hasOwnProperty.call(rawNode, 'after')) {
+    throw new CoreError('INVALID_PLAN', `Stored node ${rawNode.id ?? index} contains a non-canonical dependency alias`);
+  }
   if (typeof rawNode.id !== 'string' || !NODE_ID.test(rawNode.id)) throw new CoreError('INVALID_PLAN', `Node ${index} id is invalid`);
   if (typeof rawNode.capabilityId !== 'string') throw new CoreError('INVALID_PLAN', `Node ${rawNode.id} capabilityId is required`);
   if (typeof rawNode.capabilityVersion !== 'string') throw new CoreError('INVALID_PLAN', `Node ${rawNode.id} capabilityVersion is required`);
+  if (typeof rawNode.capabilityBindingHash !== 'string' || !/^[a-f0-9]{64}$/.test(rawNode.capabilityBindingHash)) {
+    throw new CoreError('INVALID_PLAN', `Node ${rawNode.id} capability binding hash is required`);
+  }
   if (typeof rawNode.readOnly !== 'boolean' || typeof rawNode.mutates !== 'boolean' || rawNode.mutates === rawNode.readOnly) throw new CoreError('INVALID_PLAN', `Node ${rawNode.id} mutability is invalid`);
+  if (rawNode.timeoutMs !== undefined) {
+    if (!Number.isInteger(rawNode.timeoutMs) || rawNode.timeoutMs < 1 || rawNode.timeoutMs > 86_400_000) {
+      throw new CoreError('INVALID_PLAN', `Node ${rawNode.id} timeoutMs is invalid`);
+    }
+    if (!rawNode.readOnly) {
+      throw new CoreError('INVALID_PLAN', `Mutation node ${rawNode.id} cannot use a non-cancelling in-process timeout`);
+    }
+  }
   const args = rawNode.args;
   if (!args || typeof args !== 'object' || Array.isArray(args)) throw new CoreError('INVALID_PLAN', `Node ${rawNode.id} args are invalid`);
   const cloned = jsonClone(args);
@@ -290,6 +394,9 @@ function assertUniqueNodeIds(nodes) {
 function normalizeDependencies(value, nodeId) {
   if (value === undefined) return [];
   if (!Array.isArray(value)) throw new CoreError('INVALID_PLAN', `Node ${nodeId} dependencies must be an array`);
+  if (value.length > MAX_NODE_DEPENDENCIES) {
+    throw new CoreError('PLAN_LIMIT_EXCEEDED', `Node ${nodeId} exceeds the dependency limit`);
+  }
   const result = [];
   for (const dependency of value) {
     if (typeof dependency !== 'string' || !NODE_ID.test(dependency) || dependency === nodeId) {
@@ -301,14 +408,127 @@ function normalizeDependencies(value, nodeId) {
   return result.sort(compareIds);
 }
 
-function normalizeAdapterChoice(value, capability, nodeId) {
-  if (value === undefined) return capability.adapters[0]?.id;
-  const adapter = typeof value === 'string' ? value : value?.id ?? value?.adapterId;
-  if (typeof adapter !== 'string' || !adapter) throw new CoreError('INVALID_PLAN', `Node ${nodeId} adapter is invalid`);
-  if (capability.adapters.length && !capability.adapters.some((entry) => entry.id === adapter)) {
-    throw new CoreError('ADAPTER_NOT_ALLOWED', `Adapter ${adapter} is not allowed for node ${nodeId}`);
+function assertTotalDependencies(nodes) {
+  const total = nodes.reduce((count, node) => count + node.dependsOn.length, 0);
+  if (total > MAX_TOTAL_DEPENDENCIES) {
+    throw new CoreError('PLAN_LIMIT_EXCEEDED', 'Plan exceeds the aggregate dependency limit');
   }
-  return adapter;
+}
+
+/**
+ * Bound a plan before cloning, hashing, or graph work.  Transport limits alone
+ * are insufficient: thousands of tiny nodes fit inside a one-MiB JSON frame
+ * and can otherwise amplify into large maps, hashes, and sort work.
+ */
+export function assertPlanInputBounds(value) {
+  const stack = [{ value, depth: 0, path: '$' }];
+  let values = 0;
+  while (stack.length) {
+    const current = stack.pop();
+    values += 1;
+    if (values > MAX_PLAN_VALUES) {
+      throw new CoreError('PLAN_LIMIT_EXCEEDED', 'Plan contains too many JSON values');
+    }
+    if (current.depth > MAX_PLAN_DEPTH) {
+      throw new CoreError('PLAN_LIMIT_EXCEEDED', 'Plan nesting is too deep');
+    }
+    const item = current.value;
+    if (item === null || typeof item !== 'object') continue;
+    const prototype = Object.getPrototypeOf(item);
+    if (!Array.isArray(item) && prototype !== Object.prototype && prototype !== null) {
+      throw new CoreError('INVALID_PLAN', `Plan value at ${current.path} must be plain JSON`);
+    }
+    const descriptors = Object.getOwnPropertyDescriptors(item);
+    for (const [key, descriptor] of Object.entries(descriptors)) {
+      if (Array.isArray(item) && key === 'length') continue;
+      if (!Object.prototype.hasOwnProperty.call(descriptor, 'value') || descriptor.enumerable !== true) {
+        throw new CoreError('INVALID_PLAN', `Plan value at ${current.path}.${key} must be plain JSON data`);
+      }
+      const child = descriptor.value;
+      if ((key === 'nodes' || key === 'steps') && Array.isArray(child) && child.length > MAX_PLAN_NODES) {
+        throw new CoreError('PLAN_LIMIT_EXCEEDED', `Plan may contain at most ${MAX_PLAN_NODES} nodes`);
+      }
+      if ((key === 'dependsOn' || key === 'dependencies' || key === 'after') &&
+          Array.isArray(child) && child.length > MAX_NODE_DEPENDENCIES) {
+        throw new CoreError('PLAN_LIMIT_EXCEEDED', `A node may contain at most ${MAX_NODE_DEPENDENCIES} dependencies`);
+      }
+      stack.push({ value: child, depth: current.depth + 1, path: `${current.path}.${key}` });
+    }
+  }
+  let serialized;
+  try {
+    serialized = stableStringify(value);
+  } catch (error) {
+    if (error instanceof CoreError) throw error;
+    throw new CoreError('INVALID_PLAN', 'Plan must be canonical JSON', { cause: error });
+  }
+  if (Buffer.byteLength(serialized, 'utf8') > MAX_PLAN_INPUT_BYTES) {
+    throw new CoreError('PLAN_LIMIT_EXCEEDED', `Plan input exceeds ${MAX_PLAN_INPUT_BYTES} bytes`);
+  }
+  return true;
+}
+
+function normalizeAdapterChoice(value, capability, nodeId) {
+  const selected = selectTrustedAdapter(capability.adapters);
+  if (value === undefined) return selected?.id;
+  const requested = typeof value === 'string' ? value : value?.id ?? value?.adapterId;
+  if (typeof requested !== 'string' || !requested) {
+    throw new CoreError('INVALID_PLAN', `Node ${nodeId} adapter is invalid`);
+  }
+  if (!selected) {
+    throw new CoreError('ADAPTER_NOT_ALLOWED', `Capability ${capability.id} has no server-approved adapter`);
+  }
+  if (requested !== selected.id) {
+    throw new CoreError(
+      'ADAPTER_DOWNGRADE_FORBIDDEN',
+      `Node ${nodeId} must use the server-selected adapter ${selected.id}`,
+    );
+  }
+  return selected.id;
+}
+
+const ADAPTER_PRIORITY = Object.freeze({
+  'structured-api': 0,
+  webmcp: 1,
+  'dom-accessibility': 2,
+  vision: 3,
+});
+
+/**
+ * Adapter routing is a server-owned security decision.  Catalog order and a
+ * client-supplied adapter id must never be able to downgrade a structured
+ * route to DOM/vision.  Unknown integration kinds sort after the fixed trust
+ * ladder and are selected deterministically by id.
+ */
+function selectTrustedAdapter(adapters) {
+  if (!Array.isArray(adapters) || adapters.length === 0) return undefined;
+  return [...adapters].sort((left, right) => {
+    const priority = adapterPriority(left) - adapterPriority(right);
+    if (priority !== 0) return priority;
+    return left.id.localeCompare(right.id) || String(left.version ?? '').localeCompare(String(right.version ?? ''));
+  })[0];
+}
+
+function adapterPriority(adapter) {
+  const explicitKind = normalizeAdapterKind(adapter?.kind);
+  if (explicitKind !== undefined) return explicitKind;
+  const inferredKind = inferAdapterKind(adapter?.id);
+  return inferredKind === undefined ? Number.MAX_SAFE_INTEGER : inferredKind;
+}
+
+function normalizeAdapterKind(value) {
+  if (typeof value !== 'string') return undefined;
+  return ADAPTER_PRIORITY[value.trim().toLowerCase().replace(/[_.\s]+/g, '-')];
+}
+
+function inferAdapterKind(value) {
+  if (typeof value !== 'string') return undefined;
+  const normalized = value.trim().toLowerCase();
+  if (/(?:^|[._:/-])(?:structured|api)(?:$|[._:/-])/.test(normalized)) return ADAPTER_PRIORITY['structured-api'];
+  if (/(?:^|[._:/-])webmcp(?:$|[._:/-])/.test(normalized)) return ADAPTER_PRIORITY.webmcp;
+  if (/(?:^|[._:/-])(?:dom|accessibility|a11y)(?:$|[._:/-])/.test(normalized)) return ADAPTER_PRIORITY['dom-accessibility'];
+  if (/(?:^|[._:/-])vision(?:$|[._:/-])/.test(normalized)) return ADAPTER_PRIORITY.vision;
+  return undefined;
 }
 
 function normalizeOriginChoice(value, capability, nodeId) {

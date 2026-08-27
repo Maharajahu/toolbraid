@@ -1,6 +1,6 @@
 import { CoreError, errorShape } from './errors.js';
 import { requireIdentity, sameIdentity, identityKey } from './identity.js';
-import { jsonClone } from './serialization.js';
+import { jsonClone, stableStringify } from './serialization.js';
 import { validatePlan } from './planner.js';
 
 export const WORKFLOW_STATES = Object.freeze([
@@ -33,6 +33,23 @@ const NODE_TRANSITIONS = Object.freeze({
 const WORKFLOW_ID = /^[A-Za-z0-9][A-Za-z0-9._:@/+\-]{0,199}$/;
 
 /**
+ * The in-memory store is useful for local deployments, but it must still have
+ * a finite admission budget.  These defaults are deliberately generous enough
+ * for normal plans while keeping an accidentally shared process from growing
+ * without bound.  Hosts with durable storage should set limits appropriate to
+ * that store explicitly.
+ */
+export const DEFAULT_WORKFLOW_STORE_LIMITS = Object.freeze({
+  maxRecords: 10_000,
+  maxBytes: 256 * 1024 * 1024,
+  maxRecordsPerTenant: 2_000,
+  maxBytesPerTenant: 64 * 1024 * 1024,
+  maxRecordsPerIdentity: 500,
+  maxBytesPerIdentity: 16 * 1024 * 1024,
+  maxRecordBytes: 4 * 1024 * 1024,
+});
+
+/**
  * Identity-keyed in-memory workflow persistence and state machine.
  *
  * The store never looks up a workflow by id alone.  Every read or write must
@@ -41,6 +58,10 @@ const WORKFLOW_ID = /^[A-Za-z0-9][A-Za-z0-9._:@/+\-]{0,199}$/;
  */
 export class WorkflowStore {
   #records = new Map();
+  #recordBytes = new Map();
+  #globalBytes = 0;
+  #tenantUsage = new Map();
+  #identityUsage = new Map();
   #sequence = 0;
 
   constructor(options = {}) {
@@ -48,36 +69,60 @@ export class WorkflowStore {
     this.clock = typeof options.clock === 'function' ? options.clock : () => new Date().toISOString();
     this.idFactory = typeof options.idFactory === 'function' ? options.idFactory : undefined;
     this.maxHistory = options.maxHistory === undefined ? 500 : normalizePositiveInt(options.maxHistory, 'maxHistory', 10_000);
+    this.maxRecords = quotaOption(options, ['maxRecords', 'maxWorkflowRecords'], 'maxRecords', DEFAULT_WORKFLOW_STORE_LIMITS.maxRecords);
+    this.maxBytes = quotaOption(options, ['maxBytes', 'maxWorkflowBytes'], 'maxBytes', DEFAULT_WORKFLOW_STORE_LIMITS.maxBytes);
+    this.maxRecordsPerTenant = quotaOption(
+      options,
+      ['maxRecordsPerTenant', 'maxTenantRecords', 'maxWorkflowsPerTenant'],
+      'maxRecordsPerTenant',
+      DEFAULT_WORKFLOW_STORE_LIMITS.maxRecordsPerTenant,
+    );
+    this.maxBytesPerTenant = quotaOption(
+      options,
+      ['maxBytesPerTenant', 'maxTenantBytes', 'maxWorkflowBytesPerTenant'],
+      'maxBytesPerTenant',
+      DEFAULT_WORKFLOW_STORE_LIMITS.maxBytesPerTenant,
+    );
+    this.maxRecordsPerIdentity = quotaOption(
+      options,
+      ['maxRecordsPerIdentity', 'maxIdentityRecords', 'maxWorkflowsPerIdentity'],
+      'maxRecordsPerIdentity',
+      DEFAULT_WORKFLOW_STORE_LIMITS.maxRecordsPerIdentity,
+    );
+    this.maxBytesPerIdentity = quotaOption(
+      options,
+      ['maxBytesPerIdentity', 'maxIdentityBytes', 'maxWorkflowBytesPerIdentity'],
+      'maxBytesPerIdentity',
+      DEFAULT_WORKFLOW_STORE_LIMITS.maxBytesPerIdentity,
+    );
+    this.maxRecordBytes = quotaOption(
+      options,
+      ['maxRecordBytes', 'maxBytesPerRecord', 'maxWorkflowRecordBytes'],
+      'maxRecordBytes',
+      DEFAULT_WORKFLOW_STORE_LIMITS.maxRecordBytes,
+    );
   }
 
   create(input) {
     const operation = requireObject(input, 'create input');
     const identity = requireIdentity(operation);
-    const workflowId = normalizeWorkflowId(operation.workflowId ?? this.#newWorkflowId(identity));
-    const revision = normalizeRevision(operation.revision);
+    // Validate a supplied plan before allocating or retaining a draft.  In
+    // particular, create({ plan }) must be atomic: an invalid or over-quota
+    // proposal cannot leave behind a draft that consumes the caller's quota.
+    const plan = operation.plan === undefined
+      ? undefined
+      : validatePlan({ identity, plan: operation.plan });
+    const workflowId = normalizeWorkflowId(operation.workflowId ?? plan?.workflowId ?? this.#newWorkflowId(identity));
+    const revision = normalizeRevision(operation.revision ?? plan?.revision);
+    if (plan && (plan.workflowId !== workflowId || plan.revision !== revision)) {
+      throw new CoreError('INVALID_WORKFLOW', 'Plan workflow identity does not match request');
+    }
     const key = workflowKey({ identity, workflowId, revision });
     if (this.#records.has(key)) throw new CoreError('WORKFLOW_CONFLICT', 'Workflow revision already exists');
-    const now = this.#now();
-    const record = {
-      workflowId,
-      revision,
-      tenantId: identity.tenantId,
-      subjectId: identity.subjectId,
-      state: 'draft',
-      plan: null,
-      nodeStates: {},
-      awaitingApproval: null,
-      result: null,
-      error: null,
-      history: [{ at: now, type: 'created', state: 'draft' }],
-      createdAt: now,
-      updatedAt: now,
-    };
-    this.#records.set(key, record);
-    if (operation.plan !== undefined) {
-      return this.propose({ identity, workflowId, revision, plan: operation.plan });
-    }
-    return this.#public(record);
+    let candidate = this.#newRecord({ identity, workflowId, revision });
+    if (plan) candidate = this.#proposedRecord(candidate, plan);
+    const stored = this.#commit(key, undefined, candidate);
+    return this.#public(stored);
   }
 
   propose(input) {
@@ -90,23 +135,16 @@ export class WorkflowStore {
     const key = workflowKey({ identity, workflowId, revision });
     let record = this.#records.get(key);
     if (!record) {
-      this.create({ identity, workflowId, revision });
-      record = this.#records.get(key);
+      record = this.#newRecord({ identity, workflowId, revision });
+      const candidate = this.#proposedRecord(record, plan);
+      const stored = this.#commit(key, undefined, candidate);
+      return this.#public(stored);
     }
     this.#assertOwner(record, identity);
     if (record.state !== 'draft') throw new CoreError('WORKFLOW_STATE', 'Only draft workflows can be proposed');
-    record.plan = jsonClone(plan);
-    record.nodeStates = Object.fromEntries(plan.nodes.map((node) => [node.id, {
-      nodeId: node.id,
-      state: 'pending',
-      output: null,
-      error: null,
-      startedAt: null,
-      completedAt: null,
-      attempts: 0,
-    }]));
-    this.#transitionRecord(record, 'proposed', { type: 'proposed' });
-    return this.#public(record);
+    const candidate = this.#proposedRecord(record, plan);
+    const stored = this.#commit(key, record, candidate);
+    return this.#public(stored);
   }
 
   get(input) {
@@ -138,13 +176,16 @@ export class WorkflowStore {
     const operation = requireObject(input, 'transition input');
     const identity = requireIdentity(operation);
     const record = this.#ownedRecord(operation, identity);
+    const key = workflowKey({ identity, workflowId: record.workflowId, revision: record.revision });
     const target = operation.to ?? operation.state;
     if (typeof target !== 'string' || !WORKFLOW_STATES.includes(target)) throw new CoreError('INVALID_WORKFLOW_STATE', 'Unknown workflow state');
-    this.#transitionRecord(record, target, {
+    const candidate = jsonClone(record);
+    this.#transitionRecord(candidate, target, {
       type: 'transition',
       reason: operation.reason === undefined ? undefined : requireReason(operation.reason),
     });
-    return this.#public(record);
+    const stored = this.#commit(key, record, candidate);
+    return this.#public(stored);
   }
 
   start(input) {
@@ -156,11 +197,13 @@ export class WorkflowStore {
     const operation = requireObject(input, 'markNode input');
     const identity = requireIdentity(operation);
     const record = this.#ownedRecord(operation, identity);
+    const key = workflowKey({ identity, workflowId: record.workflowId, revision: record.revision });
     if (!['running', 'awaiting_approval'].includes(record.state)) {
       throw new CoreError('WORKFLOW_STATE', 'Nodes can only change while a workflow is running');
     }
     const nodeId = requireNodeId(operation.nodeId);
-    const current = record.nodeStates[nodeId];
+    const candidate = jsonClone(record);
+    const current = candidate.nodeStates[nodeId];
     if (!current) throw new CoreError('NODE_NOT_FOUND', 'Workflow node was not found');
     const target = operation.state;
     if (typeof target !== 'string' || !NODE_STATES.includes(target)) throw new CoreError('INVALID_NODE_STATE', 'Unknown node state');
@@ -179,82 +222,98 @@ export class WorkflowStore {
     }
     if (target === 'completed' || target === 'failed' || target === 'cancelled') current.completedAt = this.#now();
     current.state = target;
-    this.#event(record, {
+    this.#event(candidate, {
       at: this.#now(),
       type: 'node_state',
       nodeId,
       state: target,
     });
-    return this.#public(record);
+    const stored = this.#commit(key, record, candidate);
+    return this.#public(stored);
   }
 
   awaitApproval(input) {
     const operation = requireObject(input, 'awaitApproval input');
     const identity = requireIdentity(operation);
     const record = this.#ownedRecord(operation, identity);
+    const key = workflowKey({ identity, workflowId: record.workflowId, revision: record.revision });
     if (record.state !== 'running') throw new CoreError('WORKFLOW_STATE', 'Approval can only be requested by a running workflow');
     const nodeId = requireNodeId(operation.nodeId);
     const node = record.plan?.nodes.find((entry) => entry.id === nodeId);
     if (!node) throw new CoreError('NODE_NOT_FOUND', 'Workflow node was not found');
     if (node.readOnly) throw new CoreError('APPROVAL_NOT_REQUIRED', 'Read-only nodes cannot await mutation approval');
-    const current = record.nodeStates[nodeId];
+    const candidate = jsonClone(record);
+    const current = candidate.nodeStates[nodeId];
     if (!['pending', 'running', 'awaiting_approval'].includes(current.state)) throw new CoreError('NODE_STATE', 'Node is not awaiting execution');
     current.state = 'awaiting_approval';
-    record.awaitingApproval = {
+    candidate.awaitingApproval = {
       nodeId,
       ...(operation.request === undefined ? {} : jsonClone(operation.request)),
     };
-    if (record.state === 'running') this.#transitionRecord(record, 'awaiting_approval', { type: 'approval_required', nodeId });
-    else this.#event(record, { at: this.#now(), type: 'approval_required', nodeId });
-    return this.#public(record);
+    if (candidate.state === 'running') this.#transitionRecord(candidate, 'awaiting_approval', { type: 'approval_required', nodeId });
+    else this.#event(candidate, { at: this.#now(), type: 'approval_required', nodeId });
+    const stored = this.#commit(key, record, candidate);
+    return this.#public(stored);
   }
 
   resume(input) {
     const operation = requireObject(input, 'resume input');
     const identity = requireIdentity(operation);
     const record = this.#ownedRecord(operation, identity);
+    const key = workflowKey({ identity, workflowId: record.workflowId, revision: record.revision });
     if (record.state !== 'awaiting_approval') throw new CoreError('WORKFLOW_STATE', 'Workflow is not awaiting approval');
     const nodeId = requireNodeId(operation.nodeId);
     if (record.awaitingApproval?.nodeId !== nodeId || record.nodeStates[nodeId]?.state !== 'awaiting_approval') {
       throw new CoreError('APPROVAL_BINDING_MISMATCH', 'Approval does not match the node awaiting approval');
     }
-    this.#transitionRecord(record, 'running', { type: 'approval_resumed', nodeId });
-    record.awaitingApproval = null;
-    return this.#public(record);
+    const candidate = jsonClone(record);
+    this.#transitionRecord(candidate, 'running', { type: 'approval_resumed', nodeId });
+    candidate.awaitingApproval = null;
+    const stored = this.#commit(key, record, candidate);
+    return this.#public(stored);
   }
 
   complete(input) {
     const operation = requireObject(input, 'complete input');
     const identity = requireIdentity(operation);
     const record = this.#ownedRecord(operation, identity);
+    const key = workflowKey({ identity, workflowId: record.workflowId, revision: record.revision });
     if (record.state !== 'running') throw new CoreError('WORKFLOW_STATE', 'Only running workflows can complete');
-    const incomplete = Object.values(record.nodeStates).filter((node) => node.state !== 'completed');
+    const candidate = jsonClone(record);
+    const incomplete = Object.values(candidate.nodeStates).filter((node) => node.state !== 'completed');
     if (incomplete.length) throw new CoreError('WORKFLOW_INCOMPLETE', 'Cannot complete a workflow with incomplete nodes', { details: { nodes: incomplete.map((node) => node.nodeId) } });
-    if (operation.result !== undefined) record.result = jsonClone(operation.result);
-    this.#transitionRecord(record, 'completed', { type: 'completed' });
-    return this.#public(record);
+    if (operation.result !== undefined) candidate.result = jsonClone(operation.result);
+    this.#transitionRecord(candidate, 'completed', { type: 'completed' });
+    const stored = this.#commit(key, record, candidate);
+    return this.#public(stored);
   }
 
   fail(input) {
     const operation = requireObject(input, 'fail input');
     const identity = requireIdentity(operation);
     const record = this.#ownedRecord(operation, identity);
+    const key = workflowKey({ identity, workflowId: record.workflowId, revision: record.revision });
     if (['completed', 'failed', 'cancelled'].includes(record.state)) throw new CoreError('WORKFLOW_STATE', 'Workflow is terminal');
-    record.error = errorShape(operation.error, { code: 'WORKFLOW_FAILED', message: 'Workflow failed' });
-    this.#transitionRecord(record, 'failed', { type: 'failed', error: record.error });
-    return this.#public(record);
+    const candidate = jsonClone(record);
+    candidate.error = errorShape(operation.error, { code: 'WORKFLOW_FAILED', message: 'Workflow failed' });
+    this.#transitionRecord(candidate, 'failed', { type: 'failed', error: candidate.error });
+    const stored = this.#commit(key, record, candidate);
+    return this.#public(stored);
   }
 
   cancel(input) {
     const operation = requireObject(input, 'cancel input');
     const identity = requireIdentity(operation);
     const record = this.#ownedRecord(operation, identity);
+    const key = workflowKey({ identity, workflowId: record.workflowId, revision: record.revision });
     if (['completed', 'failed', 'cancelled'].includes(record.state)) throw new CoreError('WORKFLOW_STATE', 'Workflow is terminal');
-    this.#transitionRecord(record, 'cancelled', { type: 'cancelled', reason: operation.reason === undefined ? undefined : requireReason(operation.reason) });
-    for (const node of Object.values(record.nodeStates)) {
+    const candidate = jsonClone(record);
+    this.#transitionRecord(candidate, 'cancelled', { type: 'cancelled', reason: operation.reason === undefined ? undefined : requireReason(operation.reason) });
+    for (const node of Object.values(candidate.nodeStates)) {
       if (!['completed', 'failed', 'cancelled'].includes(node.state)) node.state = 'cancelled';
     }
-    return this.#public(record);
+    const stored = this.#commit(key, record, candidate);
+    return this.#public(stored);
   }
 
   #ownedRecord(operation, identity) {
@@ -268,6 +327,115 @@ export class WorkflowStore {
 
   #assertOwner(record, identity) {
     if (!sameIdentity(record, identity)) throw new CoreError('WORKFLOW_FORBIDDEN', 'Workflow is outside the caller identity');
+  }
+
+  #newRecord({ identity, workflowId, revision }) {
+    const now = this.#now();
+    return {
+      workflowId,
+      revision,
+      tenantId: identity.tenantId,
+      subjectId: identity.subjectId,
+      state: 'draft',
+      plan: null,
+      nodeStates: {},
+      awaitingApproval: null,
+      result: null,
+      error: null,
+      history: [{ at: now, type: 'created', state: 'draft' }],
+      createdAt: now,
+      updatedAt: now,
+    };
+  }
+
+  #proposedRecord(record, plan) {
+    const candidate = jsonClone(record);
+    candidate.plan = jsonClone(plan);
+    candidate.nodeStates = Object.fromEntries(plan.nodes.map((node) => [node.id, {
+      nodeId: node.id,
+      state: 'pending',
+      output: null,
+      error: null,
+      startedAt: null,
+      completedAt: null,
+      attempts: 0,
+    }]));
+    this.#transitionRecord(candidate, 'proposed', { type: 'proposed' });
+    return candidate;
+  }
+
+  /**
+   * Commit only a detached, quota-checked candidate.  All public mutators
+   * construct a candidate first, so a quota failure leaves the prior record,
+   * counters, and history untouched.
+   */
+  #commit(key, previous, candidate) {
+    const clean = jsonClone(candidate);
+    const bytes = serializedBytes(clean);
+    const existing = this.#records.has(key);
+    const previousBytes = existing
+      ? this.#recordBytes.get(key) ?? serializedBytes(previous)
+      : 0;
+    const deltaBytes = bytes - previousBytes;
+    this.#assertQuota(clean, bytes, deltaBytes, existing);
+
+    this.#records.set(key, clean);
+    this.#recordBytes.set(key, bytes);
+    this.#globalBytes += deltaBytes;
+    this.#adjustUsage(this.#tenantUsage, clean.tenantId, existing ? 0 : 1, deltaBytes);
+    this.#adjustUsage(this.#identityUsage, identityKey(clean), existing ? 0 : 1, deltaBytes);
+    return clean;
+  }
+
+  #assertQuota(record, bytes, deltaBytes, existing) {
+    if (bytes > this.maxRecordBytes) {
+      throw new CoreError('WORKFLOW_QUOTA_EXCEEDED', 'Workflow record exceeds its byte limit', {
+        details: { scope: 'record.bytes', limit: this.maxRecordBytes, requested: bytes },
+      });
+    }
+    if (!existing && this.#records.size + 1 > this.maxRecords) {
+      throw new CoreError('WORKFLOW_QUOTA_EXCEEDED', 'Global workflow record limit reached', {
+        details: { scope: 'global.records', limit: this.maxRecords, current: this.#records.size, requested: this.#records.size + 1 },
+      });
+    }
+    if (this.#globalBytes + deltaBytes > this.maxBytes) {
+      throw new CoreError('WORKFLOW_QUOTA_EXCEEDED', 'Global workflow byte limit reached', {
+        details: { scope: 'global.bytes', limit: this.maxBytes, current: this.#globalBytes, requested: this.#globalBytes + deltaBytes },
+      });
+    }
+
+    const tenant = this.#tenantUsage.get(record.tenantId) ?? EMPTY_USAGE;
+    if (!existing && tenant.records + 1 > this.maxRecordsPerTenant) {
+      throw new CoreError('WORKFLOW_QUOTA_EXCEEDED', 'Tenant workflow record limit reached', {
+        details: { scope: 'tenant.records', tenantId: record.tenantId, limit: this.maxRecordsPerTenant, current: tenant.records, requested: tenant.records + 1 },
+      });
+    }
+    if (tenant.bytes + deltaBytes > this.maxBytesPerTenant) {
+      throw new CoreError('WORKFLOW_QUOTA_EXCEEDED', 'Tenant workflow byte limit reached', {
+        details: { scope: 'tenant.bytes', tenantId: record.tenantId, limit: this.maxBytesPerTenant, current: tenant.bytes, requested: tenant.bytes + deltaBytes },
+      });
+    }
+
+    const identity = identityKey(record);
+    const owner = this.#identityUsage.get(identity) ?? EMPTY_USAGE;
+    if (!existing && owner.records + 1 > this.maxRecordsPerIdentity) {
+      throw new CoreError('WORKFLOW_QUOTA_EXCEEDED', 'Identity workflow record limit reached', {
+        details: { scope: 'identity.records', limit: this.maxRecordsPerIdentity, current: owner.records, requested: owner.records + 1 },
+      });
+    }
+    if (owner.bytes + deltaBytes > this.maxBytesPerIdentity) {
+      throw new CoreError('WORKFLOW_QUOTA_EXCEEDED', 'Identity workflow byte limit reached', {
+        details: { scope: 'identity.bytes', limit: this.maxBytesPerIdentity, current: owner.bytes, requested: owner.bytes + deltaBytes },
+      });
+    }
+  }
+
+  #adjustUsage(map, key, recordDelta, byteDelta) {
+    const current = map.get(key) ?? { records: 0, bytes: 0 };
+    map.set(key, {
+      records: current.records + recordDelta,
+      bytes: current.bytes + byteDelta,
+    });
   }
 
   #transitionRecord(record, target, event) {
@@ -346,6 +514,21 @@ function normalizePositiveInt(value, field, max) {
   if (!Number.isInteger(value) || value < 1 || value > max) throw new CoreError('INVALID_INPUT', `${field} must be a positive integer`);
   return value;
 }
+
+function quotaOption(options, names, field, fallback) {
+  const supplied = names.find((name) => options[name] !== undefined);
+  const value = supplied === undefined ? fallback : options[supplied];
+  if (!Number.isSafeInteger(value) || value < 1) {
+    throw new CoreError('INVALID_WORKFLOW_STORE', `${field} must be a positive safe integer`);
+  }
+  return value;
+}
+
+function serializedBytes(value) {
+  return Buffer.byteLength(stableStringify(value), 'utf8');
+}
+
+const EMPTY_USAGE = Object.freeze({ records: 0, bytes: 0 });
 
 function requireObject(value, label) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new CoreError('INVALID_INPUT', `${label} must be an object`);

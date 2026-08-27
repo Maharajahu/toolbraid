@@ -3,6 +3,7 @@ import {
   ADAPTER_PRIORITY,
   AdapterContractError,
   assertRecord,
+  cloneJson,
   createAdapterError,
   errorResult,
   isJsonSafe,
@@ -28,7 +29,6 @@ function adapterShape({ adapter }) {
 function canonicalPolicy({ policy, request }) {
   const source = policy === undefined ? {} : assertRecord({ value: policy, name: 'routing policy' });
   const merged = { ...source };
-  if (request?.allowVisionFallback === true) merged.allowVisionFallback = true;
   for (const key of ['minimumConfidence', 'maxRiskScore']) {
     if (merged[key] !== undefined && (typeof merged[key] !== 'number' || !Number.isFinite(merged[key]) || merged[key] < 0 || merged[key] > 1)) {
       throw new AdapterContractError({ code: 'ADAPTER_POLICY_INVALID', message: `${key} must be a number between 0 and 1.` });
@@ -117,6 +117,11 @@ function rejection({ adapterId, kind, reason, error }) {
 export function createAdapterRegistry({ adapters = [] } = {}) {
   if (!Array.isArray(adapters)) throw new AdapterContractError({ code: 'ADAPTER_REGISTRY_INVALID', message: 'adapters must be an array.' });
   const entries = new Map();
+  // A selection is an authority-bearing capability, not a caller-owned
+  // routing hint.  Keep the original selection inputs in a server-owned
+  // identity map so a cloned or forged object cannot choose a different
+  // adapter at execution time.
+  const selectionHandles = new WeakMap();
   let sequence = 0;
 
   const register = (registration = {}) => {
@@ -257,7 +262,7 @@ export function createAdapterRegistry({ adapters = [] } = {}) {
         }),
       };
     }
-    return {
+    const result = {
       ok: true,
       origin,
       capability,
@@ -270,6 +275,39 @@ export function createAdapterRegistry({ adapters = [] } = {}) {
         rationale: `Selected ${selected.kind} at priority ${selected.priority}.`,
       },
     };
+    try {
+      // Keep only the policy fields that affect routing and snapshot the
+      // request used by adapter probes.  Both are cloned before storage so a
+      // caller cannot mutate the authority context after selection.
+      const requestSnapshot = cloneJson({ value: request });
+      const policySnapshot = cloneJson({
+        value: Object.fromEntries([
+          'minimumConfidence',
+          'maxRiskScore',
+          'allowedAdapters',
+          'requireReadOnly',
+          'allowVisionFallback',
+        ].filter((key) => Object.prototype.hasOwnProperty.call(policy, key)).map((key) => [
+          key,
+          policy[key],
+        ])),
+      });
+      selectionHandles.set(result, {
+        origin,
+        capability,
+        request: requestSnapshot,
+        policy: policySnapshot,
+        adapterId: selected.adapterId,
+        selected: cloneJson({ value: selected }),
+      });
+    } catch (error) {
+      return errorResult({ error: new AdapterContractError({
+        code: 'ADAPTER_SELECTION_INVALID',
+        message: 'Selection inputs must be bounded JSON data.',
+        cause: error,
+      }) });
+    }
+    return result;
   };
 
   const execute = (executionInput = {}) => {
@@ -277,15 +315,39 @@ export function createAdapterRegistry({ adapters = [] } = {}) {
     try { input = assertRecord({ value: executionInput, name: 'adapter execution' }); } catch (error) { return errorResult({ error }); }
     const selection = input.selection;
     if (!isPlainObject({ value: selection }) || selection.ok !== true) return errorResult({ error: createAdapterError({ code: 'ADAPTER_SELECTION_REQUIRED', message: 'A successful adapter selection is required.' }) });
-    const adapterId = input.adapterId ?? selection.selectedAdapterId ?? selection.selected?.adapterId;
-    if (typeof adapterId !== 'string') return errorResult({ error: createAdapterError({ code: 'ADAPTER_SELECTION_INVALID', message: 'Selection does not identify an adapter.' }) });
-    const entry = entries.get(adapterId);
-    if (!entry) return errorResult({ error: createAdapterError({ code: 'ADAPTER_NOT_FOUND', message: 'Selected adapter is not registered.' }) });
+    const handle = selectionHandles.get(selection);
+    if (!handle) return errorResult({ error: createAdapterError({ code: 'ADAPTER_SELECTION_REQUIRED', message: 'Selection must be issued by this server-side registry.' }) });
     let origin;
     try { origin = normalizeOrigin({ origin: input.origin }); } catch (error) { return errorResult({ error }); }
     let capability;
     try { capability = validateCapabilityName({ name: input.capability ?? input.capabilityId ?? input.operation }); } catch (error) { return errorResult({ error }); }
-    if (selection.origin !== origin || selection.capability !== capability || selection.selectedAdapterId !== adapterId) return errorResult({ error: createAdapterError({ code: 'ADAPTER_SELECTION_BINDING_MISMATCH', message: 'Selection is not bound to this origin, capability, or adapter.' }) });
+    if (handle.origin !== origin || handle.capability !== capability) return errorResult({ error: createAdapterError({ code: 'ADAPTER_SELECTION_BINDING_MISMATCH', message: 'Selection is not bound to this origin or capability.' }) });
+
+    // Re-run routing with the server-owned selection inputs.  This prevents a
+    // caller from changing selectedAdapterId/candidates (or from presenting a
+    // stale selection after probe state changes) to reach a weaker adapter.
+    const refreshed = select({
+      origin: handle.origin,
+      capability: handle.capability,
+      request: handle.request,
+      policy: handle.policy,
+    });
+    if (!refreshed.ok || refreshed.selectedAdapterId !== handle.adapterId) {
+      return errorResult({ error: createAdapterError({ code: 'ADAPTER_SELECTION_STALE', message: 'Server-side adapter selection is no longer valid.' }) });
+    }
+    let refreshedSelected;
+    try {
+      refreshedSelected = cloneJson({ value: refreshed.selected });
+    } catch {
+      return errorResult({ error: createAdapterError({ code: 'ADAPTER_SELECTION_STALE', message: 'Server-side adapter selection is no longer valid.' }) });
+    }
+    if (JSON.stringify(refreshedSelected) !== JSON.stringify(handle.selected)) {
+      return errorResult({ error: createAdapterError({ code: 'ADAPTER_SELECTION_STALE', message: 'Server-side adapter selection has changed.' }) });
+    }
+    const adapterId = handle.adapterId;
+    if (input.adapterId !== undefined && input.adapterId !== adapterId) return errorResult({ error: createAdapterError({ code: 'ADAPTER_SELECTION_BINDING_MISMATCH', message: 'Requested adapter does not match the server-side selection.' }) });
+    const entry = entries.get(adapterId);
+    if (!entry) return errorResult({ error: createAdapterError({ code: 'ADAPTER_NOT_FOUND', message: 'Selected adapter is not registered.' }) });
     try {
       const result = entry.adapter.execute({
         origin,
