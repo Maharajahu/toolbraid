@@ -10,7 +10,7 @@
   "audit": {
     "algorithm": "sha256-chain-v1",
     "entries": 54,
-    "head": "b42e2938582525f956a47b2f3f577419ffc8494a2e2a878b7abab10c7f0cb825"
+    "head": "eaf7276abce58016a33db52c56cb05d9cfc98df18920ff7da1d42f4f6a82f5b0"
   },
   "screenshots": [
     "docs\\screenshots\\toolbraid-recovery-approval.png",

@@ -123,6 +123,7 @@ def main() -> int:
 
             command_trigger = page.get_by_role("button", name="Open command menu")
             command_trigger.click()
+            page.wait_for_function("document.activeElement?.matches('[data-command-input]')")
             assert_equal(page.evaluate("document.activeElement?.matches('[data-command-input]')"), True, "command focus")
             page.locator('[data-command-input]').fill("reset")
             visible_commands = page.locator('[data-command-menu] [data-action]:visible')
