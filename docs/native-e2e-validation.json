@@ -1,0 +1,16 @@
+{
+  "status": "PASS",
+  "browser": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/151.0.0.0 Safari/537.36",
+  "runtime": "native",
+  "providers": 6,
+  "discoveredTools": 9,
+  "quarantined": 1,
+  "activeRelease": "release-1841",
+  "noticeRevision": "notice-r9",
+  "expectedProviderFailures": 1,
+  "audit": {
+    "algorithm": "sha256-chain-v1",
+    "entries": 54,
+    "head": "736840dc4241aeea1599867b643da9f4183d039eb9af432faeb03fd277d06aef"
+  }
+}

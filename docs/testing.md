@@ -1,58 +1,69 @@
 # Testing Strategy
 
-ToolBraid is validated at three artifact levels.
+## One-command engineering validation
 
-## 1. Modular source
+```bash
+npm run validate
+```
 
-`npm run validate:ci` checks required assets, unfinished markers, JavaScript syntax and all unit/security tests.
+This command runs:
 
-Coverage includes:
+1. repository integrity, broken-link, forbidden legacy, unresolved-marker, and JavaScript syntax checks;
+2. all `tests/v2/*.test.mjs` unit and integration tests;
+3. static-server dependency and security-header smoke checks;
+4. the generated standalone verification-harness build.
 
-- semantic tool mapping
-- hostile metadata quarantine
-- risk classification
-- DAG construction
-- ranked alternatives
-- input schema validation
-- canonical output validation
-- read-only fallback
-- no automatic mutation fallback
-- plan-bound approval
-- option/provider/price binding
-- tamper detection
-- single-use approval and replay rejection
+## Test coverage
 
-## 2. Generated standalone artifact
+- native-style registration, explicit `exposedTo`, origin filtering, opaque tool execution, cancellation, and tool-change events;
+- hostile metadata quarantine before capability scoring;
+- seven recovery capabilities across nine heterogeneous tools;
+- schema fingerprints, aliases, confidence evidence, and canonical outputs;
+- nine-node DAG dependencies and two-stage mutation finalization;
+- parallel safe reads and read-only primary-to-fallback substitution;
+- no mutation fallback;
+- exact approval field binding, tamper/expiry detection, atomic approval-set claim, and replay rejection;
+- cryptographically unique mission idempotency keys and reuse protection;
+- registry invalidation around async refresh and immediately before dispatch;
+- ordered recovery-then-publication execution and sealed partial-failure receipts;
+- local SHA-256 integrity-chain creation, verification, and sealing;
+- mission-state success, failure, reset, and approval transitions;
+- multi-origin routing, headers, method rejection, and path traversal defense;
+- semantic icon and constellation invariants.
 
-`npm run build` creates `dist/index.html` with all application and provider code embedded. `npm run e2e:standalone` serves that exact file and executes the full mission at 1440×1050 and 390×844.
+## Browser E2E
 
-Assertions include:
+```bash
+npm run test:e2e
+```
 
-- 4 providers
-- 6 discovered tools
-- 1 quarantined tool
-- 7 plan nodes
-- 5 safe completed nodes before approval
-- £184.90 recommendation
-- 13-minute walking result
-- agent self-approval blocked
-- human approval source
-- 64-character SHA-256 plan fingerprint
-- two action fingerprints
-- two hold IDs
-- approval consumption
-- replay rejection
-- zero material browser errors
-- no mobile horizontal overflow
+Playwright drives the actual mission-control interface in desktop and mobile viewports. It verifies:
 
-## 3. Production release
+- six origins, nine discovered tools, one quarantine, seven mappings, and nine graph nodes;
+- the primary health read fails and the fallback completes;
+- seven safe-stage results and finalized exact mutation arguments;
+- synthetic DOM approval is rejected;
+- two separate trusted human approval dialogs expose the real tool, origin, arguments, and effect;
+- the full approval set is claimed before dispatch, then `release-1841` completes before `notice-r9` starts;
+- keyboard navigation, dialog focus traps/return, tab roving, and graph roving work;
+- the 320 px graph scrolls without label collisions or global page overflow, and key targets are at least 24 px;
+- the audit has 54 entries, verifies as a local SHA-256 integrity chain, and is sealed;
+- no material console or page errors.
 
-`release/index.html` is the audited single-file production build. `npm run check:release` verifies the WebMCP surface, security controls and disclosure text. `npm run e2e:release` runs the same complete browser flow.
+The report is stored at `docs/e2e-validation.json`; current screenshots are in `docs/screenshots/`.
 
-## 4. Deployment transport
+## Native compliance gate
 
-`npm run build:deploy` compresses the standalone build into a small loader plus eight chunks. The loader is tested as a served artifact, including decompression and document replacement.
+Headless Chromium exercises the explicitly labelled local verification harness. Native WebMCP compliance uses installed Chrome 149+ with its testing feature enabled and the seven-origin server:
 
-## Browser environment
+```bash
+npm run test:native
+```
 
-The automated tests use headless Chromium. If native WebMCP is unavailable, ToolBraid uses its compatibility runtime. Native registration remains present and is contract-checked in the production release.
+The run must use the real `document.modelContext` surface and the UI badge must read **Native WebMCP**. Harness results must never be relabelled as native evidence. A passing run writes `docs/native-e2e-validation.json`.
+
+Latest native result: **PASS** in Chrome 151 with six provider origins, nine discovered tools, one quarantined tool, one expected read-provider failure followed by fallback, `release-1841`, `notice-r9`, and a verified 54-entry local integrity chain. The run also fails on any unexpected console, page, or CSP error.
+
+## Generated artifact
+
+`npm run build` creates `dist/index.html`, a self-contained ordinary-browser verification harness. Provider documents are intentionally not embedded because native execution depends on their distinct origins.

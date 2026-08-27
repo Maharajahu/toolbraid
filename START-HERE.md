@@ -1,40 +1,44 @@
-# Start Here: ToolBraid Challenge Release
+# Start Here
 
-## 1. Open the live product
-
-https://toolbraid-dumitrescu91dan-7167.vercel.app/
-
-## 2. Run the judge flow
-
-1. Select **Discover and build plan**.
-2. Observe six discovered tools and one quarantined hostile tool.
-3. Select **Execute safe steps**.
-4. Inspect the seven-node graph and the £184.90 recommendation.
-5. Select **Test agent self-approval guard**. Execution must remain blocked.
-6. Select **Approve exactly these actions**.
-7. Select **Execute approved holds**.
-8. Confirm two synthetic holds appear and the plan completes.
-9. Try the execution action again through `window.ToolBraidApp.runApprovedActions('webmcp-agent')`; the result must be `approval_replay_blocked`.
-
-## 3. Inspect WebMCP
-
-In a native WebMCP browser, ToolBraid registers provider tools and four orchestration tools. It intentionally registers no approval tool. The agent may plan and execute read-only work, but only the human UI can create the approval record.
-
-## 4. Run locally
+## Run the product
 
 ```bash
-npm run validate:ci
-npm run build
-npm run e2e:standalone
-npm run check:release
-npm run e2e:release
+npm run dev
 ```
 
-## 5. Evidence
+Open `http://127.0.0.1:4173`. The badge must read **Verified local harness** in an ordinary browser.
 
-- `docs/e2e-modular-build-validation.json`
-- `docs/e2e-release-validation.json`
-- `docs/e2e-deployment-bootstrap-validation.json`
-- `docs/release-contract.log`
-- `docs/video-file-validation.json`
-- `docs/final-validation-report.md`
+For the native multi-origin path, use a browser build that implements WebMCP:
+
+```bash
+npm run dev:native
+```
+
+This starts the orchestrator on port 4173 and six provider documents on ports 4174 through 4179. The badge must read **Native WebMCP**; otherwise the run is not native compliance evidence.
+
+Chrome 149+ native verification can be run reproducibly with:
+
+```bash
+npm run test:native
+```
+
+## Walk through the mission
+
+1. Start discovery and inspect six origins, nine tools, one quarantine, and seven capability mappings.
+2. Run safe reads. The primary health provider fails and the graph visibly substitutes the read-only fallback.
+3. Inspect the evidence, proposed recovery, drafted notice, and exact mutation arguments.
+4. Approve the recovery action and status publication separately.
+5. Execute the approved mutations.
+6. Confirm `release-1841`, `notice-r9`, and the sealed local SHA-256 integrity chain.
+7. Reset to begin a fresh mission.
+
+No real infrastructure or public status page is changed.
+
+## Validate the repository
+
+```bash
+npm run validate
+npm run test:e2e
+```
+
+The browser report is written to `docs/e2e-validation.json`; screenshots are stored in `docs/screenshots/`.

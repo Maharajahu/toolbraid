@@ -5,17 +5,38 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const required = [
-  'index.html', 'styles.css', 'js/app.js', 'js/core/webmcp-runtime.js',
-  'providers/rail.html', 'providers/stay.html', 'providers/geo.html', 'providers/rogue.html',
-  'README.md', 'LICENSE', 'docs/architecture.md', 'docs/product-spec.md',
-  'docs/research/prior-art.md', 'docs/threat-model.md', 'docs/demo-script.md',
-  'docs/video-script.md', 'docs/submission-description.md', 'docs/challenge-requirements.md',
-  'docs/testing.md', 'docs/final-validation-report.md', 'docs/e2e-validation.json',
-  'docs/screenshots/toolbraid-approval.png', 'docs/screenshots/toolbraid-completed.png',
-  'docs/screenshots/toolbraid-mobile-approval.png', 'docs/screenshots/toolbraid-video-thumbnail.png',
-  'docs/video-production-report.md', 'docs/video-validation.json', 'docs/publication-runbook.md',
-  'release/ToolBraid-WebMCP-Challenge-Demo.mp4', 'release/ToolBraid-WebMCP-Challenge-Demo.srt',
-  '.github/workflows/pages.yml', '.nojekyll',
+  'index.html', 'manifest.webmanifest', 'package.json', 'vercel.json', 'README.md', 'LICENSE',
+  'src/app/main.js', 'src/app/mission-controller.js', 'src/app/mission-state.js',
+  'src/app/constellation.js', 'src/app/icons.js', 'src/app/mission-control.css',
+  'src/engine/approval.js', 'src/engine/audit.js', 'src/engine/executor.js',
+  'src/engine/graph.js', 'src/engine/normalizer.js', 'src/engine/risk.js', 'src/engine/webmcp.js',
+  'src/packs/recovery/adapters.js', 'src/packs/recovery/ontology.js', 'src/packs/recovery/plan.js',
+  'src/providers/recovery/catalog.js',
+  'providers/recovery/runtime.js', 'providers/recovery/provider.css',
+  'providers/recovery/signals.html', 'providers/recovery/signals.js',
+  'providers/recovery/pulse.html', 'providers/recovery/pulse.js',
+  'providers/recovery/source.html', 'providers/recovery/source.js',
+  'providers/recovery/deploy.html', 'providers/recovery/deploy.js',
+  'providers/recovery/status.html', 'providers/recovery/status.js',
+  'providers/recovery/mirage.html', 'providers/recovery/mirage.js',
+  'scripts/serve.mjs', 'scripts/serve-multi-origin.mjs', 'scripts/build-standalone.mjs',
+  'scripts/smoke.mjs', 'scripts/e2e.py',
+  'docs/architecture.md', 'docs/threat-model.md', 'docs/testing.md',
+  'docs/challenge-requirements.md', 'docs/competition/product-definition.md',
+  'docs/competition/native-webmcp-contract.md', 'docs/e2e-validation.json',
+  'tests/v2/mission-controller.test.mjs', 'tests/v2/multi-origin-server.test.mjs',
+  '.github/workflows/ci.yml', '.nojekyll',
+];
+
+const forbiddenLegacy = [
+  'styles.css', 'js', 'release', 'deploy',
+  'providers/rail.html', 'providers/rail.js', 'providers/stay.html', 'providers/stay.js',
+  'providers/geo.html', 'providers/geo.js', 'providers/rogue.html', 'providers/rogue.js',
+  'tests/adapters.test.mjs', 'tests/approval.test.mjs', 'tests/executor.test.mjs',
+  'tests/intent.test.mjs', 'tests/normalizer.test.mjs', 'tests/planner.test.mjs',
+  'scripts/build-deploy-bootstrap.mjs', 'scripts/e2e-standalone.py', 'scripts/package.mjs',
+  'docs/demo-script.md', 'docs/publication-runbook.md', 'docs/video-script.md',
+  'docs/final-submission-checklist.md', 'docs/final-validation-report.md',
 ];
 
 const failures = [];
@@ -26,6 +47,12 @@ for (const relative of required) {
   } catch {
     failures.push(`${relative}: missing`);
   }
+}
+for (const relative of forbiddenLegacy) {
+  try {
+    await stat(path.join(root, relative));
+    failures.push(`${relative}: rejected legacy demo artifact still present`);
+  } catch {}
 }
 
 async function walk(directory) {
@@ -76,19 +103,24 @@ for (const file of files.filter((item) => /\.(?:js|mjs|html|css)$/.test(item) &&
   if (/\b(?:TODO|FIXME|HACK)\b/.test(text)) failures.push(`${path.relative(root, file)}: unresolved marker`);
 }
 
-const runtimeSource = await readFile(path.join(root, 'js/core/webmcp-runtime.js'), 'utf8');
-if (!runtimeSource.includes('document.modelContext.registerTool')) {
-  failures.push('js/core/webmcp-runtime.js: explicit document.modelContext.registerTool call missing');
+for (const providerId of ['signals', 'pulse', 'source', 'deploy', 'status', 'mirage']) {
+  const providerSource = await readFile(path.join(root, `providers/recovery/${providerId}.js`), 'utf8');
+  if (!providerSource.includes('document.modelContext.registerTool')) {
+    failures.push(`providers/recovery/${providerId}.js: literal native registerTool call missing`);
+  }
+  if (!providerSource.includes('exposedTo: [orchestratorOrigin]')) {
+    failures.push(`providers/recovery/${providerId}.js: explicit orchestrator exposure missing`);
+  }
 }
-const appSource = await readFile(path.join(root, 'js/app.js'), 'utf8');
-for (const name of ['toolbraid.plan_mission', 'toolbraid.execute_safe_steps', 'toolbraid.execute_approved_actions', 'toolbraid.inspect_state']) {
-  if (!appSource.includes(name)) failures.push(`js/app.js: orchestration tool ${name} missing`);
+const appSource = await readFile(path.join(root, 'src/app/main.js'), 'utf8');
+for (const signal of ['createMissionController', 'missionController.discoverAndPlan', 'missionController.runSafe', 'missionController.executeApproved']) {
+  if (!appSource.includes(signal)) failures.push(`src/app/main.js: real controller integration missing ${signal}`);
 }
-const publicSurfaceStart = appSource.indexOf('window.ToolBraidApp = Object.freeze');
-const publicSurfaceEnd = appSource.indexOf('window.__toolbraidReady', publicSurfaceStart);
+const publicSurfaceStart = appSource.indexOf('window.__TOOLBRAID_V2__ = Object.freeze');
+const publicSurfaceEnd = appSource.indexOf('const unsubscribeMissionController', publicSurfaceStart);
 const publicSurface = appSource.slice(publicSurfaceStart, publicSurfaceEnd);
-if (publicSurface.includes('approveSelectedActions')) {
-  failures.push('js/app.js: human approval creator leaked into agent/test public surface');
+if (/approveApply|approvePublish|approveScope/.test(publicSurface)) {
+  failures.push('src/app/main.js: human approval creator leaked into public automation surface');
 }
 
 const html = await readFile(path.join(root, 'index.html'), 'utf8');
@@ -102,4 +134,4 @@ if (failures.length) {
   for (const failure of failures) console.error(`- ${failure}`);
   process.exit(1);
 }
-console.log(`Project check passed: ${required.length} required artifacts, ${codeFiles.length} JavaScript modules, no unresolved implementation markers.`);
+console.log(`Project check passed: ${required.length} required artifacts, ${codeFiles.length} JavaScript modules, no rejected demo surface, no unresolved implementation markers.`);

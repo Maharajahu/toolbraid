@@ -1,143 +1,104 @@
 # ToolBraid
 
-**A semantic action layer that turns fragmented WebMCP capabilities into one explainable, human-controlled execution plan.**
+**A browser-native semantic and policy control plane for WebMCP.**
 
-ToolBraid is an OpenAI WebMCP Challenge project. It accepts a user goal, discovers provider tools, maps incompatible names and schemas into canonical capabilities, builds a dependency graph, runs read-only work, and stops before any state-changing action until the human approves the exact provider, option and price.
+ToolBraid turns one human objective spanning several websites into a visible, explainable execution graph. It discovers live WebMCP tools, quarantines hostile metadata, maps incompatible contracts into canonical capabilities, executes safe reads, and stops before each external mutation until the human approves the exact origin, tool, arguments, and effect.
 
-**Live application:** https://toolbraid-dumitrescu91dan-7167.vercel.app/
+The current proof mission is production recovery:
 
-## Why it exists
+> Restore checkout after the latest deployment. Find the safest recovery path and prepare a customer update, but do not change production or publish anything without my approval.
 
-WebMCP makes individual websites callable by agents, but each provider still exposes different names, schemas, risk semantics and result shapes. ToolBraid supplies the missing orchestration layer:
+No real production system or public status page is changed. The bundled providers are deterministic fixtures that exercise the complete control path.
 
-```text
-user intent
-   ↓
-dynamic tool discovery
-   ↓
-semantic capability normalization
-   ↓
-explainable execution DAG
-   ↓
-read-only execution
-   ↓
-human-bound approval
-   ↓
-reversible state changes
-```
+## What the product proves
 
-The challenge scenario combines transport, accommodation and walking-distance providers. The product discovers six tools across four provider documents, quarantines one malicious tool description, normalizes the remaining tools into five canonical capabilities, builds a seven-node plan, executes five safe nodes, and requires human approval before creating two synthetic reversible holds.
+- six independently served provider origins;
+- nine heterogeneous provider tools discovered at runtime;
+- seven canonical capabilities and a nine-node dependency graph;
+- hostile metadata quarantined before capability scoring;
+- automatic fallback only for a failed read-only health provider;
+- two-stage planning: evidence first, exact mutation arguments second;
+- separate human approvals for recovery and customer communication;
+- approval binding to plan revision, origin, tool, schema, arguments, effect, and one-time nonce;
+- idempotent mutations, replay rejection, and registry-change invalidation;
+- an append-only local SHA-256 integrity chain with a final seal.
 
-## Memorable demo result
-
-- Route: Coventry → London, £39.90
-- Stay: Point A Liverpool Street, £145.00
-- Total: £184.90
-- Budget: £250.00
-- Remaining: £65.10
-- Walking access: 13 minutes
-- State changes: two synthetic 15-minute holds, only after approval
-
-No real purchase, payment or external booking occurs.
-
-## Security model
-
-Tool metadata and results are treated as untrusted input.
-
-- Hostile tool descriptions are quarantined before planning.
-- Input and canonical output schemas are validated.
-- Automatic fallback is restricted to read-only operations.
-- Mutating actions never fail over automatically.
-- Approval is created only by the human UI.
-- Approval is fingerprint-bound to the plan, provider, option, price and action set.
-- Approval is atomically consumed before mutation.
-- Replays and post-approval mutations are blocked.
-- The production deployment sends `Permissions-Policy: tools=(self)`.
-
-See [`docs/threat-model.md`](docs/threat-model.md) and [`docs/JUDGING.md`](docs/JUDGING.md).
-
-## Repository map
+## Runtime topology
 
 ```text
-.
-├── index.html                    # Modular development application
-├── css/styles.css
-├── js/
-│   ├── app.js                    # Product orchestration and UI
-│   └── core/                     # Discovery, normalization, planning, execution, approval
-├── providers/                    # Four independently registered provider documents
-├── release/index.html            # Single-file production release
-├── dist/index.html               # Generated modular standalone artifact
-├── deploy/                       # Compressed Vercel transport artifact
-├── tests/                        # Unit and security-contract tests
-├── scripts/                      # Build, validation and E2E tooling
-└── docs/                         # Architecture, evidence and submission material
+Human + browser agent
+          |
+          v
+ToolBraid mission control :4173
+          |
+          +-- service signals :4174
+          +-- service pulse   :4175  (read fallback)
+          +-- source history  :4176
+          +-- deployment      :4177
+          +-- status notice   :4178
+          +-- hostile fixture :4179  (quarantined)
 ```
 
-## Local development
+In a supported browser, each provider calls `document.modelContext.registerTool(...)` from its own document. ToolBraid discovers the returned live registrations with an explicit origin allowlist and executes those opaque tool references.
 
-Requirements:
+Ordinary browsers can run the visibly labelled local verification harness. It mirrors the observable contract for deterministic development and E2E testing, but it is not presented as native-WebMCP compliance evidence.
 
-- Node.js 20+
-- Python 3.11+
-- Playwright Python package
-- Chromium
+## Run locally
+
+Requirements: Node.js 20+; Python and Playwright/Chromium only for browser E2E.
 
 ```bash
-npm run validate:ci
-npm run serve
+# Ordinary-browser verification harness
+npm run dev
+
+# Native multi-origin topology (ports 4173-4179)
+npm run dev:native
 ```
 
 Open `http://127.0.0.1:4173`.
 
-## Build and validation
+## Validate
 
 ```bash
-npm run validate:ci
-npm run build
-npm run e2e:standalone
-npm run check:release
-npm run e2e:release
-npm run build:deploy
-E2E_REPORT=docs/e2e-deployment-bootstrap-validation.json \
-  python3 scripts/e2e-standalone.py deploy/index.html
+npm run validate
+npm run test:e2e
+npm run test:native
 ```
 
-The browser test executes the full flow at desktop and mobile viewports, including discovery, quarantine, planning, safe execution, blocked self-approval, human approval, two holds and replay rejection.
+`npm run validate` checks repository integrity, JavaScript syntax, all engine/provider/state tests, the static dependency graph, security headers, and the generated standalone harness. `npm run test:e2e` drives the real recovery mission at desktop and mobile sizes. `npm run test:native` uses installed Chrome with the experimental WebMCP surface enabled and proves that the same mission executes through the real `document.modelContext` API.
 
-## WebMCP integration
+Latest checked E2E outcome:
 
-When the browser exposes `document.modelContext.registerTool()` or `navigator.modelContext.registerTool()`, ToolBraid registers provider and orchestration tools natively. The deterministic compatibility runtime supports repeatable testing in browsers where the experimental API is unavailable.
+```text
+6 origins · 9 tools · 1 quarantined · 9 plan nodes
+recovery release-1841 · notice notice-r9 · 54 audit entries
+```
 
-The public orchestration surface deliberately contains no approval tool:
+## Repository map
 
-- `toolbraid_plan`
-- `toolbraid_execute_safe`
-- `toolbraid_status`
-- `toolbraid_execute_approved`
+```text
+src/engine/                 provider-neutral discovery, policy, graph, execution, approvals, audit
+src/packs/recovery/         recovery ontology, adapters, and two-stage plan
+src/providers/recovery/     deterministic provider catalog used by the local harness
+providers/recovery/         six native provider documents
+src/app/                    mission controller, state projection, constellation UI
+tests/v2/                   unit, integration, security, and multi-origin contract tests
+scripts/                    servers, checks, standalone build, and browser E2E
+docs/                       architecture, threat model, test evidence, and challenge notes
+```
 
-Human approval remains a UI-only authority.
+## Human authority boundary
 
-## Production
+Agent-callable actions may start discovery, execute safe reads, inspect state, or attempt execution of already approved nodes. They cannot create approval.
 
-The Vercel project is configured by `vercel.json`. The root route serves the audited `release/index.html`, with security headers and no framework build dependency.
+Approval creation is accepted only from a trusted human DOM activation. A synthetic `.click()` is rejected. Immediately before mutation, ToolBraid refreshes and rescans both live tools, verifies and atomically claims the full approval set, then executes recovery before publication. The local SHA-256 chain detects changes to the retained session record but is not a signed external audit log.
 
-## Documentation
+## Current scope
 
-- [Start here](START-HERE.md)
-- [Judge guide](docs/JUDGING.md)
-- [Architecture](docs/architecture.md)
-- [Product specification](docs/product-spec.md)
-- [Threat model](docs/threat-model.md)
-- [Testing](docs/testing.md)
-- [Build provenance](docs/build-provenance.md)
-- [Submission copy](docs/submission-description.md)
-- [Final validation report](docs/final-validation-report.md)
+The engineering build is a native-validated release candidate. It deliberately claims no completed competition submission, public deployment, or final video. Those release gates remain separate from product evidence and are tracked in [Challenge Requirements](docs/challenge-requirements.md).
 
-## Limitations
-
-The included providers are deterministic challenge fixtures, not commercial booking partners. ToolBraid proves the orchestration, safety and WebMCP interaction model without creating real financial transactions. Native WebMCP execution must be judged in a browser build that exposes the experimental API; the compatibility path is included for reliable inspection and automated testing.
+See [Start Here](START-HERE.md), [Architecture](docs/architecture.md), [Threat Model](docs/threat-model.md), and [Testing](docs/testing.md).
 
 ## License
 
-MIT. See [`LICENSE`](LICENSE).
+MIT. See [LICENSE](LICENSE).

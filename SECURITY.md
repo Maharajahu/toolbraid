@@ -1,13 +1,9 @@
 # Security Policy
 
-ToolBraid is an experimental prototype and must not be used for real payments, financial transfers, identity actions, or irreversible transactions.
+ToolBraid is a competition prototype with deterministic providers. Do not connect it to real production infrastructure, public communications, credentials, payments, identity operations, or irreversible actions.
 
-Please report vulnerabilities privately to the repository owner rather than publishing an exploit in an issue. Include:
+The primary invariant is that neither an agent nor a provider can create, widen, refresh, or replay a valid human approval.
 
-- affected commit;
-- reproduction steps;
-- expected and actual approval behavior;
-- whether provider metadata, schema, output, origin, or UI injection is involved;
-- proof that no real third-party account was harmed.
+Please report vulnerabilities privately to the repository owner. Include the affected commit, reproduction steps, expected and actual behavior, the relevant origin/tool/schema, and whether the issue involves discovery, quarantine, mapping, approval, execution, registry invalidation, or audit integrity. Do not test against systems or accounts you do not own.
 
-The primary security invariant is that an agent or provider cannot create a valid human approval record.
+See [docs/threat-model.md](docs/threat-model.md) for implemented controls and residual risks.

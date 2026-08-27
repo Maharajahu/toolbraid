@@ -1,68 +1,20 @@
 {
   "status": "PASS",
-  "runtime": "polyfill",
-  "providers": 4,
-  "discoveredTools": 6,
+  "runtime": "test",
+  "providers": 6,
+  "discoveredTools": 9,
   "quarantined": 1,
-  "planNodes": 7,
-  "recommendation": {
-    "total": 184.9,
-    "travel": {
-      "id": "VR-0745",
-      "provider": "West Midlands Railway",
-      "price": 39.9,
-      "departAt": "07:45",
-      "arriveAt": "09:03"
-    },
-    "stay": {
-      "id": "NS-POINT-A",
-      "label": "Point A Liverpool Street",
-      "provider": "Point A",
-      "price": 145,
-      "address": "13-15 Folgate Street, London E1 6BX"
-    },
-    "walkingMinutes": 13,
-    "distanceKm": 1,
-    "savings": 65.1
-  },
-  "holds": {
-    "travel": {
-      "holdId": "VR-HOLD-VR-0745",
-      "expiresAt": "2026-08-25T23:07:35.918Z",
-      "status": "held",
-      "raw": {
-        "holdId": "VR-HOLD-VR-0745",
-        "status": "held",
-        "expiresAt": "2026-08-25T23:07:35.918Z",
-        "fare": 39.9
-      }
-    },
-    "stay": {
-      "holdId": "NS-HOLD-NS-POINT-A",
-      "expiresAt": "2026-08-25T23:12:35.945Z",
-      "status": "held",
-      "raw": {
-        "holdId": "NS-HOLD-NS-POINT-A",
-        "status": "held",
-        "expiresAt": "2026-08-25T23:12:35.945Z",
-        "checkIn": "2026-08-26",
-        "nights": 1,
-        "nightly": 145
-      }
-    }
-  },
-  "humanApproval": {
-    "source": "human",
-    "channel": "human-ui",
-    "actionIds": [
-      "travel-hold",
-      "stay-hold"
-    ],
-    "approvedAt": "2026-08-25T22:52:35.705Z"
+  "planNodes": 9,
+  "activeRelease": "release-1841",
+  "noticeRevision": "notice-r9",
+  "audit": {
+    "algorithm": "sha256-chain-v1",
+    "entries": 54,
+    "head": "84b4ca37a133a8c9a94ed87a1d5e358ca19720cf53cde8410a57527f8b460aeb"
   },
   "screenshots": [
-    "docs/screenshots/toolbraid-approval.png",
-    "docs/screenshots/toolbraid-completed.png",
-    "docs/screenshots/toolbraid-mobile-approval.png"
+    "docs\\screenshots\\toolbraid-recovery-approval.png",
+    "docs\\screenshots\\toolbraid-recovery-completed.png",
+    "docs\\screenshots\\toolbraid-recovery-mobile.png"
   ]
 }

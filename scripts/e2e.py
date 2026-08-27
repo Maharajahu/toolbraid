@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Deterministic browser validation for the ToolBraid challenge demo."""
+"""Deterministic browser validation for the ToolBraid production-recovery product."""
 from __future__ import annotations
 
 import json
@@ -52,6 +52,17 @@ def assert_equal(actual: Any, expected: Any, label: str) -> None:
         raise AssertionError(f"{label}: expected {expected!r}, got {actual!r}")
 
 
+def assert_desktop_viewport_stable(page: Any, label: str) -> None:
+    metrics = page.evaluate(
+        """() => ({
+          scrollX: window.scrollX,
+          overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        })"""
+    )
+    if abs(metrics["scrollX"]) > 1 or metrics["overflow"] > 1:
+        raise AssertionError(f"{label} desktop viewport shifted: {metrics}")
+
+
 def main() -> int:
     SCREENSHOTS.mkdir(parents=True, exist_ok=True)
     server = subprocess.Popen(
@@ -78,6 +89,7 @@ def main() -> int:
             browser = playwright.chromium.launch(**launch)
             context = browser.new_context(viewport={"width": 1600, "height": 1100}, device_scale_factor=1)
             page = context.new_page()
+            page.set_default_timeout(10_000)
             page.on("pageerror", lambda error: browser_errors.append(f"pageerror: {error}"))
             page.on(
                 "console",
@@ -86,60 +98,153 @@ def main() -> int:
             )
 
             page.goto(BASE_URL, wait_until="networkidle", timeout=30_000)
-            page.wait_for_function("window.ToolBraidApp && window.__toolbraidReady", timeout=10_000)
-            page.evaluate("window.__toolbraidReady")
+            page.wait_for_function("window.__TOOLBRAID_V2__", timeout=10_000)
 
-            initial = page.evaluate("window.ToolBraidApp.snapshot()")
+            initial = page.evaluate("window.__TOOLBRAID_V2__.getState()")
             assert_equal(initial["phase"], "idle", "initial phase")
-            assert_equal(len(initial["providers"]), 4, "provider count")
-            assert_equal(initial["discoveredToolCount"], 6, "provider tool count")
-            assert_equal(sum(1 for item in initial["capabilityMappings"] if item["quarantined"]), 1, "quarantined tool count")
-            capabilities = {
-                item["capability"] for item in initial["capabilityMappings"]
-                if item["capability"] and not item["quarantined"]
-            }
-            assert_equal(
-                capabilities,
-                {"travel.search", "travel.hold", "accommodation.search", "accommodation.hold", "location.distance"},
-                "normalized capability set",
+            if not page.locator("#mission-canvas").is_visible():
+                raise AssertionError("mission canvas is not visible")
+
+            page.keyboard.press("Tab")
+            assert_equal(page.evaluate("document.activeElement?.classList.contains('skip-link')"), True, "skip-link focus")
+            page.keyboard.press("Enter")
+            assert_equal(page.evaluate("document.activeElement?.id"), "mission-canvas", "skip-link target")
+
+            targets = page.evaluate(
+                """() => Object.fromEntries(['edit-objective', 'copy-origin'].map(action => {
+                  const element = document.querySelector(`[data-action="${action}"]`);
+                  const rect = element.getBoundingClientRect();
+                  return [action, { width: rect.width, height: rect.height }];
+                }))"""
             )
+            for action, size in targets.items():
+                if size["width"] < 24 or size["height"] < 24:
+                    raise AssertionError(f"{action} target is below 24px: {size}")
 
-            page.evaluate("window.ToolBraidApp.planMission({})")
-            safe = page.evaluate("window.ToolBraidApp.runSafeSteps('e2e')")
-            assert_equal(safe["phase"], "approval_required", "phase after safe execution")
-            assert_equal(len(safe["plan"]["nodes"]), 7, "plan node count")
-            assert_equal(sum(1 for node in safe["plan"]["nodes"] if node["status"] == "completed"), 5, "completed safe nodes")
-            assert_equal(sum(1 for node in safe["plan"]["nodes"] if node["approvalRequired"] and node["status"] == "pending"), 2, "approval gates")
-            assert safe["recommendation"] is not None
-            assert safe["recommendation"]["total"] <= safe["mission"]["budget"]
-            assert_equal(safe["recommendation"]["stay"]["id"], "NS-POINT-A", "selected accommodation")
-            assert_equal(safe["recommendation"]["total"], 184.9, "recommended total")
+            command_trigger = page.get_by_role("button", name="Open command menu")
+            command_trigger.click()
+            assert_equal(page.evaluate("document.activeElement?.matches('[data-command-input]')"), True, "command focus")
+            page.locator('[data-command-input]').fill("reset")
+            visible_commands = page.locator('[data-command-menu] [data-action]:visible')
+            assert_equal(visible_commands.count(), 1, "filtered command count")
+            assert_equal(visible_commands.first.get_attribute("data-action"), "reset", "filtered command")
+            page.keyboard.press("Escape")
+            assert_equal(page.locator('[data-command-menu]').is_hidden(), True, "command Escape close")
+            page.wait_for_function("document.activeElement?.matches('[data-action=\"open-command\"]')")
+            assert_equal(page.evaluate("document.activeElement?.matches('[data-action=\"open-command\"]')"), True, "command focus return")
 
-            page.screenshot(path=str(SCREENSHOTS / "toolbraid-approval.png"), full_page=True)
+            first_tab = page.locator('[data-panel-tab]').first
+            first_tab.focus()
+            first_tab.press("ArrowRight")
+            assert_equal(page.evaluate("document.activeElement?.getAttribute('data-panel-tab')"), "mapping", "tab arrow navigation")
 
-            blocked = page.evaluate("window.ToolBraidApp.runApprovedActions('webmcp-agent')")
-            assert_equal(blocked["phase"], "approval_required", "agent self-approval guard")
-            assert_equal(blocked["humanApproval"], None, "human approval remains absent")
-            assert_equal(blocked["holds"]["travel"], None, "travel hold blocked before approval")
-            assert_equal(blocked["holds"]["stay"], None, "stay hold blocked before approval")
+            page.get_by_role("button", name="Start mission", exact=True).click()
+            page.wait_for_function("window.__TOOLBRAID_V2__.getState().phase === 'mapping'", timeout=10_000)
+            discovered = page.evaluate("window.__TOOLBRAID_V2__.getEngineSnapshot()")
+            assert_equal(discovered["mode"], "test", "local runtime mode")
+            assert_equal(len(discovered["discoveredTools"]), 9, "discovered tool count")
+            assert_equal(len(discovered["normalization"]["mappings"]), 7, "canonical mappings")
+            assert_equal(len(discovered["normalization"]["quarantined"]), 1, "quarantined tool count")
+            assert_equal(discovered["auditVerified"], True, "discovery audit integrity")
+            if not discovered["plan"]["id"].startswith("recovery-"):
+                raise AssertionError("mission plan does not use a unique recovery identity")
 
-            page.locator('[data-action="approve"]').click()
-            page.wait_for_function("window.ToolBraidApp.snapshot().phase === 'approved'")
-            approved = page.evaluate("window.ToolBraidApp.snapshot()")
-            assert_equal(approved["phase"], "approved", "phase after human approval")
-            assert_equal(approved["humanApproval"]["source"], "human", "approval source")
-            assert_equal(approved["humanApproval"]["channel"], "human-ui", "approval channel")
-            assert_equal(len(approved["humanApproval"]["actionIds"]), 2, "approved action count")
+            graph_focus = page.locator('[data-constellation] [data-node-id][tabindex="0"]')
+            assert_equal(graph_focus.count(), 1, "graph roving tabindex")
+            selected_before = graph_focus.get_attribute("data-node-id")
+            graph_focus.focus()
+            graph_focus.press("ArrowRight")
+            page.wait_for_function("document.activeElement?.matches('[data-constellation] [data-node-id][aria-pressed=\"true\"]')")
+            selected_after = page.evaluate("document.activeElement?.getAttribute('data-node-id')")
+            if not selected_after or selected_after == selected_before:
+                raise AssertionError("graph arrow navigation did not move focus")
+            assert_equal(page.evaluate("document.activeElement?.getAttribute('aria-pressed')"), "true", "graph selected state")
 
-            final = page.evaluate("window.ToolBraidApp.runApprovedActions('e2e')")
-            assert_equal(final["phase"], "completed", "final phase")
-            assert_equal(sum(1 for node in final["plan"]["nodes"] if node["status"] == "completed"), 7, "completed plan nodes")
-            assert final["holds"]["travel"]["holdId"].startswith("VR-HOLD-")
-            assert final["holds"]["stay"]["holdId"].startswith("NS-HOLD-")
-            assert_equal(final["recommendation"]["walkingMinutes"], 13, "walking minutes")
-            assert_equal(final["recommendation"]["savings"], 65.1, "budget remaining")
+            page.get_by_role("button", name="Run 4 safe reads", exact=True).click()
+            page.wait_for_function("window.__TOOLBRAID_V2__.getState().phase === 'review'", timeout=10_000)
+            safe = page.evaluate("window.__TOOLBRAID_V2__.getEngineSnapshot()")
+            assert_equal(safe["plan"]["status"], "approval_required", "phase after safe execution")
+            assert_equal(safe["plan"]["mutationArgumentsFinalized"], True, "mutation arguments finalized")
+            assert_equal(len(safe["results"]), 7, "safe result count")
+            assert any(entry["event"] == "tool.execution_failed" for entry in safe["audit"])
+            assert any(entry["event"] == "tool.failover_selected" for entry in safe["audit"])
+            apply_node = next(node for node in safe["plan"]["nodes"] if node["id"] == "apply-recovery-option")
+            publish_node = next(node for node in safe["plan"]["nodes"] if node["id"] == "publish-status-update")
+            assert_equal(apply_node["arguments"]["recoveryOptionId"], "recovery-option-checkout-r3", "recovery option")
+            assert_equal(apply_node["arguments"]["quoteRevision"], "quote-r3", "quote revision")
+            assert_equal(publish_node["arguments"]["noticeRevision"], "notice-r8", "notice revision")
+            if "release-1842" not in publish_node["arguments"]["body"]:
+                raise AssertionError("customer update was not derived from correlated evidence")
 
-            page.screenshot(path=str(SCREENSHOTS / "toolbraid-completed.png"), full_page=True)
+            page.wait_for_timeout(4_300)
+            assert_desktop_viewport_stable(page, "approval")
+            page.screenshot(path=str(SCREENSHOTS / "toolbraid-recovery-approval.png"), full_page=True)
+            page.locator('[data-approval-dock] [data-action="review-approval"]').click()
+            if not page.locator('[data-approval-dialog]').is_visible():
+                raise AssertionError("approval dialog did not open")
+            page.wait_for_function("document.activeElement?.matches('[data-action=\"close-approval\"]')")
+            assert_equal(page.evaluate("document.activeElement?.matches('[data-action=\"close-approval\"]')"), True, "approval focus entry")
+            page.keyboard.press("Shift+Tab")
+            assert_equal(page.evaluate("document.activeElement?.matches('[data-action=\"approve-publish\"]')"), True, "approval focus trap")
+            page.keyboard.press("Escape")
+            assert_equal(page.locator('[data-approval-dialog]').is_hidden(), True, "approval Escape close")
+            page.wait_for_function("document.activeElement?.matches('[data-approval-dock] [data-action=\"review-approval\"]')")
+            assert_equal(page.evaluate("document.activeElement?.matches('[data-approval-dock] [data-action=\"review-approval\"]')"), True, "approval focus return")
+            page.locator('[data-approval-dock] [data-action="review-approval"]').click()
+            if "recovery-option-checkout-r3" not in page.locator('[data-review-apply-arguments]').inner_text():
+                raise AssertionError("exact recovery arguments are not visible")
+            if "release-1842" not in page.locator('[data-review-publish-body]').inner_text():
+                raise AssertionError("exact customer message is not visible")
+
+            page.evaluate("document.querySelector('[data-action=\"approve-apply\"]').click()")
+            synthetic = page.evaluate("window.__TOOLBRAID_V2__.getState()")
+            assert_equal(synthetic["approvals"]["apply"]["granted"], False, "synthetic approval guard")
+
+            page.locator('[data-action="approve-apply"]').click()
+            page.wait_for_function("window.__TOOLBRAID_V2__.getState().approvals.apply.granted")
+            page.locator('[data-action="approve-publish"]').click()
+            page.wait_for_function("window.__TOOLBRAID_V2__.getState().phase === 'approved'")
+            approved = page.evaluate("window.__TOOLBRAID_V2__.getEngineSnapshot()")
+            assert_equal(len(approved["approvals"]), 2, "separate approval envelopes")
+            assert all(len(envelope["fingerprint"]) == 64 for envelope in approved["approvals"].values())
+
+            page.locator('[data-action="execute-approved"]').click()
+            page.wait_for_function(
+                "window.__TOOLBRAID_V2__.getState().phase === 'complete' && window.__TOOLBRAID_V2__.getEngineSnapshot().seal",
+                timeout=10_000,
+            )
+            final = page.evaluate("window.__TOOLBRAID_V2__.getEngineSnapshot()")
+            assert_equal(final["plan"]["status"], "completed", "final plan status")
+            assert_equal(final["providerState"]["activeReleaseId"], "release-1841", "active release")
+            assert_equal(final["providerState"]["noticeRevision"], "notice-r9", "published notice revision")
+            assert_equal(final["providerState"]["appliedRequestCount"], 1, "recovery mutation count")
+            assert_equal(final["providerState"]["publishedRequestCount"], 1, "publish mutation count")
+            assert_equal(final["auditVerified"], True, "final audit integrity")
+            assert_equal(final["seal"]["algorithm"], "sha256-chain-v1", "audit algorithm")
+            assert_equal(len(final["seal"]["head"]), 64, "audit seal length")
+            audit_events = final["audit"]
+            apply_completed = next(
+                index for index, entry in enumerate(audit_events)
+                if entry["event"] == "node.completed" and entry["details"].get("nodeId") == "apply-recovery-option"
+            )
+            publish_started = next(
+                index for index, entry in enumerate(audit_events)
+                if entry["event"] == "node.started" and entry["details"].get("nodeId") == "publish-status-update"
+            )
+            assert apply_completed < publish_started, "publication started before recovery completed"
+            first_mutation_started = min(
+                index for index, entry in enumerate(audit_events)
+                if entry["event"] == "node.started"
+                and entry["details"].get("nodeId") in {"apply-recovery-option", "publish-status-update"}
+            )
+            claimed_before_execution = [
+                entry for entry in audit_events[:first_mutation_started] if entry["event"] == "approval.claimed"
+            ]
+            assert_equal(len(claimed_before_execution), 2, "atomic approval-set claims")
+
+            page.wait_for_timeout(4_300)
+            assert_desktop_viewport_stable(page, "completed")
+            page.screenshot(path=str(SCREENSHOTS / "toolbraid-recovery-completed.png"), full_page=True)
 
             mobile_context = browser.new_context(
                 viewport={"width": 390, "height": 844},
@@ -154,22 +259,82 @@ def main() -> int:
                 if message.type == "error" else None,
             )
             mobile_page.goto(BASE_URL, wait_until="networkidle", timeout=30_000)
-            mobile_page.wait_for_function("window.ToolBraidApp && window.__toolbraidReady", timeout=10_000)
-            mobile_page.evaluate("window.__toolbraidReady")
-            mobile_page.evaluate("window.ToolBraidApp.planMission({})")
-            mobile_safe = mobile_page.evaluate("window.ToolBraidApp.runSafeSteps('e2e-mobile')")
-            assert_equal(mobile_safe["phase"], "approval_required", "mobile approval phase")
-            assert mobile_page.locator('[data-action="approve"]').is_visible()
+            mobile_page.wait_for_function("window.__TOOLBRAID_V2__", timeout=10_000)
+            mobile_page.evaluate("window.__TOOLBRAID_V2__.start()")
+            mobile_page.wait_for_function("window.__TOOLBRAID_V2__.getState().phase === 'mapping'", timeout=10_000)
+            mobile_page.evaluate("window.__TOOLBRAID_V2__.runSafeReads()")
+            mobile_page.wait_for_function("window.__TOOLBRAID_V2__.getState().phase === 'review'", timeout=10_000)
+            assert mobile_page.locator('[data-approval-dock] [data-action="review-approval"]').is_visible()
             overflow = mobile_page.evaluate(
                 "document.documentElement.scrollWidth - document.documentElement.clientWidth"
             )
             if overflow > 1:
                 raise AssertionError(f"mobile horizontal overflow: {overflow}px")
+            mobile_page.wait_for_timeout(4_300)
             mobile_page.screenshot(
-                path=str(SCREENSHOTS / "toolbraid-mobile-approval.png"),
+                path=str(SCREENSHOTS / "toolbraid-recovery-mobile.png"),
                 full_page=True,
             )
             mobile_context.close()
+
+            narrow_context = browser.new_context(
+                viewport={"width": 320, "height": 800},
+                device_scale_factor=1,
+                is_mobile=True,
+            )
+            narrow_page = narrow_context.new_page()
+            narrow_page.on("pageerror", lambda error: browser_errors.append(f"narrow pageerror: {error}"))
+            narrow_page.on(
+                "console",
+                lambda message: browser_errors.append(f"narrow console.{message.type}: {message.text}")
+                if message.type == "error" else None,
+            )
+            narrow_page.goto(BASE_URL, wait_until="networkidle", timeout=30_000)
+            narrow_page.wait_for_function("window.__TOOLBRAID_V2__", timeout=10_000)
+            narrow_page.evaluate("window.__TOOLBRAID_V2__.start()")
+            narrow_page.wait_for_function("window.__TOOLBRAID_V2__.getState().phase === 'mapping'", timeout=10_000)
+            graph_metrics = narrow_page.evaluate(
+                """() => {
+                  const viewport = document.querySelector('[data-constellation-viewport]');
+                  return { clientWidth: viewport.clientWidth, scrollWidth: viewport.scrollWidth, scrollLeft: viewport.scrollLeft };
+                }"""
+            )
+            if graph_metrics["scrollWidth"] <= graph_metrics["clientWidth"]:
+                raise AssertionError(f"narrow graph is not horizontally scrollable: {graph_metrics}")
+            active_graph_node = narrow_page.locator('[data-constellation] [data-node-id][tabindex="0"]')
+            active_graph_node.focus()
+            active_graph_node.press("End")
+            narrow_page.wait_for_timeout(50)
+            assert_equal(
+                narrow_page.locator('[data-constellation] [data-node-id][tabindex="0"]').count(),
+                1,
+                "narrow graph roving tabindex",
+            )
+            assert_equal(
+                narrow_page.evaluate("document.activeElement?.getAttribute('aria-pressed')"),
+                "true",
+                "narrow graph focus visibility",
+            )
+            if narrow_page.evaluate("document.documentElement.scrollWidth - document.documentElement.clientWidth") > 1:
+                raise AssertionError("320px page has global horizontal overflow")
+            overlaps = narrow_page.evaluate(
+                """() => {
+                  const labels = [...document.querySelectorAll('.tb-node__label')];
+                  const pairs = [['Prepare recovery', 'Mirage Fixture'], ['Release history', 'Release Source']];
+                  const rect = text => labels.find(node => node.textContent.trim() === text)?.getBoundingClientRect();
+                  return pairs.map(([left, right]) => {
+                    const a = rect(left); const b = rect(right);
+                    if (!a || !b) return { pair: [left, right], missing: true };
+                    return {
+                      pair: [left, right],
+                      overlap: a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top,
+                    };
+                  });
+                }"""
+            )
+            if any(result.get("missing") or result.get("overlap") for result in overlaps):
+                raise AssertionError(f"narrow graph label overlap: {overlaps}")
+            narrow_context.close()
 
             browser.close()
             browser = None
@@ -179,18 +344,18 @@ def main() -> int:
 
             report = {
                 "status": "PASS",
-                "runtime": final["runtimeMode"],
-                "providers": len(final["providers"]),
-                "discoveredTools": final["discoveredToolCount"],
-                "quarantined": sum(1 for item in final["capabilityMappings"] if item["quarantined"]),
+                "runtime": final["mode"],
+                "providers": len(final["providerDescriptors"]),
+                "discoveredTools": len(final["discoveredTools"]),
+                "quarantined": len(final["normalization"]["quarantined"]),
                 "planNodes": len(final["plan"]["nodes"]),
-                "recommendation": final["recommendation"],
-                "holds": final["holds"],
-                "humanApproval": final["humanApproval"],
+                "activeRelease": final["providerState"]["activeReleaseId"],
+                "noticeRevision": final["providerState"]["noticeRevision"],
+                "audit": final["seal"],
                 "screenshots": [
-                    str((SCREENSHOTS / "toolbraid-approval.png").relative_to(ROOT)),
-                    str((SCREENSHOTS / "toolbraid-completed.png").relative_to(ROOT)),
-                    str((SCREENSHOTS / "toolbraid-mobile-approval.png").relative_to(ROOT)),
+                    str((SCREENSHOTS / "toolbraid-recovery-approval.png").relative_to(ROOT)),
+                    str((SCREENSHOTS / "toolbraid-recovery-completed.png").relative_to(ROOT)),
+                    str((SCREENSHOTS / "toolbraid-recovery-mobile.png").relative_to(ROOT)),
                 ],
             }
             report_text = json.dumps(report, indent=2)

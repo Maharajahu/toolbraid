@@ -6,15 +6,25 @@
     {
       "source": "/(.*)",
       "headers": [
+        {
+          "key": "Content-Security-Policy",
+          "value": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://signals.toolbraid.dev https://pulse.toolbraid.dev https://source.toolbraid.dev https://deploy.toolbraid.dev https://status.toolbraid.dev https://mirage.toolbraid.dev; frame-src https://signals.toolbraid.dev https://pulse.toolbraid.dev https://source.toolbraid.dev https://deploy.toolbraid.dev https://status.toolbraid.dev https://mirage.toolbraid.dev; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+        },
+        {
+          "key": "Permissions-Policy",
+          "value": "tools=(self \"https://signals.toolbraid.dev\" \"https://pulse.toolbraid.dev\" \"https://source.toolbraid.dev\" \"https://deploy.toolbraid.dev\" \"https://status.toolbraid.dev\" \"https://mirage.toolbraid.dev\")"
+        },
         { "key": "Cross-Origin-Opener-Policy", "value": "same-origin-allow-popups" },
-        { "key": "Permissions-Policy", "value": "tools=(self)" },
+        { "key": "Cross-Origin-Resource-Policy", "value": "same-origin" },
         { "key": "Referrer-Policy", "value": "no-referrer" },
         { "key": "X-Content-Type-Options", "value": "nosniff" }
       ]
     },
     {
       "source": "/index.html",
-      "headers": [ { "key": "Cache-Control", "value": "public, max-age=0, must-revalidate" } ]
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=0, must-revalidate" }
+      ]
     }
   ]
 }

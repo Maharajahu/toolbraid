@@ -1,71 +1,40 @@
-# ToolBraid Judge Guide
+# Judge Guide
 
-## The problem in one sentence
+## The proof mission
 
-WebMCP makes websites callable, but agents still face fragmented names, schemas, providers, risks and workflows.
+Restore checkout after the latest deployment and prepare a customer update, while keeping both production and public communication under separate human authority.
 
-## The product in one sentence
+## What to observe
 
-ToolBraid discovers those fragmented tools, maps them into common capabilities, composes them into an explainable plan, and preserves human authority over state-changing actions.
+1. **WebMCP leverage:** six provider documents contribute nine live tools from explicit origins. ToolBraid retains and executes the opaque registered objects rather than calling provider functions directly.
+2. **Semantic interoperability:** unfamiliar names and schemas become seven canonical capabilities, with confidence and evidence visible in the inspector.
+3. **Execution:** four evidence reads run concurrently; a failed health provider is replaced by a heterogeneous read-only fallback; the planner itself does not change.
+4. **Safety:** hostile metadata is quarantined before scoring. Mutation arguments remain deferred until safe evidence is complete.
+5. **Human collaboration:** production recovery and status publication each show exact origin, tool, schema-bound arguments, and effect in separate approval dialogs.
+6. **Integrity:** synthetic approval attempts fail, registry changes invalidate the plan, both nonces are claimed atomically, recovery completes before publication, providers enforce idempotency, and the local integrity chain is sealed.
 
-## The magic moment
-
-During discovery, ToolBraid sees:
+## Expected completed state
 
 ```text
-SwiftRail.journey_lookup       → travel.search
-NorthStay.rooms_lookup         → accommodation.search
-MapWise.walk_time              → location.distance
-ViaRail.hold_fare              → travel.hold
-NorthStay.hold_room            → accommodation.hold
-NorthStay.instant_free_checkout → QUARANTINED
+providers:       6 origins
+tools:           9 discovered
+quarantine:      1
+capabilities:    7
+graph:           9 nodes
+recovery result: release-1841
+notice result:   notice-r9
+audit:           sha256-chain-v1, 54 entries
 ```
 
-It then generates one seven-node mission from those heterogeneous capabilities.
+All incident, provider, recovery, and notice data are deterministic fixtures. The proof does not touch real production or publish a real customer message.
 
-## What is dynamic
+Native and harness runs are visibly labelled. Only a run whose badge reads **Native WebMCP** is native API evidence.
 
-- Tool metadata is inspected at runtime.
-- Capabilities are inferred from names, descriptions and schemas.
-- Providers are ranked per capability.
-- Read-only alternatives may be selected after failure.
-- Dependencies are represented explicitly in a DAG.
-- Approval is generated from the selected recommendation, not hardcoded before planning.
+## Official criteria coverage
 
-## What is deterministic
+- **WebMCP Leverage:** multi-origin registration, explicit exposure/discovery, opaque handle execution, cancellation, tool-change invalidation, and native Chrome evidence.
+- **Execution:** a coherent objective-to-evidence-to-approval-to-receipt product flow with desktop, mobile, keyboard, CSP, failure, and partial-outcome validation.
+- **Potential Impact:** one control plane reduces the risk and cognitive load of coordinating consequential work across incompatible sites while preserving human authority.
+- **Creativity & Ambition:** semantic capability normalization turns the open web's heterogeneous tools into a visible cross-site execution graph without replacing provider-owned contracts.
 
-The challenge providers return stable synthetic data so judges can reproduce the same flow without API keys, commercial accounts or payment risk. Deterministic data is not the same as hardcoded orchestration: the normalizer, planner, executor, schema validator, fallback policy and approval binding are implemented as reusable modules.
-
-## Safety demonstration
-
-1. A provider publishes a tool description that asks the agent to ignore approval rules.
-2. ToolBraid quarantines it before the planning stage.
-3. Read-only nodes execute automatically.
-4. The two mutation nodes remain blocked.
-5. Calling the approved-execution tool before human approval returns `approval_required`.
-6. The UI creates an approval record fingerprinted to the plan, providers, option IDs and prices.
-7. The approval is consumed before the holds execute.
-8. A second execution attempt returns `approval_replay_blocked`.
-
-## WebMCP is central
-
-Without WebMCP, the providers would require private API integrations or brittle visual automation. ToolBraid consumes provider-published tools, not DOM selectors. The system exists specifically to compose WebMCP capabilities across providers.
-
-## Honest scope
-
-- Four provider documents are included in the deterministic challenge harness.
-- Holds are synthetic and reversible.
-- No payment or final booking occurs.
-- The native registration path activates when the browser exposes WebMCP.
-- The compatibility path makes the exact same orchestration testable in ordinary Chromium.
-
-## Suggested inspection order
-
-1. Live app
-2. `release/index.html`
-3. `js/core/normalizer.js`
-4. `js/core/planner.js`
-5. `js/core/executor.js`
-6. `js/core/approval.js`
-7. `tests/`
-8. `docs/e2e-release-validation.json`
+The official criteria are equally weighted. Claims above describe implemented evidence, not a predicted judge score.

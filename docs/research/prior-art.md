@@ -119,14 +119,14 @@ Wording deliberately avoided:
 
 Those claims are too broad or contradicted by existing infrastructure and research.
 
-## Why the challenge demo remains ambitious
+## Why the proof mission remains ambitious
 
-The demo makes WebMCP central rather than decorative:
+The recovery proof mission makes WebMCP central rather than decorative:
 
 - the providers are actual WebMCP applications;
 - the orchestrator is itself WebMCP-operable;
 - discovery happens at runtime;
 - mappings are derived rather than prewired by provider ID;
-- the DAG uses outputs across three provider sites;
+- the DAG uses outputs across six provider origins;
 - the adversarial fixture changes the plan through quarantine;
 - human approval is a real execution precondition, not a modal shown after the action.

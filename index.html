@@ -3,148 +3,267 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#071014">
-  <meta name="description" content="ToolBraid dynamically discovers, normalizes, plans, and executes WebMCP capabilities with human approval.">
-  <title>ToolBraid · WebMCP mission control</title>
+  <meta name="theme-color" content="#041020">
+  <meta name="description" content="ToolBraid turns WebMCP tools from many origins into one explainable, human-authorized execution graph.">
+  <title>ToolBraid · Production recovery mission control</title>
   <link rel="icon" href="./assets/favicon.svg" type="image/svg+xml">
   <link rel="manifest" href="./manifest.webmanifest">
-  <link rel="stylesheet" href="./styles.css">
+  <link rel="stylesheet" href="./src/app/mission-control.css">
 </head>
-<body>
-  <div class="noise" aria-hidden="true"></div>
-  <header class="topbar">
-    <a class="brand" href="./" aria-label="ToolBraid home">
-      <svg class="brand-mark" viewBox="0 0 52 52" role="img" aria-label="Three capability paths braided together">
-        <rect x="1" y="1" width="50" height="50" rx="14" fill="none" stroke="currentColor" stroke-opacity=".12"/>
-        <path d="M10 12c16 0 16 28 32 28" class="strand strand-a"/>
-        <path d="M10 26c16 0 16-14 32-14" class="strand strand-b"/>
-        <path d="M10 40c16 0 16-14 32-14" class="strand strand-c"/>
-      </svg>
-      <span><strong>ToolBraid</strong><small>WebMCP mission control</small></span>
-    </a>
-    <div class="topbar-status" aria-label="Runtime status">
-      <span class="status-pill" id="runtime-pill"><i></i><span data-runtime-label>Detecting WebMCP</span></span>
-      <span class="status-pill"><b data-provider-count>0</b> provider documents</span>
-      <span class="status-pill"><b data-tool-count>0</b> discovered tools</span>
-    </div>
-    <button class="ghost-button compact" type="button" data-action="reset">Reset mission</button>
-  </header>
+<body data-phase="idle">
+  <a class="skip-link" href="#mission-canvas">Skip to mission canvas</a>
 
-  <main class="app-shell">
-    <section class="mission-panel surface" aria-labelledby="mission-title">
-      <div class="section-heading">
-        <div><p class="eyebrow">01 · Human intent</p><h1 id="mission-title">Give the web a goal, not a click path.</h1></div>
-        <span class="human-badge">Human controlled</span>
+  <div class="app-frame">
+    <header class="command-bar">
+      <a class="brand-lockup" href="./" aria-label="ToolBraid home">
+        <svg class="brand-symbol" viewBox="0 0 44 44" aria-hidden="true">
+          <circle class="brand-symbol-frame" cx="22" cy="22" r="20"></circle>
+          <path class="brand-strand brand-strand-a" d="M7 15c7-8 13-8 18 0l6 9c2 3 4 3 6 0"></path>
+          <path class="brand-strand brand-strand-b" d="M7 29c7 8 13 8 18 0l6-9c2-3 4-3 6 0"></path>
+          <path class="brand-strand brand-strand-c" d="M6 22c5-6 9-6 13 0l7 10M19 22l7-10c3-4 7-4 11 0"></path>
+          <circle class="brand-knot" cx="22" cy="22" r="2.2"></circle>
+        </svg>
+        <span><strong>ToolBraid</strong><small>WebMCP control plane</small></span>
+      </a>
+
+      <div class="mission-context" aria-label="Current mission">
+        <span class="mission-context-label">Mission</span>
+        <strong>Production recovery</strong>
+        <span class="mission-context-divider" aria-hidden="true"></span>
+        <span data-phase-label aria-live="polite">Ready for objective</span>
       </div>
 
-      <label class="field-label" for="goal">Mission</label>
-      <textarea id="goal" data-field="goal" rows="5">Find transport from Coventry to London tomorrow, find a hotel near Amazon LHR16, keep the total under £250, compare the options, and ask me before holding anything.</textarea>
-
-      <div class="constraint-grid">
-        <label><span>Origin</span><input data-field="origin" value="Coventry" autocomplete="off"></label>
-        <label><span>Destination</span><input data-field="destination" value="London" autocomplete="off"></label>
-        <label class="span-2"><span>Final destination</span><input data-field="destinationAddress" value="1 Principal Place, London EC2A 2FA" autocomplete="off"></label>
-        <label><span>Travel date</span><input data-field="date" type="date"></label>
-        <label><span>Total budget</span><span class="money-field"><b>£</b><input data-field="budget" type="number" min="1" value="250"></span></label>
+      <div class="runtime-cluster" aria-label="Runtime status">
+        <span class="runtime-chip verified"><i></i><span data-runtime-label aria-live="polite">Detecting runtime</span></span>
+        <span class="runtime-chip"><b data-provider-count>0</b> origins</span>
+        <span class="runtime-chip lock"><span class="chip-icon" data-ui-icon="lock" aria-hidden="true"></span> Human authority</span>
+        <span class="mission-clock" data-mission-clock>00:00:00</span>
       </div>
 
-      <div class="mission-actions">
-        <button class="primary-button" type="button" data-action="plan"><span>Build capability plan</span><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 10h11m-4-4 4 4-4 4"/></svg></button>
-        <button class="secondary-button" type="button" data-action="run-safe" disabled>Run safe steps</button>
+      <div class="command-actions">
+        <button class="icon-button command-trigger" type="button" data-action="open-command" aria-label="Open command menu">
+          <kbd>⌘K</kbd><span data-ui-icon="search" aria-hidden="true"></span>
+        </button>
+        <button class="icon-button" type="button" data-action="reset" aria-label="Reset mission"><span data-ui-icon="reset" aria-hidden="true"></span></button>
       </div>
+    </header>
 
-      <div class="agent-contract">
-        <div class="agent-contract-head"><span class="mini-icon">⌘</span><strong>Agent contract</strong></div>
-        <p>The page exposes orchestration tools through <code>document.modelContext</code>. Read-only work can run automatically. External state changes remain blocked until a person approves them in this UI.</p>
-        <div class="contract-tools"><code>toolbraid.plan_mission</code><code>toolbraid.execute_safe_steps</code><code>toolbraid.execute_approved_actions</code></div>
-      </div>
+    <nav class="navigation-rail" aria-label="Mission views">
+      <button class="rail-button active" type="button" data-view="topology" aria-label="Provider topology" aria-current="page">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="2"></circle><circle cx="5" cy="5" r="2"></circle><circle cx="19" cy="5" r="2"></circle><circle cx="5" cy="19" r="2"></circle><circle cx="19" cy="19" r="2"></circle><path d="m10.5 10.5-4-4m7-1 4 4m-7 4-4 4m7 0 4-4"></path></svg>
+        <span>Topology</span>
+      </button>
+      <button class="rail-button" type="button" data-view="evidence" aria-label="Evidence">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h14v18H5zM8 8h8M8 12h8M8 16h5"></path></svg>
+        <span>Evidence</span>
+      </button>
+      <button class="rail-button" type="button" data-view="approvals" aria-label="Approvals">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 11V8a5 5 0 0 1 10 0v3M5 11h14v10H5z"></path></svg>
+        <i data-approval-count>2</i><span>Approvals</span>
+      </button>
+      <button class="rail-button" type="button" data-view="audit" aria-label="Audit">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12a8 8 0 1 0 2-5.3M4 4v5h5M12 7v5l3 2"></path></svg>
+        <span>Audit</span>
+      </button>
+      <button class="rail-button rail-bottom" type="button" data-view="help" aria-label="Help">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M9.8 9a2.4 2.4 0 1 1 3.7 2c-1 .6-1.5 1.1-1.5 2M12 17h.01"></path></svg>
+        <span>Help</span>
+      </button>
+    </nav>
 
-      <div class="mission-metrics" aria-label="Mission metrics">
-        <div><span>Capabilities</span><strong data-metric="capabilities">0</strong></div>
-        <div><span>Quarantined</span><strong data-metric="quarantined">0</strong></div>
-        <div><span>Approval gates</span><strong data-metric="approvals">0</strong></div>
-      </div>
-    </section>
+    <main class="workspace" id="mission-canvas" tabindex="-1">
+      <section class="topology-stage" aria-labelledby="topology-title">
+        <div class="stage-grid" aria-hidden="true"></div>
+        <div class="reactive-lens" data-reactive-lens aria-hidden="true"></div>
+        <header class="stage-header">
+          <div>
+            <p class="section-kicker">Live provider topology</p>
+            <h1 id="topology-title">Evidence constellation</h1>
+          </div>
+          <ol class="mission-trajectory" aria-label="Mission progress">
+            <li data-phase-step="discovering"><span data-ui-icon="provider" aria-hidden="true"></span><b>Discover</b><small>Origins</small></li>
+            <li data-phase-step="mapping"><span data-ui-icon="braid" aria-hidden="true"></span><b>Normalize</b><small>Ontology</small></li>
+            <li data-phase-step="reading"><span data-ui-icon="pulse" aria-hidden="true"></span><b>Observe</b><small>Safe reads</small></li>
+            <li data-phase-step="review"><span data-ui-icon="lock" aria-hidden="true"></span><b>Authorize</b><small>Exact scope</small></li>
+            <li data-phase-step="executing"><span data-ui-icon="send" aria-hidden="true"></span><b>Execute</b><small>Approved</small></li>
+          </ol>
+          <div class="stage-tools">
+            <button class="guided-control" type="button" data-action="guided-tour" aria-pressed="false">
+              <span data-guided-icon data-ui-icon="play" aria-hidden="true"></span>
+              <span data-guided-label>Guided preview</span>
+            </button>
+            <span class="live-status"><i></i> Live graph</span>
+            <button class="stage-tool" type="button" data-action="zoom-out" aria-label="Zoom out">−</button>
+            <output data-zoom-level aria-live="polite">100%</output>
+            <button class="stage-tool" type="button" data-action="zoom-in" aria-label="Zoom in">+</button>
+            <button class="stage-tool" type="button" data-action="fit-graph" aria-label="Fit graph">⌗</button>
+          </div>
+        </header>
 
-    <section class="orchestration-panel surface" aria-labelledby="graph-title">
-      <div class="orchestration-header">
-        <div><p class="eyebrow">02 · Capability braid</p><h2 id="graph-title">Multi-provider execution graph</h2></div>
-        <div class="phase-chip" data-phase-chip="idle"><span></span><b data-phase-label>Waiting for mission</b></div>
-      </div>
-      <div class="progress-shell" aria-label="Plan progress">
-        <div class="progress-copy"><span data-progress-copy>No plan created</span><b data-progress-percent>0%</b></div>
-        <div class="progress-track"><span data-progress-bar></span></div>
-      </div>
+        <article class="mission-brief" data-mission-brief>
+          <div class="mission-brief-head">
+            <span class="brief-icon" data-ui-icon="mission" aria-hidden="true"></span>
+            <div><p data-mission-kicker>Human objective</p><strong data-mission-title>Restore checkout safely</strong></div>
+            <button type="button" data-action="edit-objective" aria-label="Edit mission objective">Edit</button>
+          </div>
+          <p data-objective-copy>Diagnose checkout after the latest deployment, prepare a safe recovery and a customer update. Do not change production or publish without my approval.</p>
+          <div class="mission-constraints">
+            <span data-constraint="environment">Production</span><span data-constraint="mode">Read first</span><span data-constraint="authority">Exact approval</span>
+          </div>
+          <button class="primary-action" type="button" data-action="start-mission">
+            <span data-start-label>Start mission</span><span data-start-icon aria-hidden="true">→</span>
+          </button>
+        </article>
 
-      <div class="empty-graph" data-empty-graph>
-        <div class="empty-orbit" aria-hidden="true"><span class="orbit orbit-a"></span><span class="orbit orbit-b"></span><span class="orbit orbit-c"></span><svg viewBox="0 0 52 52"><path d="M10 12c16 0 16 28 32 28"/><path d="M10 26c16 0 16-14 32-14"/><path d="M10 40c16 0 16-14 32-14"/></svg></div>
-        <h3>One intent. Many provider capabilities. One accountable plan.</h3>
-        <p>ToolBraid will discover each provider's WebMCP tools, map incompatible names and schemas into common capabilities, then build a dependency-aware plan.</p>
-      </div>
-      <div class="execution-graph" data-graph hidden></div>
+        <section class="provider-legend" aria-label="Provider status legend">
+          <p>Provider origins</p>
+          <span><i class="healthy"></i>Healthy <b data-healthy-count>0</b></span>
+          <span><i class="degraded"></i>Degraded <b data-degraded-count>0</b></span>
+          <span><i class="quarantined"></i>Quarantined <b data-quarantine-count>0</b></span>
+          <button type="button" data-action="swap-provider">Test provider swap <span>↔</span></button>
+          <div class="provider-swap-status" data-swap-status hidden><span data-ui-icon="check" aria-hidden="true"></span><p><strong>Pulse Monitor substituted</strong><small>Read-only fallback · healthy</small></p></div>
+        </section>
 
-      <article class="recommendation-card" data-recommendation hidden>
-        <div class="recommendation-top"><div><p class="eyebrow">Selected mission</p><h3>Best feasible combination</h3></div><span class="recommendation-total" data-recommendation-total>£0</span></div>
-        <div class="recommendation-grid">
-          <div><span>Rail</span><strong data-recommendation-rail>—</strong><small data-recommendation-times>—</small></div>
-          <div><span>Stay</span><strong data-recommendation-stay>—</strong><small data-recommendation-address>—</small></div>
-          <div><span>Access</span><strong data-recommendation-walk>—</strong><small data-recommendation-distance>—</small></div>
-          <div><span>Budget remaining</span><strong data-recommendation-savings>—</strong><small>before payment or final booking</small></div>
+        <div class="constellation-viewport" data-constellation-viewport role="region" aria-label="Interactive provider constellation. On small screens, scroll horizontally to inspect all nodes." tabindex="0">
+          <div class="constellation-placeholder" data-constellation-placeholder>
+            <div class="placeholder-orbits" aria-hidden="true"><i></i><i></i><i></i><b></b></div>
+            <strong>One objective. Many origins. One accountable plan.</strong>
+            <p>Start the mission to discover native WebMCP tools and watch the execution graph assemble.</p>
+          </div>
+          <div class="constellation-mount" data-constellation hidden></div>
         </div>
-      </article>
 
-      <article class="completion-card" data-completion hidden>
-        <div class="completion-icon">✓</div>
-        <div><p class="eyebrow">Mission staged</p><h3>Both reversible holds were created.</h3><p data-completion-copy>No purchase was made. The user retains the final checkout decision on each provider site.</p></div>
-      </article>
-    </section>
+        <section class="parallel-reads" aria-labelledby="parallel-title">
+          <header><div><p>Parallel evidence</p><h2 id="parallel-title">Read-only batch</h2></div><span data-read-summary aria-live="polite">0 / 4</span></header>
+          <ol data-read-list>
+            <li data-read="health"><i></i><span><strong>Service health</strong><small>Waiting</small></span><time>—</time></li>
+            <li data-read="release"><i></i><span><strong>Release history</strong><small>Waiting</small></span><time>—</time></li>
+            <li data-read="deployment"><i></i><span><strong>Deployment state</strong><small>Waiting</small></span><time>—</time></li>
+            <li data-read="notice"><i></i><span><strong>Status notice</strong><small>Waiting</small></span><time>—</time></li>
+          </ol>
+        </section>
 
-    <aside class="inspector-panel surface" aria-labelledby="inspector-title">
-      <div class="inspector-header"><div><p class="eyebrow">03 · Evidence</p><h2 id="inspector-title">Why each action exists</h2></div><span class="live-dot">Live</span></div>
-      <div class="tabs" role="tablist" aria-label="Inspector views">
-        <button class="tab active" type="button" role="tab" aria-selected="true" data-tab="mappings">Mappings</button>
-        <button class="tab" type="button" role="tab" aria-selected="false" data-tab="audit">Audit</button>
-        <button class="tab" type="button" role="tab" aria-selected="false" data-tab="state">State</button>
-      </div>
-      <div class="tab-panel active" data-panel="mappings"><div class="inspector-empty" data-mappings-empty><span>∿</span><p>Tool mappings will appear after discovery.</p></div><div class="mapping-list" data-mapping-list></div></div>
-      <div class="tab-panel" data-panel="audit"><div class="audit-list" data-audit-list><div class="inspector-empty"><span>◷</span><p>The execution trace is empty.</p></div></div></div>
-      <div class="tab-panel" data-panel="state"><pre class="state-view" data-state-view>{ "phase": "booting" }</pre></div>
-    </aside>
+        <section class="approval-dock" data-approval-dock aria-labelledby="approval-gate-title">
+          <div class="approval-gate-copy">
+            <span class="gate-lock" data-ui-icon="lock" aria-hidden="true"></span>
+            <div>
+              <p data-approval-kicker>Human checkpoint</p>
+              <h2 id="approval-gate-title" data-approval-title>Approval required</h2>
+              <small data-approval-detail aria-live="polite">External mutations stay cryptographically bound and locked.</small>
+              <code class="audit-seal" data-audit-hash hidden>Audit seal pending</code>
+            </div>
+          </div>
+          <button class="mutation-card" type="button" data-node-target="apply-recovery" data-action="inspect-mutation">
+            <span class="mutation-icon" data-ui-icon="rollback" aria-hidden="true"></span><span><small data-apply-kicker>Production mutation</small><strong data-apply-title>Apply recovery</strong><em data-apply-state>Locked</em><code class="receipt-id" data-apply-receipt hidden>RCV-1841</code></span><i data-ui-icon="lock" aria-hidden="true"></i>
+          </button>
+          <button class="mutation-card" type="button" data-node-target="publish-update" data-action="inspect-mutation">
+            <span class="mutation-icon" data-ui-icon="send" aria-hidden="true"></span><span><small data-publish-kicker>Customer communication</small><strong data-publish-title>Publish update</strong><em data-publish-state>Locked</em><code class="receipt-id" data-publish-receipt hidden>NTC-R9</code></span><i data-ui-icon="lock" aria-hidden="true"></i>
+          </button>
+          <button class="review-action" type="button" data-action="review-approval" disabled>Review exact effects <span aria-hidden="true">→</span></button>
+        </section>
+      </section>
 
-    <section class="provider-network surface" aria-labelledby="providers-title">
-      <div class="provider-network-head">
-        <div><p class="eyebrow">04 · Independent capability providers</p><h2 id="providers-title">Live provider documents inside one browser context</h2></div>
-        <p>Each frame owns its UI, state, schemas, and WebMCP tool implementations. The deterministic challenge deployment uses same-origin provider documents; the runtime also implements origin-aware WebMCP discovery rules. ToolBraid does not call private provider APIs.</p>
-      </div>
-      <div class="provider-grid">
-        <article class="provider-frame-card" data-provider-card="vectorrail"><div class="provider-card-head"><span class="provider-color rail"></span><strong>Transport</strong><i data-provider-status="vectorrail">Connecting</i></div><iframe src="./providers/rail.html" title="VectorRail WebMCP provider" allow="tools"></iframe></article>
-        <article class="provider-frame-card" data-provider-card="nestsquare"><div class="provider-card-head"><span class="provider-color stay"></span><strong>Accommodation</strong><i data-provider-status="nestsquare">Connecting</i></div><iframe src="./providers/stay.html" title="NestSquare WebMCP provider" allow="tools"></iframe></article>
-        <article class="provider-frame-card" data-provider-card="walkmesh"><div class="provider-card-head"><span class="provider-color geo"></span><strong>Location</strong><i data-provider-status="walkmesh">Connecting</i></div><iframe src="./providers/geo.html" title="WalkMesh WebMCP provider" allow="tools"></iframe></article>
-        <article class="provider-frame-card adversarial" data-provider-card="mirage"><div class="provider-card-head"><span class="provider-color rogue"></span><strong>Adversarial fixture</strong><i data-provider-status="mirage">Connecting</i></div><iframe src="./providers/rogue.html" title="Mirage adversarial WebMCP fixture" allow="tools"></iframe></article>
-      </div>
-    </section>
-  </main>
+      <aside class="evidence-panel" aria-labelledby="evidence-title">
+        <header class="panel-header">
+          <div><p class="section-kicker">Context inspector</p><h2 id="evidence-title" data-panel-heading>Evidence</h2></div>
+          <span class="panel-live"><i></i>Live</span>
+        </header>
+        <div class="panel-tabs" role="tablist" aria-label="Inspector sections">
+          <button class="active" id="tab-evidence" type="button" role="tab" aria-selected="true" aria-controls="panel-evidence" tabindex="0" data-panel-tab="evidence">Evidence</button>
+          <button id="tab-mapping" type="button" role="tab" aria-selected="false" aria-controls="panel-mapping" tabindex="-1" data-panel-tab="mapping">Mapping</button>
+          <button id="tab-audit" type="button" role="tab" aria-selected="false" aria-controls="panel-audit" tabindex="-1" data-panel-tab="audit">Audit</button>
+        </div>
 
-  <div class="approved-actionbar" data-approved-actionbar hidden>
-    <div><span>✓</span><p><strong>Human approval recorded</strong><small>Only selected reversible actions can execute.</small></p></div>
-    <button class="primary-button" type="button" data-action="run-approved">Execute approved actions</button>
+        <div class="inspector-body" id="panel-evidence" role="tabpanel" aria-labelledby="tab-evidence" tabindex="0" data-panel-content="evidence">
+          <section class="selected-node" data-selected-node>
+            <div class="selected-node-icon" data-selected-icon aria-hidden="true">◎</div>
+            <div><small data-selected-kind>Mission</small><h3 data-selected-title>Production recovery</h3><p data-selected-description>Select a node to inspect its origin, evidence and execution status.</p></div>
+          </section>
+
+          <section class="confidence-block">
+            <div class="block-title"><span>Semantic confidence</span><strong data-confidence-value>—</strong></div>
+            <progress class="confidence-track" data-confidence-bar max="100" value="0" aria-label="Semantic confidence">0%</progress>
+            <div class="confidence-meta"><span>Canonical match</span><b data-mapped-concepts>0 / 7 capabilities</b></div>
+          </section>
+
+          <section class="origin-identity">
+            <div class="block-title"><span>Origin identity</span><button type="button" data-action="copy-origin">Copy</button></div>
+            <dl>
+              <div><dt>Provider</dt><dd data-origin-provider>Not selected</dd></div>
+              <div><dt>Origin</dt><dd><code data-origin-value>—</code></dd></div>
+              <div><dt>Tool</dt><dd><code data-tool-value>—</code></dd></div>
+              <div><dt>Schema</dt><dd><code data-schema-value>—</code></dd></div>
+            </dl>
+          </section>
+
+          <section class="signal-card clean" data-signal-card>
+              <div><span data-signal-icon data-ui-icon="shield" aria-hidden="true"></span><p><small>Metadata security</small><strong data-signal-status>Awaiting discovery</strong></p></div>
+            <b data-signal-count>0 signals</b>
+          </section>
+
+          <section class="evidence-stack">
+            <div class="block-title"><span>Evidence trace</span><b data-evidence-count>0 items</b></div>
+            <div data-evidence-list>
+              <p class="empty-copy">Evidence will appear as safe reads complete.</p>
+            </div>
+          </section>
+        </div>
+
+        <div class="inspector-body" id="panel-mapping" role="tabpanel" aria-labelledby="tab-mapping" tabindex="0" data-panel-content="mapping" hidden>
+          <section class="mapping-summary"><p>Capability pack</p><h3>Production recovery</h3><span>7 canonical capabilities</span></section>
+          <div class="mapping-list" data-mapping-list></div>
+        </div>
+
+        <div class="inspector-body audit-body" id="panel-audit" role="tabpanel" aria-labelledby="tab-audit" tabindex="0" data-panel-content="audit" hidden>
+          <section class="audit-overview" aria-label="Audit summary">
+            <div><small>Phase summaries</small><strong data-audit-overview>No recorded phases</strong></div>
+            <code data-audit-panel-hash>Unsealed</code>
+          </section>
+          <div class="audit-stream" data-audit-list><p class="empty-copy">The audit stream is empty.</p></div>
+        </div>
+      </aside>
+    </main>
+
+    <footer class="activity-ticker" aria-label="Live mission activity">
+      <div class="ticker-title"><span>Audit</span><i></i><b data-ticker-status>Ready</b></div>
+      <div class="ticker-events" data-ticker-events><span><time>—</time> Mission waiting for human objective</span></div>
+      <button type="button" data-action="open-audit">View full audit <span>↗</span></button>
+    </footer>
   </div>
 
-  <div class="approval-backdrop" data-approval-backdrop hidden></div>
-  <section class="approval-drawer" data-approval-drawer hidden role="dialog" aria-modal="true" aria-labelledby="approval-title">
-    <div class="drawer-grip" aria-hidden="true"></div>
-    <button class="drawer-close" type="button" data-action="close-approval" aria-label="Close approval dialog">×</button>
-    <p class="eyebrow">Human checkpoint</p>
-    <h2 id="approval-title">Review external state changes</h2>
-    <p class="drawer-copy">Search and comparison are complete. These reversible actions cannot execute until a person approves them.</p>
-    <div class="approval-actions" data-approval-actions></div>
-    <div class="approval-footer">
-      <div class="approval-note"><span>🔒</span><p><strong>No payment and no final booking.</strong><small>Only temporary holds will be created.</small></p></div>
-      <div class="approval-buttons"><button class="ghost-button" type="button" data-action="decline">Decline</button><button class="primary-button" type="button" data-action="approve">Approve selected actions</button></div>
+  <div class="dialog-backdrop" data-dialog-backdrop hidden aria-hidden="true"></div>
+  <section class="approval-dialog" data-approval-dialog hidden role="dialog" aria-modal="true" aria-labelledby="approval-title" aria-describedby="approval-description" tabindex="-1">
+    <header>
+      <div><p class="section-kicker">Human authority · exact scope</p><h2 id="approval-title">Review external mutations</h2></div>
+      <button class="dialog-close" type="button" data-action="close-approval" aria-label="Close approval review">×</button>
+    </header>
+    <p class="dialog-intro" id="approval-description">Each approval is separate, single-use and bound to the exact origin, tool, schema and arguments shown below.</p>
+    <div class="approval-review-grid">
+      <article class="approval-review" data-approval-review="apply">
+        <div class="approval-review-head"><span data-ui-icon="rollback" aria-hidden="true"></span><div><small>Production mutation</small><h3>Apply recovery</h3></div><b data-review-apply-state>Locked</b></div>
+        <dl><div><dt>Origin</dt><dd data-review-apply-origin>Awaiting mapping</dd></div><div><dt>Tool</dt><dd><code data-review-apply-tool>—</code></dd></div><div><dt>Effect</dt><dd data-review-apply-effect>Awaiting verified evidence</dd></div><div><dt>Risk</dt><dd>Reversible production change</dd></div></dl>
+        <pre data-review-apply-arguments tabindex="-1">{}</pre>
+        <button type="button" data-action="approve-apply">Approve apply recovery</button>
+      </article>
+      <article class="approval-review" data-approval-review="publish">
+        <div class="approval-review-head"><span data-ui-icon="send" aria-hidden="true"></span><div><small>Customer communication</small><h3>Publish update</h3></div><b data-review-publish-state>Locked</b></div>
+        <dl><div><dt>Origin</dt><dd data-review-publish-origin>Awaiting mapping</dd></div><div><dt>Tool</dt><dd><code data-review-publish-tool>—</code></dd></div><div><dt>Effect</dt><dd data-review-publish-effect>Awaiting verified evidence</dd></div><div><dt>Risk</dt><dd>Public external mutation</dd></div></dl>
+        <blockquote data-review-publish-body>Customer-visible content appears after the safe evidence phase.</blockquote>
+        <pre data-review-publish-arguments tabindex="-1">{}</pre>
+        <button type="button" data-action="approve-publish">Approve publish update</button>
+      </article>
     </div>
+    <footer><div><span data-ui-icon="lock" aria-hidden="true"></span><p><strong data-approval-summary aria-live="polite">0 of 2 approved</strong><small>Changing any bound field invalidates its approval.</small></p></div><button class="execute-action" type="button" data-action="execute-approved" disabled>Execute approved actions <span aria-hidden="true">→</span></button></footer>
   </section>
 
-  <div class="toast-region" data-toast-region aria-live="polite"></div>
-  <script type="module" src="./js/app.js"></script>
+  <section class="command-menu" data-command-menu hidden role="dialog" aria-modal="true" aria-labelledby="command-menu-title" tabindex="-1">
+    <h2 class="visually-hidden" id="command-menu-title">Command menu</h2>
+    <label><span data-ui-icon="search" aria-hidden="true"></span><input type="search" data-command-input aria-label="Filter commands" placeholder="Type a command…" autocomplete="off"></label>
+    <div><button type="button" data-action="guided-tour"><span>Run guided preview</span><kbd>G</kbd></button><button type="button" data-action="start-mission"><span>Start production recovery</span><kbd>↵</kbd></button><button type="button" data-action="review-approval"><span>Review approvals</span><kbd>R</kbd></button><button type="button" data-action="reset"><span>Reset mission</span><kbd>⌫</kbd></button></div>
+  </section>
+
+  <div class="toast-region" data-toast-region role="status" aria-live="polite" aria-atomic="true"></div>
+  <div data-provider-runtime hidden aria-hidden="true"></div>
+  <script type="module" src="./src/app/main.js"></script>
 </body>
 </html>

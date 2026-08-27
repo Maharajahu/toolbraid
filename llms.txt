@@ -1,11 +1,14 @@
 # ToolBraid
 
-ToolBraid is a WebMCP Challenge application that dynamically discovers provider tools, normalizes incompatible schemas into canonical capabilities, builds an explainable multi-provider execution graph, executes read-only steps, and requires explicit plan-bound human approval before reversible state changes.
+ToolBraid is a browser-native semantic and policy control plane for WebMCP. It discovers live provider tools across explicit origins, quarantines hostile metadata, maps heterogeneous schemas into canonical capabilities, builds an explainable dependency graph, executes read-only work, and requires human-created approvals before exact external mutations.
 
-## WebMCP tools exposed by this page
-- toolbraid.plan_mission
-- toolbraid.execute_safe_steps
-- toolbraid.execute_approved_actions
-- toolbraid.inspect_state
+## Recovery proof mission
+Restore checkout after the latest deployment, select the safest recovery option, and prepare a customer update without changing production or publishing until the human approves each action.
 
-The deterministic public demo uses same-origin provider documents so judges can reproduce the complete workflow without third-party accounts. Provider metadata and outputs are treated as untrusted input.
+## Agent-accessible surface
+- start discovery and planning
+- execute safe read-only steps
+- inspect current state and audit evidence
+- execute mutations only when matching human approval envelopes already exist
+
+There is deliberately no agent-callable approval creator. Provider metadata and results are untrusted data. The local verification harness is not native-WebMCP compliance evidence.

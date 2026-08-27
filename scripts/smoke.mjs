@@ -53,12 +53,34 @@ try {
   assert.equal(rootResponse.headers.get('x-content-type-options'), 'nosniff');
   assert.equal(rootResponse.headers.get('referrer-policy'), 'no-referrer');
   const html = await rootResponse.text();
-  assert.equal((html.match(/<iframe\b/g) ?? []).length, 4, 'four provider documents must be present');
-  assert.match(html, /allow="tools"/);
+  assert.equal((html.match(/<iframe\b/g) ?? []).length, 0, 'mission control must not depend on legacy provider frames');
+  assert.match(html, /data-constellation/, 'constellation mount must be present');
+  assert.match(html, /data-approval-dock/, 'human approval dock must be present');
+  assert.match(html, /data-panel-heading/, 'evidence inspector must be present');
+  assert.match(html, /data-provider-runtime/, 'isolated native provider mount must be present');
+  assert.match(html, /src\/app\/main\.js/, 'mission control entry module must be linked');
+  for (const pathname of [
+    '/src/app/mission-control.css',
+    '/src/app/main.js',
+    '/src/app/constellation.js',
+    '/src/app/icons.js',
+    '/src/app/mission-state.js',
+    '/src/app/mission-controller.js',
+    '/src/engine/webmcp.js',
+    '/src/engine/audit.js',
+    '/src/packs/recovery/plan.js',
+    '/src/providers/recovery/catalog.js',
+  ]) {
+    assert.ok(visited.has(pathname), `${pathname} must be reachable`);
+  }
+  assert.equal(
+    [...visited.keys()].some((pathname) => pathname.startsWith('/providers/')),
+    false,
+    'provider documents must remain isolated from the local non-native harness',
+  );
   const missing = await fetch(`${base}/definitely-not-a-real-file`);
   assert.equal(missing.status, 404);
-  assert.ok(visited.size >= 14, `expected at least 14 linked resources, found ${visited.size}`);
-  console.log(`Static smoke passed: ${visited.size} linked resources, four WebMCP frames, security headers, and 404 handling.`);
+  console.log(`Static smoke passed: ${visited.size} recovery resources, isolated provider runtime, security headers, and 404 handling.`);
 } finally {
   server.kill('SIGTERM');
   await new Promise((resolve) => server.once('exit', resolve));
