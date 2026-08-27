@@ -1,0 +1,293 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" role="img" aria-labelledby="title desc">
+  <title id="title">ToolBraid human authority boundary</title>
+  <desc id="desc">A security architecture diagram showing what the browser agent may do, the trusted human activation required for two separate approvals, the exact fields bound to execution, fail-closed conditions, and the ordered mutation path from live registry refresh through recovery, publication, and a SHA-256 audit seal.</desc>
+
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#020914"/>
+      <stop offset="1" stop-color="#01060d"/>
+    </linearGradient>
+    <linearGradient id="surface" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0a1a2c"/>
+      <stop offset="1" stop-color="#061322"/>
+    </linearGradient>
+    <linearGradient id="surfaceStrong" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0e2238"/>
+      <stop offset="1" stop-color="#061322"/>
+    </linearGradient>
+    <linearGradient id="authority" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#3f7cff"/>
+      <stop offset="1" stop-color="#38c7ff"/>
+    </linearGradient>
+    <linearGradient id="execution" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#38c7ff"/>
+      <stop offset="0.55" stop-color="#7fe36a"/>
+      <stop offset="1" stop-color="#77e1ff"/>
+    </linearGradient>
+    <radialGradient id="cyanGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#38c7ff" stop-opacity="0.18"/>
+      <stop offset="1" stop-color="#38c7ff" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="purpleGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#9a8cff" stop-opacity="0.12"/>
+      <stop offset="1" stop-color="#9a8cff" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="softGlow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="7" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <marker id="arrowCyan" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#38c7ff"/>
+    </marker>
+    <marker id="arrowGreen" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#7fe36a"/>
+    </marker>
+    <style>
+      .sans { font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .mono { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; }
+      .title { fill: #f2f7fb; font-size: 38px; font-weight: 700; letter-spacing: -0.7px; }
+      .subtitle { fill: #b8c7d5; font-size: 18px; font-weight: 400; }
+      .eyebrow { fill: #77e1ff; font-size: 14px; font-weight: 700; letter-spacing: 2.2px; }
+      .panelTitle { fill: #f2f7fb; font-size: 23px; font-weight: 700; }
+      .body { fill: #b8c7d5; font-size: 17px; font-weight: 500; }
+      .bodyStrong { fill: #f2f7fb; font-size: 17px; font-weight: 650; }
+      .small { fill: #73889d; font-size: 14px; font-weight: 500; }
+      .micro { fill: #73889d; font-size: 12px; font-weight: 600; letter-spacing: 0.9px; }
+      .stepTitle { fill: #f2f7fb; font-size: 16px; font-weight: 700; }
+      .stepDetail { fill: #b8c7d5; font-size: 13px; font-weight: 500; }
+    </style>
+  </defs>
+
+  <rect width="1600" height="900" fill="url(#background)"/>
+  <ellipse cx="770" cy="290" rx="570" ry="360" fill="url(#cyanGlow)"/>
+  <ellipse cx="1320" cy="345" rx="340" ry="300" fill="url(#purpleGlow)"/>
+
+  <g opacity="0.2" stroke="#3f7cff" stroke-width="1">
+    <path d="M0 112H1600M0 650H1600M475 112V650M1130 112V650"/>
+    <path d="M90 78H275M1325 78H1510" stroke-dasharray="3 8"/>
+  </g>
+  <g fill="#38c7ff" opacity="0.34">
+    <circle cx="90" cy="78" r="3"/><circle cx="275" cy="78" r="3"/>
+    <circle cx="1325" cy="78" r="3"/><circle cx="1510" cy="78" r="3"/>
+  </g>
+
+  <g class="sans">
+    <text x="56" y="62" class="eyebrow">TOOLBRAID / AUTHORITY MODEL</text>
+    <text x="56" y="101" class="title">Human authority is the hard boundary</text>
+    <text x="1544" y="64" text-anchor="end" class="small">Browser-native · exact scope · fail closed</text>
+
+    <!-- Agent surface -->
+    <g aria-label="Agent permissions">
+      <rect x="56" y="142" width="390" height="480" rx="24" fill="url(#surface)" stroke="#3f7cff" stroke-opacity="0.32"/>
+      <rect x="56" y="142" width="390" height="5" rx="2.5" fill="url(#authority)"/>
+
+      <g transform="translate(82 174)">
+        <circle cx="22" cy="22" r="22" fill="#3f7cff" fill-opacity="0.16" stroke="#38c7ff" stroke-opacity="0.55"/>
+        <path d="M13 19h18M13 25h13M16 14l-4 5 4 5" fill="none" stroke="#77e1ff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+      </g>
+      <text x="138" y="188" class="eyebrow">AGENT SURFACE</text>
+      <text x="138" y="216" class="panelTitle">Allowed without approval</text>
+
+      <g transform="translate(82 253)">
+        <g>
+          <circle cx="13" cy="13" r="12" fill="#38c7ff" fill-opacity="0.14" stroke="#38c7ff" stroke-opacity="0.48"/>
+          <path d="m8 13 3.3 3.3L18 9.8" fill="none" stroke="#77e1ff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          <text x="38" y="19" class="bodyStrong">Discover live WebMCP tools</text>
+        </g>
+        <g transform="translate(0 58)">
+          <circle cx="13" cy="13" r="12" fill="#38c7ff" fill-opacity="0.14" stroke="#38c7ff" stroke-opacity="0.48"/>
+          <path d="m8 13 3.3 3.3L18 9.8" fill="none" stroke="#77e1ff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          <text x="38" y="19" class="bodyStrong">Execute safe, read-only evidence</text>
+        </g>
+        <g transform="translate(0 116)">
+          <circle cx="13" cy="13" r="12" fill="#38c7ff" fill-opacity="0.14" stroke="#38c7ff" stroke-opacity="0.48"/>
+          <path d="m8 13 3.3 3.3L18 9.8" fill="none" stroke="#77e1ff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          <text x="38" y="19" class="bodyStrong">Inspect plan and mission state</text>
+        </g>
+        <g transform="translate(0 174)">
+          <circle cx="13" cy="13" r="12" fill="#38c7ff" fill-opacity="0.14" stroke="#38c7ff" stroke-opacity="0.48"/>
+          <path d="m8 13 3.3 3.3L18 9.8" fill="none" stroke="#77e1ff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          <text x="38" y="8" class="bodyStrong">Attempt execution only for</text>
+          <text x="38" y="30" class="body">already-approved nodes</text>
+        </g>
+      </g>
+
+      <rect x="80" y="529" width="342" height="67" rx="14" fill="#ff6b55" fill-opacity="0.08" stroke="#ff6b55" stroke-opacity="0.4"/>
+      <g transform="translate(98 547)">
+        <circle cx="15" cy="15" r="14" fill="#ff6b55" fill-opacity="0.16"/>
+        <path d="M9 9l12 12M21 9 9 21" fill="none" stroke="#ff6b55" stroke-width="2.3" stroke-linecap="round"/>
+        <text x="42" y="13" fill="#ff6b55" font-size="16" font-weight="750">NO APPROVAL CREATOR</text>
+        <text x="42" y="34" class="small">Agent and provider calls cannot grant authority.</text>
+      </g>
+    </g>
+
+    <!-- Trusted human authority -->
+    <g aria-label="Trusted human approval gate">
+      <rect x="476" y="142" width="650" height="480" rx="24" fill="url(#surfaceStrong)" stroke="#38c7ff" stroke-opacity="0.44"/>
+      <rect x="476" y="142" width="650" height="5" rx="2.5" fill="url(#authority)" filter="url(#softGlow)"/>
+
+      <text x="504" y="177" class="eyebrow">SOLE APPROVAL AUTHORITY</text>
+      <text x="504" y="208" class="panelTitle">Trusted human DOM activation</text>
+      <g transform="translate(949 166)">
+        <rect width="149" height="42" rx="21" fill="#7fe36a" fill-opacity="0.11" stroke="#7fe36a" stroke-opacity="0.42"/>
+        <circle cx="22" cy="21" r="7" fill="#7fe36a" filter="url(#softGlow)"/>
+        <text x="39" y="26" fill="#7fe36a" font-size="14" font-weight="700" class="mono">isTrusted = true</text>
+      </g>
+
+      <path d="M800 222v31" stroke="#38c7ff" stroke-width="2" marker-end="url(#arrowCyan)"/>
+      <text x="800" y="276" text-anchor="middle" class="micro">CREATES TWO INDEPENDENT ENVELOPES</text>
+
+      <g transform="translate(504 294)">
+        <rect width="279" height="72" rx="15" fill="#f6b941" fill-opacity="0.09" stroke="#f6b941" stroke-opacity="0.55"/>
+        <circle cx="36" cy="36" r="20" fill="#f6b941" fill-opacity="0.15"/>
+        <text x="36" y="42" text-anchor="middle" fill="#f6b941" font-size="18" font-weight="800">1</text>
+        <text x="69" y="31" fill="#f6b941" font-size="14" font-weight="750" letter-spacing="1.2">RECOVERY</text>
+        <text x="69" y="53" class="bodyStrong">Apply exact rollback</text>
+      </g>
+      <g transform="translate(819 294)">
+        <rect width="279" height="72" rx="15" fill="#9a8cff" fill-opacity="0.09" stroke="#9a8cff" stroke-opacity="0.55"/>
+        <circle cx="36" cy="36" r="20" fill="#9a8cff" fill-opacity="0.15"/>
+        <text x="36" y="42" text-anchor="middle" fill="#9a8cff" font-size="18" font-weight="800">2</text>
+        <text x="69" y="31" fill="#9a8cff" font-size="14" font-weight="750" letter-spacing="1.2">NOTICE</text>
+        <text x="69" y="53" class="bodyStrong">Publish exact update</text>
+      </g>
+
+      <rect x="504" y="388" width="594" height="205" rx="17" fill="#061322" stroke="#77e1ff" stroke-opacity="0.24"/>
+      <text x="528" y="420" class="eyebrow">EXACT EXECUTION BINDING</text>
+      <text x="1074" y="420" text-anchor="end" class="small mono">SHA-256 fingerprint</text>
+      <path d="M801 438v132M528 482h546M528 526h546" stroke="#0e2238" stroke-width="2"/>
+
+      <g transform="translate(528 447)">
+        <circle cx="6" cy="7" r="4" fill="#38c7ff"/>
+        <text x="20" y="12" class="bodyStrong">Plan ID + revision + node</text>
+        <circle cx="296" cy="7" r="4" fill="#38c7ff"/>
+        <text x="310" y="12" class="bodyStrong">Provider origin + native tool</text>
+      </g>
+      <g transform="translate(528 491)">
+        <circle cx="6" cy="7" r="4" fill="#38c7ff"/>
+        <text x="20" y="12" class="bodyStrong">Live schema fingerprint</text>
+        <circle cx="296" cy="7" r="4" fill="#38c7ff"/>
+        <text x="310" y="12" class="bodyStrong">Exact effect + risk class</text>
+      </g>
+      <g transform="translate(528 535)">
+        <circle cx="6" cy="7" r="4" fill="#38c7ff"/>
+        <text x="20" y="12" class="bodyStrong">Canonical arguments</text>
+        <circle cx="296" cy="7" r="4" fill="#38c7ff"/>
+        <text x="310" y="12" class="bodyStrong">Provider-native input</text>
+      </g>
+      <text x="528" y="578" class="small">Expiry + one-time nonce · native input derived, preauthorized and hash-rechecked</text>
+    </g>
+
+    <!-- Fail-closed boundary -->
+    <g aria-label="Fail-closed conditions">
+      <rect x="1156" y="142" width="388" height="480" rx="24" fill="url(#surface)" stroke="#ff6b55" stroke-opacity="0.38"/>
+      <rect x="1156" y="142" width="388" height="5" rx="2.5" fill="#ff6b55"/>
+      <g transform="translate(1182 174)">
+        <path d="M22 1 42 9v14c0 14-8 23-20 29C10 46 2 37 2 23V9z" fill="#ff6b55" fill-opacity="0.12" stroke="#ff6b55" stroke-width="1.8"/>
+        <path d="m14 19 16 16M30 19 14 35" fill="none" stroke="#ff6b55" stroke-width="2.4" stroke-linecap="round"/>
+      </g>
+      <text x="1242" y="188" fill="#ff6b55" font-size="14" font-weight="750" letter-spacing="2.2">FAIL CLOSED</text>
+      <text x="1242" y="216" class="panelTitle">Authority never drifts</text>
+
+      <g transform="translate(1182 252)">
+        <g>
+          <rect width="336" height="48" rx="12" fill="#ff6b55" fill-opacity="0.07"/>
+          <path d="M18 16l16 16M34 16 18 32" stroke="#ff6b55" stroke-width="2" stroke-linecap="round"/>
+          <text x="50" y="30" class="bodyStrong">Origin, tool or schema changes</text>
+        </g>
+        <g transform="translate(0 58)">
+          <rect width="336" height="60" rx="12" fill="#ff6b55" fill-opacity="0.07"/>
+          <path d="M18 22l16 16M34 22 18 38" stroke="#ff6b55" stroke-width="2" stroke-linecap="round"/>
+          <text x="50" y="27" class="bodyStrong">Canonical or native arguments</text>
+          <text x="50" y="48" class="body">no longer match</text>
+        </g>
+        <g transform="translate(0 128)">
+          <rect width="336" height="48" rx="12" fill="#ff6b55" fill-opacity="0.07"/>
+          <path d="M18 16l16 16M34 16 18 32" stroke="#ff6b55" stroke-width="2" stroke-linecap="round"/>
+          <text x="50" y="30" class="bodyStrong">Approval expires</text>
+        </g>
+        <g transform="translate(0 186)">
+          <rect width="336" height="48" rx="12" fill="#ff6b55" fill-opacity="0.07"/>
+          <path d="M18 16l16 16M34 16 18 32" stroke="#ff6b55" stroke-width="2" stroke-linecap="round"/>
+          <text x="50" y="30" class="bodyStrong">Nonce is replayed or duplicated</text>
+        </g>
+        <g transform="translate(0 244)">
+          <rect width="336" height="48" rx="12" fill="#ff6b55" fill-opacity="0.07"/>
+          <path d="M18 16l16 16M34 16 18 32" stroke="#ff6b55" stroke-width="2" stroke-linecap="round"/>
+          <text x="50" y="30" class="bodyStrong">Full approval set is incomplete</text>
+        </g>
+      </g>
+
+      <rect x="1182" y="563" width="336" height="34" rx="17" fill="#ff6b55"/>
+      <text x="1350" y="586" text-anchor="middle" fill="#01060d" font-size="14" font-weight="800" letter-spacing="1.4">NO MUTATION DISPATCH</text>
+    </g>
+
+    <!-- Directional authority connectors -->
+    <path d="M446 382h29" stroke="#38c7ff" stroke-width="2" stroke-dasharray="4 6" marker-end="url(#arrowCyan)"/>
+    <path d="M1126 382h29" stroke="#ff6b55" stroke-width="2" stroke-dasharray="4 6"/>
+
+    <!-- Ordered mutation commit path -->
+    <g aria-label="Ordered mutation commit path">
+      <rect x="56" y="654" width="1488" height="192" rx="24" fill="#061322" stroke="#7fe36a" stroke-opacity="0.3"/>
+      <text x="82" y="690" class="eyebrow">IMMEDIATELY BEFORE EXTERNAL EFFECTS</text>
+      <text x="82" y="720" class="panelTitle">Verified mutation commit path</text>
+      <text x="1518" y="712" text-anchor="end" class="small">Any drift before dispatch routes to FAIL CLOSED.</text>
+
+      <path d="M155 770H1437" stroke="url(#execution)" stroke-width="3" stroke-opacity="0.55"/>
+
+      <g transform="translate(82 744)">
+        <circle cx="42" cy="26" r="26" fill="#0e2238" stroke="#38c7ff" stroke-width="2"/>
+        <text x="42" y="32" text-anchor="middle" fill="#77e1ff" font-size="17" font-weight="800">1</text>
+        <text x="78" y="18" class="stepTitle">Refresh + rescan</text>
+        <text x="78" y="39" class="stepDetail">live tools &amp; metadata</text>
+      </g>
+      <path d="M302 770h35" stroke="#7fe36a" stroke-width="2" marker-end="url(#arrowGreen)"/>
+
+      <g transform="translate(346 744)">
+        <circle cx="42" cy="26" r="26" fill="#0e2238" stroke="#38c7ff" stroke-width="2"/>
+        <text x="42" y="32" text-anchor="middle" fill="#77e1ff" font-size="17" font-weight="800">2</text>
+        <text x="78" y="18" class="stepTitle">Verify full set</text>
+        <text x="78" y="39" class="stepDetail">exact live bindings</text>
+      </g>
+      <path d="M547 770h35" stroke="#7fe36a" stroke-width="2" marker-end="url(#arrowGreen)"/>
+
+      <g transform="translate(591 744)">
+        <circle cx="42" cy="26" r="26" fill="#0e2238" stroke="#7fe36a" stroke-width="2"/>
+        <text x="42" y="32" text-anchor="middle" fill="#7fe36a" font-size="17" font-weight="800">3</text>
+        <text x="78" y="18" class="stepTitle">Atomic claim</text>
+        <text x="78" y="39" class="stepDetail">both one-time nonces</text>
+      </g>
+      <path d="M785 770h35" stroke="#7fe36a" stroke-width="2" marker-end="url(#arrowGreen)"/>
+
+      <g transform="translate(829 744)">
+        <circle cx="42" cy="26" r="26" fill="#7fe36a" fill-opacity="0.14" stroke="#7fe36a" stroke-width="2"/>
+        <text x="42" y="32" text-anchor="middle" fill="#7fe36a" font-size="17" font-weight="800">4</text>
+        <text x="78" y="18" class="stepTitle">Apply recovery</text>
+        <text x="78" y="39" fill="#7fe36a" font-size="13" font-weight="700">EXECUTES FIRST</text>
+      </g>
+      <path d="M1029 770h35" stroke="#7fe36a" stroke-width="2" marker-end="url(#arrowGreen)"/>
+
+      <g transform="translate(1073 744)">
+        <circle cx="42" cy="26" r="26" fill="#9a8cff" fill-opacity="0.13" stroke="#9a8cff" stroke-width="2"/>
+        <text x="42" y="32" text-anchor="middle" fill="#9a8cff" font-size="17" font-weight="800">5</text>
+        <text x="78" y="18" class="stepTitle">Publish notice</text>
+        <text x="78" y="39" class="stepDetail">only after recovery</text>
+      </g>
+      <path d="M1268 770h35" stroke="#7fe36a" stroke-width="2" marker-end="url(#arrowGreen)"/>
+
+      <g transform="translate(1312 744)">
+        <circle cx="42" cy="26" r="26" fill="#38c7ff" fill-opacity="0.13" stroke="#77e1ff" stroke-width="2"/>
+        <text x="42" y="32" text-anchor="middle" fill="#77e1ff" font-size="17" font-weight="800">6</text>
+        <text x="78" y="18" class="stepTitle">Append seal</text>
+        <text x="78" y="39" class="stepDetail">SHA-256 audit head</text>
+      </g>
+
+      <text x="82" y="825" class="small">Separate approvals · all-or-none claim · recovery before publication · append-only local integrity chain</text>
+    </g>
+
+    <text x="1544" y="876" text-anchor="end" class="micro">TOOLBRAID SECURITY ARCHITECTURE / HUMAN AUTHORITY BOUNDARY</text>
+  </g>
+</svg>

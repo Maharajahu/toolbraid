@@ -13,6 +13,8 @@ It does not replace websites and it does not automate arbitrary pages. It works
 with capabilities that participating websites deliberately expose through
 WebMCP, preserving each site's authenticated browser context and visible UI.
 
+[![ToolBraid product flow from objective through discovery, normalization, planning, approvals, ordered effects, and sealed evidence](../diagrams/toolbraid-how-it-works.svg)](../diagrams/toolbraid-how-it-works.svg)
+
 ```text
 human objective
   -> discover WebMCP tools across origins

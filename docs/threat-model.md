@@ -6,6 +6,8 @@ Neither an agent nor a provider may cause an external mutation that the human di
 
 All provider metadata, schemas, annotations, outputs, and messages are untrusted. Browser origin is part of identity, but origin alone is not sufficient authorization.
 
+[![ToolBraid authority model showing trusted human approval, exact execution binding, fail-closed invalidation, and the verified mutation commit path](diagrams/toolbraid-human-authority.svg)](diagrams/toolbraid-human-authority.svg)
+
 ## Assets and boundaries
 
 - provider account and application state;

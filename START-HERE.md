@@ -1,5 +1,7 @@
 # Start Here
 
+For a fast product overview, open the [Judge Guide](docs/JUDGING.md) or the [full-resolution completed mission](docs/screenshots/toolbraid-recovery-completed.png).
+
 ## Run the product
 
 ```bash

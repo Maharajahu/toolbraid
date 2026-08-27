@@ -3,7 +3,7 @@
   "version": "0.2.0",
   "private": true,
   "type": "module",
-  "description": "A human-approved semantic orchestration layer for WebMCP tools.",
+  "description": "A browser-native semantic and policy control plane for safe, explainable, human-approved WebMCP execution across sites.",
   "scripts": {
     "dev": "node scripts/serve.mjs",
     "dev:native": "node scripts/serve-multi-origin.mjs",

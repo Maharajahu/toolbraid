@@ -24,6 +24,10 @@ const required = [
   'docs/architecture.md', 'docs/threat-model.md', 'docs/testing.md',
   'docs/challenge-requirements.md', 'docs/competition/product-definition.md',
   'docs/competition/native-webmcp-contract.md', 'docs/e2e-validation.json',
+  'docs/diagrams/toolbraid-how-it-works.svg',
+  'docs/diagrams/toolbraid-cross-origin-architecture.svg',
+  'docs/diagrams/toolbraid-human-authority.svg',
+  'docs/screenshots/toolbraid-recovery-completed.png',
   'tests/v2/mission-controller.test.mjs', 'tests/v2/multi-origin-server.test.mjs',
   '.github/workflows/ci.yml', '.nojekyll',
 ];

@@ -1,7 +1,7 @@
 {
   "name": "ToolBraid",
   "short_name": "ToolBraid",
-  "description": "WebMCP semantic mission control",
+  "description": "Safe, explainable, human-approved WebMCP execution across sites",
   "start_url": "./",
   "display": "standalone",
   "background_color": "#071014",

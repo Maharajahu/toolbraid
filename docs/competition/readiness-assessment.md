@@ -20,7 +20,7 @@
 
 1. Deploy the orchestrator and all provider origins to public HTTPS URLs.
 2. Verify the deployed project from Chrome WebMCP and ChatGPT's in-app browser.
-3. Sync the completed source to the public repository and verify license/About visibility from a clean clone.
+3. Promote the synchronized private competition branch, make the repository public, and verify license/About visibility from a clean clone.
 4. Complete an assistive-technology pass on the deployed build.
 5. Prepare the English Devpost description, testing instructions, images, and links.
 6. Produce and publish the required sub-three-minute YouTube demo with audio.

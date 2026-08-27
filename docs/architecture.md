@@ -6,6 +6,8 @@ ToolBraid is a browser-native control plane. Provider websites deliberately expo
 
 The engine is provider-neutral. Recovery vocabulary lives in a replaceable domain pack.
 
+[![End-to-end ToolBraid execution story from human objective to sealed audit evidence](diagrams/toolbraid-how-it-works.svg)](diagrams/toolbraid-how-it-works.svg)
+
 ```text
 human objective
   -> discover live tools from allowed origins
@@ -34,6 +36,8 @@ document.modelContext.registerTool(definition, {
 ```
 
 The orchestrator calls `getTools({ fromOrigins })`, retains each opaque live registration, and passes that exact object to `executeTool()`. Origin, name, normalized input schema, and registration generation form tool identity.
+
+[![Native ToolBraid topology across the orchestrator and six isolated WebMCP provider origins](diagrams/toolbraid-cross-origin-architecture.svg)](diagrams/toolbraid-cross-origin-architecture.svg)
 
 ### Local verification harness
 

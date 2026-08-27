@@ -4,6 +4,12 @@
 
 Restore checkout after the latest deployment and prepare a customer update, while keeping both production and public communication under separate human authority.
 
+[![Completed ToolBraid production-recovery mission with six provider origins, two verified mutations, receipts, and a sealed audit trail](screenshots/toolbraid-recovery-completed.png)](screenshots/toolbraid-recovery-completed.png)
+
+## System at a glance
+
+[![ToolBraid turns one human objective into safe WebMCP evidence, a nine-node plan, two exact approvals, ordered effects, and sealed local audit evidence](diagrams/toolbraid-how-it-works.svg)](diagrams/toolbraid-how-it-works.svg)
+
 ## What to observe
 
 1. **WebMCP leverage:** six provider documents contribute nine live tools from explicit origins. ToolBraid retains and executes the opaque registered objects rather than calling provider functions directly.
@@ -29,6 +35,12 @@ audit:           sha256-chain-v1, 54 entries
 All incident, provider, recovery, and notice data are deterministic fixtures. The proof does not touch real production or publish a real customer message.
 
 Native and harness runs are visibly labelled. Only a run whose badge reads **Native WebMCP** is native API evidence.
+
+## Why the boundary is credible
+
+[![ToolBraid human-authority boundary and fail-closed execution policy](diagrams/toolbraid-human-authority.svg)](diagrams/toolbraid-human-authority.svg)
+
+The runtime topology, origin allowlist, fallback path, mutation domains, and quarantined provider are shown in the [cross-origin architecture](diagrams/toolbraid-cross-origin-architecture.svg).
 
 ## Official criteria coverage
 

@@ -1,6 +1,6 @@
 # ToolBraid
 
-**A browser-native semantic and policy control plane for WebMCP.**
+**A browser-native semantic and policy control plane for safe, explainable, human-approved WebMCP execution across sites.**
 
 ToolBraid turns one human objective spanning several websites into a visible, explainable execution graph. It discovers live WebMCP tools, quarantines hostile metadata, maps incompatible contracts into canonical capabilities, executes safe reads, and stops before each external mutation until the human approves the exact origin, tool, arguments, and effect.
 
@@ -9,6 +9,16 @@ The current proof mission is production recovery:
 > Restore checkout after the latest deployment. Find the safest recovery path and prepare a customer update, but do not change production or publish anything without my approval.
 
 No real production system or public status page is changed. The bundled providers are deterministic fixtures that exercise the complete control path.
+
+[![ToolBraid completed production-recovery mission with six provider origins, verified mutations, and a sealed audit trail](docs/screenshots/toolbraid-recovery-completed.png)](docs/screenshots/toolbraid-recovery-completed.png)
+
+*The implemented product after a deterministic recovery mission. Open the image for the full-resolution evidence view.*
+
+**Judge path:** [Judge Guide](docs/JUDGING.md) · [Start Here](START-HERE.md) · [Architecture](docs/architecture.md) · [Threat Model](docs/threat-model.md) · [Testing](docs/testing.md)
+
+## How ToolBraid works
+
+[![ToolBraid execution story from one human objective through WebMCP discovery, semantic normalization, a nine-node plan, two exact approvals, ordered effects, and a sealed audit chain](docs/diagrams/toolbraid-how-it-works.svg)](docs/diagrams/toolbraid-how-it-works.svg)
 
 ## What the product proves
 
@@ -25,19 +35,7 @@ No real production system or public status page is changed. The bundled provider
 
 ## Runtime topology
 
-```text
-Human + browser agent
-          |
-          v
-ToolBraid mission control :4173
-          |
-          +-- service signals :4174
-          +-- service pulse   :4175  (read fallback)
-          +-- source history  :4176
-          +-- deployment      :4177
-          +-- status notice   :4178
-          +-- hostile fixture :4179  (quarantined)
-```
+[![ToolBraid cross-origin architecture showing the mission-control origin, six isolated WebMCP provider origins, read-only fallback, mutation domains, and a quarantined hostile fixture](docs/diagrams/toolbraid-cross-origin-architecture.svg)](docs/diagrams/toolbraid-cross-origin-architecture.svg)
 
 In a supported browser, each provider calls `document.modelContext.registerTool(...)` from its own document. ToolBraid discovers the returned live registrations with an explicit origin allowlist and executes those opaque tool references.
 
@@ -88,6 +86,8 @@ docs/                       architecture, threat model, test evidence, and chall
 ```
 
 ## Human authority boundary
+
+[![ToolBraid human-authority model showing the agent surface, trusted human approval creation, exact execution bindings, fail-closed invalidation, atomic nonce claim, ordered mutations, and audit sealing](docs/diagrams/toolbraid-human-authority.svg)](docs/diagrams/toolbraid-human-authority.svg)
 
 Agent-callable actions may start discovery, execute safe reads, inspect state, or attempt execution of already approved nodes. They cannot create approval.
 

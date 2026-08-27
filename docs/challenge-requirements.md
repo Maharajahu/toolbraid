@@ -23,9 +23,9 @@ Native evidence is recorded in [native-e2e-validation.json](native-e2e-validatio
 | Official requirement | Current state |
 |---|---|
 | Working live URL accessible in ChatGPT's in-app browser or Chrome 149+ with WebMCP enabled | Pending public HTTPS deployment |
-| Public source repository with all source/assets/instructions | Pending sync of the completed branch |
-| Open-source license detectable on the repository page and visible in About | Local MIT license exists; public repository metadata must be verified |
-| English description covering WebMCP fit, UX improvement, human-agent collaboration, and implementation | Pending final submission copy |
+| Public source repository with all source/assets/instructions | Complete private development branch is synchronized; public visibility and default-branch promotion remain pending |
+| Open-source license detectable on the repository page and visible in About | GitHub detects the MIT license while private; recheck after public release |
+| English description covering WebMCP fit, UX improvement, human-agent collaboration, and implementation | Repository description and judge documentation are complete; final Devpost copy remains pending |
 | Public YouTube demonstration under three minutes, with audio | Intentionally deferred by the project owner |
 | English video/text/testing instructions | Pending final submission package |
 | Free judge access through the end of judging | Pending deployment and availability check |

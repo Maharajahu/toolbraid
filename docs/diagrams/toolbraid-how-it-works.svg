@@ -1,0 +1,301 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" role="img" aria-labelledby="title desc">
+  <title id="title">How ToolBraid turns one human objective into safe, authorized WebMCP execution</title>
+  <desc id="desc">ToolBraid discovers nine live tools across six origins, quarantines one hostile tool before scoring, normalizes the remaining contracts into seven canonical capabilities, builds a nine-node dependency graph, runs four safe reads in parallel with a read-only health fallback, prepares recovery and communication, requires two exact human approvals, applies recovery before publishing the customer notice, and seals a 54-entry append-only SHA-256 integrity chain.</desc>
+
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#020914"/>
+      <stop offset="1" stop-color="#01060d"/>
+    </linearGradient>
+    <linearGradient id="panel" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0a1a2c"/>
+      <stop offset="1" stop-color="#061322"/>
+    </linearGradient>
+    <linearGradient id="cyanEdge" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#38c7ff" stop-opacity="0.25"/>
+      <stop offset="0.5" stop-color="#77e1ff"/>
+      <stop offset="1" stop-color="#38c7ff" stop-opacity="0.25"/>
+    </linearGradient>
+    <linearGradient id="blueEdge" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#3f7cff" stop-opacity="0.18"/>
+      <stop offset="0.5" stop-color="#3f7cff"/>
+      <stop offset="1" stop-color="#3f7cff" stop-opacity="0.18"/>
+    </linearGradient>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M40 0H0V40" fill="none" stroke="#38c7ff" stroke-opacity="0.035" stroke-width="1"/>
+    </pattern>
+    <filter id="softGlow" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="6" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <marker id="arrowCyan" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M1 1L9 5L1 9Z" fill="#38c7ff"/>
+    </marker>
+    <marker id="arrowBlue" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M1 1L9 5L1 9Z" fill="#3f7cff"/>
+    </marker>
+    <marker id="arrowGreen" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M1 1L9 5L1 9Z" fill="#7fe36a"/>
+    </marker>
+    <style>
+      text { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .eyebrow { fill: #77e1ff; font-size: 14px; font-weight: 750; letter-spacing: 2.2px; }
+      .display { fill: #f2f7fb; font-size: 34px; font-weight: 720; letter-spacing: -0.8px; }
+      .subtitle { fill: #b8c7d5; font-size: 17px; font-weight: 450; }
+      .section { fill: #f2f7fb; font-size: 18px; font-weight: 700; }
+      .card-title { fill: #f2f7fb; font-size: 21px; font-weight: 680; }
+      .body { fill: #b8c7d5; font-size: 15px; font-weight: 450; }
+      .small { fill: #73889d; font-size: 13px; font-weight: 520; }
+      .metric { fill: #f2f7fb; font-size: 22px; font-weight: 760; }
+      .metric-label { fill: #73889d; font-size: 11px; font-weight: 700; letter-spacing: 1.4px; }
+      .node-title { fill: #f2f7fb; font-size: 14px; font-weight: 680; }
+      .node-note { fill: #73889d; font-size: 11px; font-weight: 560; }
+      .mono { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; }
+    </style>
+  </defs>
+
+  <rect width="1600" height="900" fill="url(#background)"/>
+  <rect width="1600" height="900" fill="url(#grid)"/>
+  <circle cx="270" cy="90" r="240" fill="#38c7ff" opacity="0.025"/>
+  <circle cx="1420" cy="740" r="310" fill="#3f7cff" opacity="0.035"/>
+
+  <!-- Header -->
+  <g transform="translate(60 45)">
+    <rect x="0" y="0" width="42" height="42" rx="12" fill="#0e2238" stroke="#38c7ff" stroke-opacity="0.7"/>
+    <path d="M11 14C18 8 24 8 31 14M11 28C18 34 24 34 31 28M12 14L30 28M30 14L12 28" fill="none" stroke="#77e1ff" stroke-width="2.4" stroke-linecap="round"/>
+    <circle cx="11" cy="14" r="2.6" fill="#7fe36a"/><circle cx="31" cy="14" r="2.6" fill="#38c7ff"/>
+    <circle cx="11" cy="28" r="2.6" fill="#3f7cff"/><circle cx="31" cy="28" r="2.6" fill="#9a8cff"/>
+    <text x="58" y="15" class="eyebrow">TOOLBRAID · EXECUTION STORY</text>
+    <text x="58" y="54" class="display">One objective. Nine-node plan. Human-controlled effects.</text>
+    <text x="58" y="83" class="subtitle">A browser-native semantic and policy control plane for safe, explainable WebMCP execution.</text>
+  </g>
+
+  <!-- Evidence metrics -->
+  <g transform="translate(1140 45)">
+    <rect width="400" height="82" rx="18" fill="#061322" stroke="#0e2238"/>
+    <path d="M100 18V64M200 18V64M300 18V64" stroke="#0e2238"/>
+    <g text-anchor="middle">
+      <text x="50" y="34" class="metric">6</text><text x="50" y="56" class="metric-label">ORIGINS</text>
+      <text x="150" y="34" class="metric">9</text><text x="150" y="56" class="metric-label">LIVE TOOLS</text>
+      <text x="250" y="34" class="metric" fill="#ff6b55">1</text><text x="250" y="56" class="metric-label">QUARANTINED</text>
+      <text x="350" y="34" class="metric" fill="#77e1ff">7</text><text x="350" y="56" class="metric-label">CAPABILITIES</text>
+    </g>
+  </g>
+
+  <!-- Top process -->
+  <g>
+    <!-- stage 01 -->
+    <rect x="60" y="165" width="330" height="174" rx="20" fill="url(#panel)" stroke="#0e2238"/>
+    <rect x="60" y="165" width="5" height="174" rx="2.5" fill="#38c7ff"/>
+    <text x="88" y="198" class="eyebrow">01 · HUMAN OBJECTIVE</text>
+    <text x="88" y="232" class="card-title">Restore checkout safely</text>
+    <text x="88" y="260" class="body">Find the safest recovery path and</text>
+    <text x="88" y="282" class="body">prepare a customer update.</text>
+    <rect x="88" y="299" width="252" height="24" rx="12" fill="#0e2238"/>
+    <circle cx="103" cy="311" r="4" fill="#f6b941"/>
+    <text x="115" y="316" class="small" fill="#f6b941">Intent is not execution authority</text>
+
+    <!-- stage arrow -->
+    <path d="M398 252H422" stroke="#38c7ff" stroke-width="2" marker-end="url(#arrowCyan)"/>
+
+    <!-- stage 02 -->
+    <rect x="430" y="165" width="360" height="174" rx="20" fill="url(#panel)" stroke="#0e2238"/>
+    <rect x="430" y="165" width="5" height="174" rx="2.5" fill="#ff6b55"/>
+    <text x="458" y="198" class="eyebrow">02 · DISCOVER + DEFEND</text>
+    <text x="458" y="232" class="card-title">6 origins → 9 live tools</text>
+    <g transform="translate(458 252)">
+      <circle cx="8" cy="8" r="7" fill="#38c7ff"/><circle cx="32" cy="8" r="7" fill="#38c7ff"/>
+      <circle cx="56" cy="8" r="7" fill="#3f7cff"/><circle cx="80" cy="8" r="7" fill="#3f7cff"/>
+      <circle cx="104" cy="8" r="7" fill="#77e1ff"/><circle cx="128" cy="8" r="7" fill="#77e1ff"/>
+      <circle cx="152" cy="8" r="7" fill="#7fe36a"/><circle cx="176" cy="8" r="7" fill="#7fe36a"/>
+      <circle cx="200" cy="8" r="9" fill="none" stroke="#ff6b55" stroke-width="2"/>
+      <path d="M195 3L205 13M205 3L195 13" stroke="#ff6b55" stroke-width="2" stroke-linecap="round"/>
+    </g>
+    <rect x="458" y="286" width="296" height="34" rx="10" fill="#ff6b55" opacity="0.1"/>
+    <path d="M474 296L481 308H467Z" fill="none" stroke="#ff6b55" stroke-width="1.5"/>
+    <text x="490" y="308" class="small" fill="#ff6b55">1 hostile tool quarantined before scoring</text>
+
+    <path d="M798 252H812" stroke="#38c7ff" stroke-width="2" marker-end="url(#arrowCyan)"/>
+
+    <!-- stage 03 -->
+    <rect x="820" y="165" width="340" height="174" rx="20" fill="url(#panel)" stroke="#0e2238"/>
+    <rect x="820" y="165" width="5" height="174" rx="2.5" fill="#3f7cff"/>
+    <text x="848" y="198" class="eyebrow">03 · NORMALIZE</text>
+    <text x="848" y="232" class="card-title">7 canonical capabilities</text>
+    <text x="848" y="260" class="body">Incompatible names, fields and results</text>
+    <text x="848" y="282" class="body">become one provider-neutral vocabulary.</text>
+    <g transform="translate(848 299)">
+      <rect width="70" height="24" rx="12" fill="#38c7ff" opacity="0.12"/><text x="35" y="16" class="small" fill="#77e1ff" text-anchor="middle">4 reads</text>
+      <rect x="78" width="72" height="24" rx="12" fill="#3f7cff" opacity="0.14"/><text x="114" y="16" class="small" fill="#77e1ff" text-anchor="middle">prepare</text>
+      <rect x="158" width="58" height="24" rx="12" fill="#f6b941" opacity="0.14"/><text x="187" y="16" class="small" fill="#f6b941" text-anchor="middle">apply</text>
+      <rect x="224" width="76" height="24" rx="12" fill="#9a8cff" opacity="0.14"/><text x="262" y="16" class="small" fill="#9a8cff" text-anchor="middle">publish</text>
+    </g>
+
+    <path d="M1168 252H1182" stroke="#3f7cff" stroke-width="2" marker-end="url(#arrowBlue)"/>
+
+    <!-- stage 04 -->
+    <rect x="1190" y="165" width="350" height="174" rx="20" fill="url(#panel)" stroke="#0e2238"/>
+    <rect x="1190" y="165" width="5" height="174" rx="2.5" fill="#9a8cff"/>
+    <text x="1218" y="198" class="eyebrow">04 · PLAN</text>
+    <text x="1218" y="232" class="card-title">Build a 9-node DAG</text>
+    <text x="1218" y="260" class="body">Dependencies stay visible. Safe reads</text>
+    <text x="1218" y="282" class="body">run first; mutation arguments finalize later.</text>
+    <rect x="1218" y="299" width="288" height="24" rx="12" fill="#0e2238"/>
+    <text x="1362" y="316" class="small" text-anchor="middle">No mutation retry · no mutation fallback</text>
+  </g>
+
+  <!-- Lower: graph -->
+  <g>
+    <rect x="60" y="370" width="1000" height="452" rx="24" fill="#061322" stroke="#0e2238"/>
+    <rect x="60" y="370" width="1000" height="3" rx="1.5" fill="url(#cyanEdge)"/>
+    <text x="88" y="408" class="eyebrow">05 · SAFE EVIDENCE + TWO-STAGE PREPARATION</text>
+    <text x="88" y="435" class="small">Four independent reads execute concurrently. Only completed evidence can finalize exact mutation arguments.</text>
+
+    <!-- read nodes and edges -->
+    <path d="M185 548V574H470V595" fill="none" stroke="#38c7ff" stroke-opacity="0.6" stroke-width="2" marker-end="url(#arrowCyan)"/>
+    <path d="M402 532V574H500V595" fill="none" stroke="#38c7ff" stroke-opacity="0.6" stroke-width="2" marker-end="url(#arrowCyan)"/>
+    <path d="M619 532V574H530V595" fill="none" stroke="#38c7ff" stroke-opacity="0.6" stroke-width="2" marker-end="url(#arrowCyan)"/>
+    <path d="M836 532V574H560V595" fill="none" stroke="#38c7ff" stroke-opacity="0.6" stroke-width="2" marker-end="url(#arrowCyan)"/>
+
+    <g transform="translate(88 465)">
+      <rect width="194" height="83" rx="14" fill="#0a1a2c" stroke="#38c7ff" stroke-opacity="0.45"/>
+      <circle cx="22" cy="22" r="12" fill="#38c7ff" opacity="0.14"/><text x="22" y="27" class="node-title" text-anchor="middle">1</text>
+      <text x="43" y="26" class="node-title">Service health</text>
+      <rect x="14" y="43" width="76" height="24" rx="8" fill="#ff6b55" opacity="0.1"/>
+      <text x="45" y="59" class="node-note" fill="#ff6b55" text-anchor="middle">Signals</text>
+      <path d="M72 51L80 59M80 51L72 59" stroke="#ff6b55" stroke-width="1.6" stroke-linecap="round"/>
+      <path d="M96 55H106" stroke="#38c7ff" stroke-width="1.5" stroke-dasharray="3 3" marker-end="url(#arrowCyan)"/>
+      <rect x="111" y="43" width="69" height="24" rx="8" fill="#7fe36a" opacity="0.1"/>
+      <text x="140" y="59" class="node-note" fill="#7fe36a" text-anchor="middle">Pulse</text>
+      <path d="M158 55L162 59L169 51" fill="none" stroke="#7fe36a" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+      <text x="97" y="79" class="node-note" text-anchor="middle">read-only mapped fallback</text>
+    </g>
+
+    <g transform="translate(305 465)">
+      <rect width="194" height="67" rx="14" fill="#0a1a2c" stroke="#38c7ff" stroke-opacity="0.45"/>
+      <circle cx="22" cy="22" r="12" fill="#38c7ff" opacity="0.14"/><text x="22" y="27" class="node-title" text-anchor="middle">2</text>
+      <text x="43" y="26" class="node-title">Release history</text>
+      <text x="15" y="51" class="node-note">safe read · source evidence</text>
+    </g>
+
+    <g transform="translate(522 465)">
+      <rect width="194" height="67" rx="14" fill="#0a1a2c" stroke="#38c7ff" stroke-opacity="0.45"/>
+      <circle cx="22" cy="22" r="12" fill="#38c7ff" opacity="0.14"/><text x="22" y="27" class="node-title" text-anchor="middle">3</text>
+      <text x="43" y="26" class="node-title">Deployment history</text>
+      <text x="15" y="51" class="node-note">safe read · rollout timeline</text>
+    </g>
+
+    <g transform="translate(739 465)">
+      <rect width="194" height="67" rx="14" fill="#0a1a2c" stroke="#38c7ff" stroke-opacity="0.45"/>
+      <circle cx="22" cy="22" r="12" fill="#38c7ff" opacity="0.14"/><text x="22" y="27" class="node-title" text-anchor="middle">4</text>
+      <text x="43" y="26" class="node-title">Active notice</text>
+      <text x="15" y="51" class="node-note">safe read · current revision</text>
+    </g>
+
+    <!-- correlate -->
+    <g transform="translate(410 596)">
+      <rect width="240" height="62" rx="16" fill="#0e2238" stroke="#3f7cff"/>
+      <circle cx="28" cy="31" r="16" fill="#3f7cff" opacity="0.18"/><text x="28" y="36" class="node-title" text-anchor="middle">5</text>
+      <text x="54" y="27" class="node-title">Correlate evidence</text>
+      <text x="54" y="47" class="node-note">local · explainable synthesis</text>
+    </g>
+
+    <path d="M530 658V681H318V696" fill="none" stroke="#3f7cff" stroke-opacity="0.75" stroke-width="2" marker-end="url(#arrowBlue)"/>
+    <path d="M530 658V681H742V696" fill="none" stroke="#3f7cff" stroke-opacity="0.75" stroke-width="2" marker-end="url(#arrowBlue)"/>
+
+    <!-- preparation -->
+    <g transform="translate(196 697)">
+      <rect width="244" height="87" rx="16" fill="#0a1a2c" stroke="#3f7cff" stroke-opacity="0.8"/>
+      <circle cx="28" cy="28" r="16" fill="#3f7cff" opacity="0.18"/><text x="28" y="33" class="node-title" text-anchor="middle">6</text>
+      <text x="54" y="27" class="node-title">Prepare recovery</text>
+      <text x="54" y="48" class="node-note">reversible quote · no production change</text>
+      <rect x="16" y="61" width="212" height="18" rx="9" fill="#3f7cff" opacity="0.1"/>
+      <text x="122" y="74" class="node-note" fill="#77e1ff" text-anchor="middle">exact option + quote revision ready</text>
+    </g>
+
+    <g transform="translate(620 697)">
+      <rect width="244" height="87" rx="16" fill="#0a1a2c" stroke="#9a8cff" stroke-opacity="0.8"/>
+      <circle cx="28" cy="28" r="16" fill="#9a8cff" opacity="0.18"/><text x="28" y="33" class="node-title" text-anchor="middle">7</text>
+      <text x="54" y="27" class="node-title">Draft customer notice</text>
+      <text x="54" y="48" class="node-note">local draft · nothing published</text>
+      <rect x="16" y="61" width="212" height="18" rx="9" fill="#9a8cff" opacity="0.1"/>
+      <text x="122" y="74" class="node-note" fill="#9a8cff" text-anchor="middle">exact message + revision ready</text>
+    </g>
+
+    <rect x="885" y="697" width="145" height="87" rx="16" fill="#020914" stroke="#f6b941" stroke-opacity="0.45" stroke-dasharray="5 5"/>
+    <path d="M915 740H990" stroke="#f6b941" stroke-width="2" marker-end="url(#arrowBlue)"/>
+    <text x="957" y="721" class="metric-label" fill="#f6b941" text-anchor="middle">AUTHORITY</text>
+    <text x="957" y="762" class="node-note" fill="#f6b941" text-anchor="middle">human boundary</text>
+  </g>
+
+  <!-- Lower: human authority and effects -->
+  <g>
+    <rect x="1090" y="370" width="450" height="452" rx="24" fill="#061322" stroke="#0e2238"/>
+    <rect x="1090" y="370" width="450" height="3" rx="1.5" fill="url(#blueEdge)"/>
+    <text x="1118" y="408" class="eyebrow">06 · HUMAN AUTHORITY → ORDERED EFFECTS</text>
+    <text x="1118" y="435" class="small">Two separate exact approvals. Neither is available to the agent.</text>
+
+    <!-- approvals -->
+    <g transform="translate(1118 458)">
+      <rect width="190" height="82" rx="15" fill="#0a1a2c" stroke="#f6b941" stroke-opacity="0.8"/>
+      <circle cx="24" cy="24" r="12" fill="#f6b941" opacity="0.16"/>
+      <path d="M19 24L23 28L30 20" fill="none" stroke="#f6b941" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      <text x="44" y="23" class="node-title">Approval 1</text>
+      <text x="16" y="48" class="node-note" fill="#f6b941">Apply exact recovery</text>
+      <text x="16" y="66" class="node-note">origin · tool · schema · args · effect · nonce</text>
+    </g>
+    <g transform="translate(1322 458)">
+      <rect width="190" height="82" rx="15" fill="#0a1a2c" stroke="#f6b941" stroke-opacity="0.8"/>
+      <circle cx="24" cy="24" r="12" fill="#f6b941" opacity="0.16"/>
+      <path d="M19 24L23 28L30 20" fill="none" stroke="#f6b941" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      <text x="44" y="23" class="node-title">Approval 2</text>
+      <text x="16" y="48" class="node-note" fill="#f6b941">Publish exact message</text>
+      <text x="16" y="66" class="node-note">origin · tool · schema · args · effect · nonce</text>
+    </g>
+
+    <path d="M1213 540V554H1315V566M1417 540V554H1315V566" fill="none" stroke="#f6b941" stroke-width="1.8"/>
+    <rect x="1143" y="566" width="344" height="38" rx="12" fill="#f6b941" opacity="0.1" stroke="#f6b941" stroke-opacity="0.45"/>
+    <text x="1315" y="581" class="metric-label" fill="#f6b941" text-anchor="middle">LIVE REFRESH + ATOMIC CLAIM</text>
+    <text x="1315" y="596" class="node-note" text-anchor="middle">both approvals verified before dispatch</text>
+
+    <path d="M1315 604V620" stroke="#7fe36a" stroke-width="2" marker-end="url(#arrowGreen)"/>
+
+    <!-- ordered mutation nodes -->
+    <g transform="translate(1143 623)">
+      <rect width="344" height="58" rx="15" fill="#0a1a2c" stroke="#7fe36a" stroke-opacity="0.8"/>
+      <circle cx="27" cy="29" r="16" fill="#7fe36a" opacity="0.15"/><text x="27" y="34" class="node-title" text-anchor="middle">8</text>
+      <text x="53" y="25" class="node-title">Apply recovery</text>
+      <text x="53" y="45" class="node-note">production restored to <tspan fill="#7fe36a" font-weight="700">release-1841</tspan></text>
+      <rect x="281" y="18" width="47" height="22" rx="11" fill="#7fe36a" opacity="0.12"/>
+      <text x="304" y="33" class="node-note" fill="#7fe36a" text-anchor="middle">FIRST</text>
+    </g>
+
+    <path d="M1315 681V702" stroke="#7fe36a" stroke-width="2" marker-end="url(#arrowGreen)"/>
+    <text x="1327" y="696" class="node-note" fill="#7fe36a">success unlocks publication</text>
+
+    <g transform="translate(1143 704)">
+      <rect width="344" height="58" rx="15" fill="#0a1a2c" stroke="#9a8cff" stroke-opacity="0.8"/>
+      <circle cx="27" cy="29" r="16" fill="#9a8cff" opacity="0.16"/><text x="27" y="34" class="node-title" text-anchor="middle">9</text>
+      <text x="53" y="25" class="node-title">Publish customer notice</text>
+      <text x="53" y="45" class="node-note">status advances to <tspan fill="#9a8cff" font-weight="700">notice-r9</tspan></text>
+      <rect x="275" y="18" width="53" height="22" rx="11" fill="#9a8cff" opacity="0.12"/>
+      <text x="301" y="33" class="node-note" fill="#9a8cff" text-anchor="middle">THEN</text>
+    </g>
+
+    <path d="M1315 762V775" stroke="#9a8cff" stroke-width="2" marker-end="url(#arrowBlue)"/>
+    <rect x="1118" y="777" width="394" height="31" rx="12" fill="#9a8cff" opacity="0.1" stroke="#9a8cff" stroke-opacity="0.55"/>
+    <path d="M1136 792L1142 797L1150 786" fill="none" stroke="#9a8cff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="1160" y="797" class="small" fill="#9a8cff">54 append-only entries · SHA-256 chain verified + sealed</text>
+  </g>
+
+  <!-- Footer legend -->
+  <g transform="translate(60 858)">
+    <circle cx="6" cy="0" r="5" fill="#38c7ff"/><text x="18" y="5" class="small">safe read</text>
+    <circle cx="116" cy="0" r="5" fill="#3f7cff"/><text x="128" y="5" class="small">planning</text>
+    <circle cx="224" cy="0" r="5" fill="#f6b941"/><text x="236" y="5" class="small">human authority</text>
+    <circle cx="375" cy="0" r="5" fill="#7fe36a"/><text x="387" y="5" class="small">verified effect</text>
+    <circle cx="509" cy="0" r="5" fill="#ff6b55"/><text x="521" y="5" class="small">blocked threat</text>
+    <circle cx="644" cy="0" r="5" fill="#9a8cff"/><text x="656" y="5" class="small">integrity seal</text>
+    <text x="1480" y="5" class="small mono" text-anchor="end">local integrity evidence · not an external signature</text>
+  </g>
+</svg>
