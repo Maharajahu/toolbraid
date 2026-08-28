@@ -18,6 +18,14 @@ The judge deployment targets a disposable recovery lab: GitHub commit/incident d
 
 **Live demo:** [toolbraid-webmcp.vercel.app](https://toolbraid-webmcp.vercel.app)
 
+## Why this matters
+
+Most browser agents must infer what a website can do from page text, DOM structure, screenshots, and screen coordinates. That approach is fragile: a small interface change can break the workflow, and the agent may not know the exact arguments or side effects of the action it is attempting.
+
+WebMCP lets participating websites expose named, schema-described actions with structured inputs and results. Instead of guessing where to click, an agent can request the exact operation the site supports.
+
+ToolBraid is the orchestration and safety layer above those tools. It discovers capabilities across origins, normalizes incompatible provider contracts, quarantines untrusted metadata, executes safe reads, and requires a separate human approval for every external mutation. WebMCP makes website actions machine-readable; ToolBraid makes multi-site execution reliable, explainable, and accountable without allowing the agent to approve its own actions.
+
 ## How ToolBraid works
 
 [![ToolBraid execution story from one human objective through WebMCP discovery, semantic normalization, a nine-node plan, two exact approvals, ordered effects, and a sealed audit chain](docs/diagrams/toolbraid-how-it-works.svg)](docs/diagrams/toolbraid-how-it-works.svg)
