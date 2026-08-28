@@ -373,14 +373,14 @@ test('Vercel sandbox health uses HEAD, falls back to GET, and returns fixture-co
       methods.push(options.method);
       return options.method === 'HEAD'
         ? { ok: false, status: 405 }
-        : { ok: true, status: 200 };
+        : { ok: true, status: 200, async json() { return { checkout: { failureRatePercent: 0.02 } }; } };
     },
   });
 
   assert.deepEqual(await service.readHealth({ service: 'checkout' }), {
     state: 'operational',
     severity: 'The allowlisted Vercel sandbox is responding normally.',
-    failure_rate: 0,
+    failure_rate: 0.02,
     first_seen_at: '2026-08-28T12:00:00.000Z',
     checked_at: '2026-08-28T12:00:00.000Z',
   });
@@ -389,6 +389,32 @@ test('Vercel sandbox health uses HEAD, falls back to GET, and returns fixture-co
     () => service.readHealth({ service: 'other' }),
     (error) => error.code === 'TARGET_DENIED',
   );
+
+  const degraded = createHealthService({
+    config: { targetUrl: 'https://toolbraid-sandbox.vercel.app/health', timeoutMs: 1000 },
+    now: FIXED_NOW,
+    async fetchImpl(_url, options) {
+      return options.method === 'HEAD'
+        ? { ok: false, status: 405 }
+        : {
+            ok: false,
+            status: 503,
+            async json() {
+              return {
+                checkout: { failureRatePercent: 37.6 },
+                incident: { severity: 'SEV-1', symptom: 'Checkout authorization failures' },
+              };
+            },
+          };
+    },
+  });
+  assert.deepEqual(await degraded.readHealth({ service: 'checkout' }), {
+    state: 'degraded',
+    severity: 'SEV-1: Checkout authorization failures',
+    failure_rate: 37.6,
+    first_seen_at: '2026-08-28T12:00:00.000Z',
+    checked_at: '2026-08-28T12:00:00.000Z',
+  });
 
   const unavailable = createHealthService({
     config: { targetUrl: 'https://toolbraid-sandbox.vercel.app/health', timeoutMs: 1000 },

@@ -26,7 +26,7 @@ Use [.env.example](../.env.example) as the variable contract. Store real values 
 |---|---|
 | `toolbraid-signals-webmcp`, `toolbraid-pulse-webmcp` | `TOOLBRAID_VERCEL_HEALTH_URL` |
 | `toolbraid-source-webmcp` | `TOOLBRAID_GITHUB_TOKEN`, `TOOLBRAID_GITHUB_REPOSITORY`, `TOOLBRAID_GITHUB_REF`, `TOOLBRAID_GITHUB_INCIDENT_ISSUE` |
-| `toolbraid-deploy-webmcp` | `TOOLBRAID_VERCEL_TOKEN`, `TOOLBRAID_VERCEL_PROJECT_ID`, optional `TOOLBRAID_VERCEL_TEAM_ID`, `TOOLBRAID_RECOVERY_SIGNING_SECRET` |
+| `toolbraid-deploy-webmcp` | `TOOLBRAID_VERCEL_TOKEN`, `TOOLBRAID_VERCEL_PROJECT_ID`, `TOOLBRAID_VERCEL_PRODUCTION_ALIAS`, optional `TOOLBRAID_VERCEL_TEAM_ID`, `TOOLBRAID_RECOVERY_SIGNING_SECRET` |
 | `toolbraid-status-webmcp` | `TOOLBRAID_GITHUB_TOKEN`, `TOOLBRAID_GITHUB_REPOSITORY`, `TOOLBRAID_GITHUB_REF`, `TOOLBRAID_GITHUB_INCIDENT_ISSUE` |
 
 Use a fine-grained GitHub token restricted to the single repository with Contents read and Issues read/write. Set `TOOLBRAID_GITHUB_REF` to the exact 40-character degraded-release commit SHA attached to the active recovery-lab deployment. Restrict the Vercel token to the account that owns only the disposable `toolbraid-recovery-lab` target. The recovery lab must have the stable deployment immediately before the intentionally degraded deployment; see [its runbook](../sandbox/recovery-lab/README.md).

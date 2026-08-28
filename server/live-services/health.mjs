@@ -44,12 +44,29 @@ export function createHealthService({
       }
 
       const healthy = response.ok;
+      let payload = null;
+      if (typeof response.json === 'function') {
+        try {
+          payload = await response.json();
+        } catch {
+          payload = null;
+        }
+      }
+      const reportedFailureRate = Number(payload?.checkout?.failureRatePercent);
+      const failureRate = Number.isFinite(reportedFailureRate)
+        && reportedFailureRate >= 0
+        && reportedFailureRate <= 100
+        ? reportedFailureRate
+        : (healthy ? 0 : 100);
+      const incidentSummary = [payload?.incident?.severity, payload?.incident?.symptom]
+        .filter((value) => typeof value === 'string' && value.trim() !== '')
+        .join(': ');
       return {
         state: healthy ? 'operational' : 'degraded',
         severity: healthy
           ? 'The allowlisted Vercel sandbox is responding normally.'
-          : `The allowlisted Vercel sandbox returned HTTP ${response.status}.`,
-        failure_rate: healthy ? 0 : 100,
+          : (incidentSummary || `The allowlisted Vercel sandbox returned HTTP ${response.status}.`),
+        failure_rate: failureRate,
         first_seen_at: checkedAt,
         checked_at: checkedAt,
       };
