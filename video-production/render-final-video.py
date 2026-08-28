@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import atexit
+import hashlib
 import io
 import json
 import math
@@ -27,6 +28,7 @@ import cairosvg
 import numpy as np
 from av.audio.resampler import AudioResampler
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
+from scipy.signal import resample_poly
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -34,6 +36,7 @@ DEFAULT_CONFIG = SCRIPT_DIR / "render-config.json"
 DEFAULT_OUTPUT = SCRIPT_DIR / "output" / "ToolBraid-WebMCP-Challenge-1080p.mp4"
 DEFAULT_REPORT = SCRIPT_DIR / "output" / "ToolBraid-WebMCP-Challenge-1080p.render-report.json"
 AV_TIME_BASE = int(av.time_base)
+MIX_TRUE_PEAK_TARGET_DBTP = -1.5
 
 
 def clamp(value: float, low: float = 0.0, high: float = 1.0) -> float:
@@ -392,7 +395,9 @@ class ToolBraidCompositor:
             x = (px * self.width + timestamp * 8.0 * speed) % self.width
             y = py * self.height + math.sin(timestamp * 0.35 * speed + px * 10.0) * 12.0
             radius = max(1.0, size * 1.8)
-            alpha = int(opacity * (0.45 + 0.55 * math.sin(timestamp * speed + px * 20.0) ** 2))
+            # Keep the field alive through drift, without the repetitive
+            # brightness pulse that made every scene feel mechanically looped.
+            alpha = int(opacity * (0.55 + 0.35 * size))
             draw.ellipse((x - radius, y - radius, x + radius, y + radius), fill=(*self.colors["cyan"], alpha))
         image.alpha_composite(overlay)
 
@@ -484,8 +489,6 @@ class ToolBraidCompositor:
         image = image.convert("RGBA")
         overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
         draw = ImageDraw.Draw(overlay)
-        pulse = 0.5 + 0.5 * math.sin(timestamp * math.tau * 0.9)
-
         if motion == "radial":
             center = (int(self.width * 0.50), int(self.height * 0.49))
             destinations = [
@@ -493,10 +496,12 @@ class ToolBraidCompositor:
                 (0.75, 0.27), (0.75, 0.50), (0.75, 0.72),
             ]
             for index, (dx, dy) in enumerate(destinations):
-                phase = (progress * 1.4 + index * 0.13) % 1.0
+                # Each packet travels once and settles. Modulo motion replayed
+                # the same journey inside a single shot.
+                phase = smoothstep((progress - index * 0.035) / 0.74)
                 x = lerp(center[0], dx * self.width, phase)
                 y = lerp(center[1], dy * self.height, phase)
-                radius = 6 + pulse * 5
+                radius = 8
                 draw.ellipse((x - radius, y - radius, x + radius, y + radius), fill=(*self.colors["cyan"], 210))
             # The architecture includes Mission Control plus six provider
             # documents. The locked judge-facing count is the provider count,
@@ -523,9 +528,9 @@ class ToolBraidCompositor:
             image.alpha_composite(glow)
         else:
             path_y = int(self.height * (0.58 if motion == "execute" else 0.49))
-            x = int(lerp(self.width * 0.20, self.width * 0.82, (progress * 1.6) % 1.0))
+            x = int(lerp(self.width * 0.20, self.width * 0.82, smoothstep(progress)))
             draw.ellipse((x - 13, path_y - 13, x + 13, path_y + 13), outline=(*self.colors["mint"], 235), width=4)
-            draw.ellipse((x - 26 - pulse * 10, path_y - 26 - pulse * 10, x + 26 + pulse * 10, path_y + 26 + pulse * 10), outline=(*self.colors["cyan"], 110), width=3)
+            draw.ellipse((x - 31, path_y - 31, x + 31, path_y + 31), outline=(*self.colors["cyan"], 110), width=3)
 
         image.alpha_composite(overlay)
         image.alpha_composite(self.vignette)
@@ -533,8 +538,11 @@ class ToolBraidCompositor:
 
     def _render_product(self, timestamp: float, segment: dict[str, Any]) -> tuple[Image.Image, dict[str, Any]]:
         start, end = float(segment["start"]), float(segment["end"])
-        progress = smoothstep((timestamp - start) / max(0.001, end - start))
-        source_time = lerp(float(segment["sourceStart"]), float(segment["sourceEnd"]), progress)
+        # Interactive footage is documentary evidence. Advance it at exactly
+        # one source second per timeline second; easing here used to retime the
+        # cursor, pause at both ends, and make genuine interaction look staged.
+        elapsed = clamp(timestamp - start, 0.0, end - start)
+        source_time = min(float(segment["sourceEnd"]), float(segment["sourceStart"]) + elapsed)
         source_key = str(segment.get("source", self.default_product_key))
         if source_key not in self.products:
             raise ValueError(
@@ -542,10 +550,9 @@ class ToolBraidCompositor:
             )
         source = self.products[source_key].get(source_time)
         self.last_product_image = source.copy()
-        zoom_start, zoom_end = segment.get("zoom", [1.0, 1.04])
-        zoom = lerp(float(zoom_start), float(zoom_end), progress)
-        focus_values = segment.get("focus", [0.5, 0.5])
-        image, crop = fitted_zoom(source, self.width, self.height, zoom, (float(focus_values[0]), float(focus_values[1])))
+        source_width, source_height = source.size
+        crop = (0.0, 0.0, float(source_width), float(source_height))
+        image = source.resize((self.width, self.height), Image.Resampling.BICUBIC)
         image = image.convert("RGBA")
         # The UI remains legible while the edges receive a restrained cinematic
         # falloff. This is deliberately lighter than a stylized mockup treatment.
@@ -556,6 +563,7 @@ class ToolBraidCompositor:
             "sourceSize": source.size,
             "sourceTime": source_time,
             "sourceKey": source_key,
+            "playback": "linear-1x",
             "provenance": segment.get("provenance"),
             "publicUrl": segment.get("publicUrl"),
         }
@@ -603,8 +611,7 @@ class ToolBraidCompositor:
         for item in active:
             rect = self._transform_source_rect(item["rect"], metadata["crop"], metadata["sourceSize"])
             color = self.colors.get(item.get("color", "cyan"), self.colors["cyan"])
-            pulse = 0.5 + 0.5 * math.sin(timestamp * math.tau * 1.6)
-            width = 3 + int(pulse * 2)
+            width = 4
             radius = 16
             glow_draw.rounded_rectangle(rect, radius=radius, outline=(*color, 160), width=14)
             draw.rounded_rectangle(rect, radius=radius, outline=(*color, 225), width=width)
@@ -872,9 +879,22 @@ class ToolBraidCompositor:
         image.alpha_composite(overlay)
 
     def _apply_scene_transition(self, image: Image.Image, timestamp: float, scene: dict[str, Any]) -> None:
+        transition = str(
+            scene.get(
+                "transition",
+                self.config.get("editingPolicy", {}).get("defaultSceneTransition", "cut"),
+            )
+        )
+        if transition == "cut":
+            return
         local = timestamp - float(scene["start"])
         remaining = float(scene["end"]) - timestamp
-        visibility = min(smoothstep(local / 0.34), smoothstep(remaining / 0.30))
+        if transition == "fade-from-black":
+            visibility = smoothstep(local / 0.34)
+        elif transition == "fade-to-black":
+            visibility = smoothstep(remaining / 0.30)
+        else:
+            raise ValueError(f"Unsupported scene transition {transition!r} in {scene['id']}")
         if visibility >= 0.999:
             return
         shade = Image.new("RGBA", image.size, (*self.colors["background"], int(255 * (1.0 - visibility))))
@@ -953,6 +973,32 @@ def fit_audio(audio: np.ndarray, samples: int, start_sample: int = 0) -> np.ndar
     return sliced.astype(np.float32, copy=False)
 
 
+def true_peak_dbfs_planar(
+    audio: np.ndarray,
+    sample_rate: int,
+    oversample: int = 4,
+) -> float:
+    """Estimate inter-sample peak for channel-first audio without a huge allocation."""
+
+    if not audio.size:
+        return -240.0
+    peak = 0.0
+    block_samples = max(1, sample_rate * 10)
+    overlap_samples = 256
+    for start in range(0, audio.shape[1], block_samples):
+        end = min(audio.shape[1], start + block_samples)
+        read_start = max(0, start - overlap_samples)
+        read_end = min(audio.shape[1], end + overlap_samples)
+        segment = audio[:, read_start:read_end]
+        oversampled = resample_poly(segment, oversample, 1, axis=1)
+        trim_start = (start - read_start) * oversample
+        trim_end = trim_start + (end - start) * oversample
+        measured = oversampled[:, trim_start:trim_end]
+        if measured.size:
+            peak = max(peak, float(np.max(np.abs(measured))))
+    return 20.0 * math.log10(max(peak, 1e-12))
+
+
 def build_audio_mix(
     narration_path: Path | None,
     ambient_path: Path | None,
@@ -1004,6 +1050,17 @@ def build_audio_mix(
     peak_before = float(np.max(np.abs(mix))) if mix.size else 0.0
     limiter_gain = 1.0 if peak_before <= 0.96 else 0.96 / peak_before
     mix = np.clip(mix * limiter_gain, -1.0, 1.0).astype(np.float32)
+    true_peak_before = true_peak_dbfs_planar(mix, sample_rate)
+    true_peak_gain_db = 0.0
+    if true_peak_before > MIX_TRUE_PEAK_TARGET_DBTP:
+        true_peak_gain_db = MIX_TRUE_PEAK_TARGET_DBTP - true_peak_before - 0.02
+        mix *= np.float32(10.0 ** (true_peak_gain_db / 20.0))
+    true_peak_after = true_peak_dbfs_planar(mix, sample_rate)
+    if true_peak_after > MIX_TRUE_PEAK_TARGET_DBTP + 0.005:
+        correction_db = MIX_TRUE_PEAK_TARGET_DBTP - true_peak_after - 0.02
+        true_peak_gain_db += correction_db
+        mix *= np.float32(10.0 ** (correction_db / 20.0))
+        true_peak_after = true_peak_dbfs_planar(mix, sample_rate)
     peak_after = float(np.max(np.abs(mix))) if mix.size else 0.0
     rms = float(np.sqrt(np.mean(np.square(mix), dtype=np.float64))) if mix.size else 0.0
     metadata = {
@@ -1015,16 +1072,27 @@ def build_audio_mix(
         "peakBeforeLimiter": round(peak_before, 7),
         "limiterGain": round(limiter_gain, 7),
         "peak": round(peak_after, 7),
+        "truePeakTargetDbtp": MIX_TRUE_PEAK_TARGET_DBTP,
+        "truePeakBeforeControlDbtp": round(true_peak_before, 3),
+        "truePeakControlGainDb": round(true_peak_gain_db, 3),
+        "truePeakAfterControlDbtp": round(true_peak_after, 3),
         "rmsDbfs": round(20.0 * math.log10(max(rms, 1e-12)), 2),
     }
     return mix, metadata
 
 
-def configure_video_stream(stream: av.video.stream.VideoStream, codec: str, width: int, height: int, fps: int) -> None:
+def configure_video_stream(
+    stream: av.video.stream.VideoStream,
+    codec: str,
+    width: int,
+    height: int,
+    fps: int,
+    bit_rate: int,
+) -> None:
     stream.width = width
     stream.height = height
     stream.pix_fmt = "yuv420p"
-    stream.bit_rate = 16_000_000
+    stream.bit_rate = bit_rate
     stream.codec_context.gop_size = fps * 2
     stream.codec_context.max_b_frames = 2
     if codec == "h264_nvenc":
@@ -1032,7 +1100,12 @@ def configure_video_stream(stream: av.video.stream.VideoStream, codec: str, widt
             "preset": "p6",
             "tune": "hq",
             "rc": "vbr",
-            "cq": "18",
+            "maxrate": str(round(bit_rate * 1.08)),
+            "bufsize": str(bit_rate * 2),
+            "multipass": "fullres",
+            "spatial-aq": "1",
+            "temporal-aq": "1",
+            "rc-lookahead": "32",
             "profile": "high",
         }
     else:
@@ -1044,12 +1117,19 @@ def configure_video_stream(stream: av.video.stream.VideoStream, codec: str, widt
         }
 
 
-def codec_preflight(codec: str, width: int, height: int, fps: int, output_dir: Path) -> tuple[bool, str | None]:
+def codec_preflight(
+    codec: str,
+    width: int,
+    height: int,
+    fps: int,
+    bit_rate: int,
+    output_dir: Path,
+) -> tuple[bool, str | None]:
     probe_path = output_dir / f".toolbraid-{codec}-{os.getpid()}-probe.mp4"
     try:
         with av.open(str(probe_path), mode="w", format="mp4") as container:
             stream = container.add_stream(codec, rate=fps)
-            configure_video_stream(stream, codec, width, height, fps)
+            configure_video_stream(stream, codec, width, height, fps, bit_rate)
             frame = av.VideoFrame.from_ndarray(np.zeros((height, width, 3), dtype=np.uint8), format="rgb24")
             frame.pts = 0
             frame.time_base = Fraction(1, fps)
@@ -1064,11 +1144,18 @@ def codec_preflight(codec: str, width: int, height: int, fps: int, output_dir: P
         probe_path.unlink(missing_ok=True)
 
 
-def choose_codec(requested: str, width: int, height: int, fps: int, output_dir: Path) -> tuple[str, dict[str, Any]]:
+def choose_codec(
+    requested: str,
+    width: int,
+    height: int,
+    fps: int,
+    bit_rate: int,
+    output_dir: Path,
+) -> tuple[str, dict[str, Any]]:
     candidates = [requested] if requested != "auto" else ["h264_nvenc", "libx264"]
     checks: dict[str, Any] = {}
     for codec in candidates:
-        ok, error = codec_preflight(codec, width, height, fps, output_dir)
+        ok, error = codec_preflight(codec, width, height, fps, bit_rate, output_dir)
         checks[codec] = {"available": ok, "error": error}
         if ok:
             return codec, checks
@@ -1121,29 +1208,96 @@ def probe_output(path: Path) -> dict[str, Any]:
     return result
 
 
-def validate_config(config: dict[str, Any], config_path: Path) -> None:
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def validate_narration_provenance(
+    config: dict[str, Any],
+    config_path: Path,
+    *,
+    allow_absent: bool = False,
+) -> dict[str, Any]:
+    inputs = config["inputs"]
+    source = resolve_from_config(config_path, str(inputs["narration"]))
+    mastered = resolve_from_config(config_path, str(inputs["narrationFinal"]))
+    source_present = source.is_file()
+    mastered_present = mastered.is_file()
+    if allow_absent and not source_present and not mastered_present:
+        return {
+            "source": str(source),
+            "mastered": str(mastered),
+            "verified": False,
+            "skipped": True,
+            "reason": "Narration source and mastered audio are both absent; omission was explicitly allowed.",
+        }
+
+    provenance = inputs.get("narrationProvenance")
+    if not isinstance(provenance, dict):
+        raise ValueError(
+            "inputs.narrationProvenance is required; refusing to use a mastered narration "
+            "without a locked source/master hash pair"
+        )
+
+    for label, path in (("source", source), ("mastered", mastered)):
+        if not path.exists():
+            raise FileNotFoundError(f"Narration provenance {label} file is missing: {path}")
+
+    expected_source = str(provenance.get("sourceSha256", "")).lower()
+    expected_mastered = str(provenance.get("masteredSha256", "")).lower()
+    for label, value in (("sourceSha256", expected_source), ("masteredSha256", expected_mastered)):
+        if len(value) != 64 or any(character not in "0123456789abcdef" for character in value):
+            raise ValueError(f"inputs.narrationProvenance.{label} must be a lowercase SHA-256 digest")
+
+    actual_source = sha256_file(source)
+    actual_mastered = sha256_file(mastered)
+    if actual_source != expected_source:
+        raise RuntimeError(
+            "narration-master.wav changed after the locked mastering pass; refusing to render "
+            "with a potentially stale narration-master-final.wav. Rerun master-narration.py "
+            "and update narrationProvenance with the new verified hash pair."
+        )
+    if actual_mastered != expected_mastered:
+        raise RuntimeError(
+            "narration-master-final.wav does not match its locked mastering provenance; "
+            "refusing to render. Rerun master-narration.py and update narrationProvenance."
+        )
+    return {
+        "source": str(source),
+        "sourceSha256": actual_source,
+        "mastered": str(mastered),
+        "masteredSha256": actual_mastered,
+        "verified": True,
+    }
+
+
+def validate_config(
+    config: dict[str, Any],
+    config_path: Path,
+    *,
+    allow_missing_audio: bool = False,
+) -> dict[str, Any]:
     master = config["master"]
     if (int(master["width"]), int(master["height"]), int(master["fps"])) != (1920, 1080, 30):
         raise ValueError("The challenge master is locked to 1920x1080 at 30 fps")
     if float(master["durationSeconds"]) != 162.0:
         raise ValueError("The challenge master duration is locked to exactly 162 seconds")
-    scenes = config["scenes"]
-    if len(scenes) != 11:
-        raise ValueError(f"Expected exactly 11 scenes, got {len(scenes)}")
-    cursor = 0.0
-    for scene in scenes:
-        start, end = float(scene["start"]), float(scene["end"])
-        if abs(start - cursor) > 1e-6 or end <= start:
-            raise ValueError(f"Scene timeline is not contiguous at {scene['id']}")
-        cursor = end
-        for segment in scene["segments"]:
-            kind = segment["kind"]
-            if kind == "diagram":
-                asset = resolve_from_config(config_path, segment["asset"])
-                if not asset.exists():
-                    raise FileNotFoundError(asset)
-    if abs(cursor - 162.0) > 1e-6:
-        raise ValueError(f"Scene timeline ends at {cursor}, expected 162")
+    editing_policy = config.get("editingPolicy")
+    expected_policy = {
+        "interactivePlayback": "linear-1x",
+        "allowInteractiveReplay": False,
+        "allowInteractiveZoom": False,
+        "crossSourceTimeline": "synchronized-semantic-clock",
+        "defaultSceneTransition": "cut",
+        "repetitivePulse": False,
+    }
+    if editing_policy != expected_policy:
+        raise ValueError(f"editingPolicy must be the locked natural-edit policy: {expected_policy}")
+
     configured_products = config["inputs"].get("productVideos")
     if isinstance(configured_products, dict) and configured_products:
         product_paths = {
@@ -1155,15 +1309,6 @@ def validate_config(config: dict[str, Any], config_path: Path) -> None:
             raise ValueError(
                 f"Unknown defaultProductVideo {default_key!r}; available sources are {sorted(product_paths)}"
             )
-        for scene in scenes:
-            for segment in scene["segments"]:
-                if segment["kind"] != "product":
-                    continue
-                source_key = str(segment.get("source", default_key))
-                if source_key not in product_paths:
-                    raise ValueError(
-                        f"Scene {scene['id']} references unknown product source {source_key!r}"
-                    )
     else:
         product_paths = {
             "default": resolve_from_config(config_path, config["inputs"]["productVideo"])
@@ -1173,15 +1318,118 @@ def validate_config(config: dict[str, Any], config_path: Path) -> None:
         if not required.exists():
             raise FileNotFoundError(required)
 
+    source_durations: dict[str, float] = {}
+    for source_key, product_path in product_paths.items():
+        with av.open(str(product_path)) as container:
+            source_durations[source_key] = float(container.duration or 0) / AV_TIME_BASE
+
+    scenes = config["scenes"]
+    if len(scenes) != 11:
+        raise ValueError(f"Expected exactly 11 scenes, got {len(scenes)}")
+    source_cursors: dict[str, float] = {}
+    synchronized_product_cursor: float | None = None
+    cursor = 0.0
+    for scene in scenes:
+        start, end = float(scene["start"]), float(scene["end"])
+        if abs(start - cursor) > 1e-6 or end <= start:
+            raise ValueError(f"Scene timeline is not contiguous at {scene['id']}")
+        transition = str(scene.get("transition", editing_policy["defaultSceneTransition"]))
+        if transition not in {"cut", "fade-from-black", "fade-to-black"}:
+            raise ValueError(f"Unsupported scene transition {transition!r} in {scene['id']}")
+
+        segment_cursor = start
+        for segment in scene["segments"]:
+            segment_start, segment_end = float(segment["start"]), float(segment["end"])
+            if abs(segment_start - segment_cursor) > 1e-6 or segment_end <= segment_start:
+                raise ValueError(f"Segment timeline is not contiguous in {scene['id']} at {segment_start}")
+            segment_cursor = segment_end
+            kind = segment["kind"]
+            if kind == "diagram":
+                asset = resolve_from_config(config_path, segment["asset"])
+                if not asset.exists():
+                    raise FileNotFoundError(asset)
+                continue
+            if kind in {"intro", "outro"}:
+                continue
+            if kind != "product":
+                raise ValueError(f"Unsupported segment kind {kind!r} in {scene['id']}")
+
+            source_key = str(segment.get("source", default_key))
+            if source_key not in product_paths:
+                raise ValueError(f"Scene {scene['id']} references unknown product source {source_key!r}")
+            if segment.get("playback") != "linear-1x":
+                raise ValueError(f"Interactive segment in {scene['id']} must declare playback='linear-1x'")
+            forbidden_retime = {"speed", "rate", "timeScale", "retime", "reverse"}.intersection(segment)
+            if forbidden_retime:
+                raise ValueError(
+                    f"Interactive segment in {scene['id']} declares forbidden retiming fields: "
+                    f"{sorted(forbidden_retime)}"
+                )
+            if "zoom" in segment:
+                raise ValueError(
+                    f"Interactive segment in {scene['id']} declares zoom; cursor footage must remain full-frame"
+                )
+
+            source_start = float(segment["sourceStart"])
+            source_end = float(segment["sourceEnd"])
+            timeline_duration = segment_end - segment_start
+            source_duration = source_end - source_start
+            if source_start < 0.0 or source_end <= source_start:
+                raise ValueError(f"Invalid source interval in {scene['id']}: {source_start}..{source_end}")
+            if abs(timeline_duration - source_duration) > 1e-6:
+                raise ValueError(
+                    f"Interactive retiming is forbidden in {scene['id']}: timeline={timeline_duration:.6f}s, "
+                    f"source={source_duration:.6f}s"
+                )
+            previous_end = source_cursors.get(source_key)
+            if previous_end is not None and source_start < previous_end - 1e-6:
+                raise ValueError(
+                    f"Interactive replay/backtracking is forbidden for {source_key!r} in {scene['id']}: "
+                    f"sourceStart={source_start:.6f} precedes prior sourceEnd={previous_end:.6f}"
+                )
+            source_cursors[source_key] = source_end
+            if (
+                synchronized_product_cursor is not None
+                and source_start < synchronized_product_cursor - 1e-6
+            ):
+                raise ValueError(
+                    "Interactive replay/backtracking is forbidden across synchronized product "
+                    f"sources in {scene['id']}: {source_key!r} sourceStart={source_start:.6f} "
+                    f"precedes global prior sourceEnd={synchronized_product_cursor:.6f}"
+                )
+            synchronized_product_cursor = source_end
+            if source_end > source_durations[source_key] + (1.0 / int(master["fps"])):
+                raise ValueError(
+                    f"Interactive segment in {scene['id']} exceeds {source_key!r} duration "
+                    f"({source_end:.3f}s > {source_durations[source_key]:.3f}s)"
+                )
+        if abs(segment_cursor - end) > 1e-6:
+            raise ValueError(f"Segment timeline in {scene['id']} ends at {segment_cursor}, expected {end}")
+        cursor = end
+    if abs(cursor - 162.0) > 1e-6:
+        raise ValueError(f"Scene timeline ends at {cursor}, expected 162")
+
+    return validate_narration_provenance(
+        config,
+        config_path,
+        allow_absent=allow_missing_audio,
+    )
+
 
 def render_master(args: argparse.Namespace) -> dict[str, Any]:
     config_path = Path(args.config).resolve()
     config = json.loads(config_path.read_text(encoding="utf-8"))
-    validate_config(config, config_path)
+    allow_missing_audio = bool(args.smoke or args.allow_missing_audio)
+    narration_provenance = validate_config(
+        config,
+        config_path,
+        allow_missing_audio=allow_missing_audio,
+    )
     master = config["master"]
     width, height, fps = int(master["width"]), int(master["height"]), int(master["fps"])
     full_duration = float(master["durationSeconds"])
     sample_rate = int(master["sampleRate"])
+    video_bit_rate = int(master.get("videoBitrate", 16_000_000))
 
     smoke = bool(args.smoke)
     start = float(args.start if args.start is not None else (21.0 if smoke else 0.0))
@@ -1200,11 +1448,10 @@ def render_master(args: argparse.Namespace) -> dict[str, Any]:
     narration = narration_final if narration_final.exists() else narration_fallback
     captions_path = resolve_from_config(config_path, config["inputs"]["captions"])
     ambient = resolve_from_config(config_path, config["inputs"]["ambientBed"])
-    if not smoke and not args.allow_missing_audio:
-        if not narration.exists():
-            raise FileNotFoundError(f"Narration master is required for a full render: {narration}")
-        if not captions_path.exists():
-            raise FileNotFoundError(f"Caption timings are required for a full render: {captions_path}")
+    if not allow_missing_audio and not narration.exists():
+        raise FileNotFoundError(f"Narration master is required for this render: {narration}")
+    if not smoke and not captions_path.exists():
+        raise FileNotFoundError(f"Caption timings are required for a full render: {captions_path}")
 
     captions = CaptionTrack(captions_path if captions_path.exists() else None)
     audio, audio_report = build_audio_mix(
@@ -1215,7 +1462,14 @@ def render_master(args: argparse.Namespace) -> dict[str, Any]:
         duration,
     )
 
-    codec, codec_checks = choose_codec(args.codec, width, height, fps, output.parent)
+    codec, codec_checks = choose_codec(
+        args.codec,
+        width,
+        height,
+        fps,
+        video_bit_rate,
+        output.parent,
+    )
     frame_count = int(round(duration * fps))
     compositor = ToolBraidCompositor(config, config_path, captions)
     staged_output = output.with_name(f".{output.stem}.rendering-{os.getpid()}{output.suffix}")
@@ -1236,7 +1490,14 @@ def render_master(args: argparse.Namespace) -> dict[str, Any]:
             # MP4 can atomically replace it on the same filesystem.
             with av.open(str(staged_output), mode="w", format="mp4", options={"movflags": "+faststart"}) as container:
                 video_stream = container.add_stream(codec, rate=fps)
-                configure_video_stream(video_stream, codec, width, height, fps)
+                configure_video_stream(
+                    video_stream,
+                    codec,
+                    width,
+                    height,
+                    fps,
+                    video_bit_rate,
+                )
                 audio_stream = container.add_stream("aac", rate=sample_rate)
                 audio_stream.layout = "stereo"
                 audio_stream.bit_rate = 192_000
@@ -1281,6 +1542,35 @@ def render_master(args: argparse.Namespace) -> dict[str, Any]:
     probe = probe_output(output)
     finished_at = datetime.now(timezone.utc)
     render_seconds = (finished_at - started_at).total_seconds()
+    configured_video_sources = (
+        config["inputs"].get("productVideos")
+        if isinstance(config["inputs"].get("productVideos"), dict)
+        else {"default": config["inputs"]["productVideo"]}
+    )
+    video_source_paths = {
+        str(key): resolve_from_config(config_path, str(value))
+        for key, value in configured_video_sources.items()
+    }
+    artifact_hashes = {
+        "renderConfig": {
+            "path": str(config_path),
+            "sha256": sha256_file(config_path),
+        },
+        "captions": {
+            "path": str(captions_path),
+            "present": captions_path.is_file(),
+            "sha256": sha256_file(captions_path) if captions_path.is_file() else None,
+        },
+        "productVideos": {
+            key: {"path": str(path), "sha256": sha256_file(path)}
+            for key, path in video_source_paths.items()
+        },
+        "output": {
+            "path": str(output),
+            "bytes": output.stat().st_size,
+            "sha256": sha256_file(output),
+        },
+    }
     report = {
         "format": "toolbraid-final-render-report-v1",
         "generatedAt": finished_at.isoformat(),
@@ -1296,6 +1586,7 @@ def render_master(args: argparse.Namespace) -> dict[str, Any]:
         },
         "encoded": {
             "videoCodec": codec,
+            "videoBitrate": video_bit_rate,
             "audioCodec": "aac",
             "pixelFormat": "yuv420p",
             "frameCount": frame_count,
@@ -1310,21 +1601,19 @@ def render_master(args: argparse.Namespace) -> dict[str, Any]:
             "narration": str(narration),
             "preferredFinalPresent": narration_final.exists(),
             "ambient": str(ambient) if ambient.exists() and not args.no_ambient else None,
+            "narrationProvenance": narration_provenance,
         },
         "videoSources": {
-            str(key): str(resolve_from_config(config_path, str(value)))
-            for key, value in (
-                config["inputs"].get("productVideos")
-                if isinstance(config["inputs"].get("productVideos"), dict)
-                else {"default": config["inputs"]["productVideo"]}
-            ).items()
+            key: str(path) for key, path in video_source_paths.items()
         },
         "captions": {
             "path": str(captions_path),
             "present": captions_path.exists(),
+            "sha256": artifact_hashes["captions"]["sha256"],
             "entries": len(captions.captions),
             "burnedIn": captions_path.exists(),
         },
+        "artifactHashes": artifact_hashes,
         "probe": probe,
     }
     staged_report = report_path.with_name(f".{report_path.name}.writing-{os.getpid()}.tmp")
@@ -1357,7 +1646,11 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(sys.argv[1:] if argv is None else argv)
     config_path = Path(args.config).resolve()
     config = json.loads(config_path.read_text(encoding="utf-8"))
-    validate_config(config, config_path)
+    validate_config(
+        config,
+        config_path,
+        allow_missing_audio=bool(args.smoke or args.allow_missing_audio),
+    )
     if args.validate_only:
         print("ToolBraid compositor validation passed: 11 scenes, 1920x1080/30, 162 seconds.")
         return 0

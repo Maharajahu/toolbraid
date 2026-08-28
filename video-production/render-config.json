@@ -6,7 +6,16 @@
     "fps": 30,
     "durationSeconds": 162,
     "sampleRate": 48000,
-    "channels": 2
+    "channels": 2,
+    "videoBitrate": 4400000
+  },
+  "editingPolicy": {
+    "interactivePlayback": "linear-1x",
+    "allowInteractiveReplay": false,
+    "allowInteractiveZoom": false,
+    "crossSourceTimeline": "synchronized-semantic-clock",
+    "defaultSceneTransition": "cut",
+    "repetitivePulse": false
   },
   "palette": {
     "background": "#020914",
@@ -29,6 +38,10 @@
     "defaultProductVideo": "public",
     "narrationFinal": "work/narration-master-final.wav",
     "narration": "work/narration-master.wav",
+    "narrationProvenance": {
+      "sourceSha256": "b68ad2499abc58855f7e03712db308388c9df5abfb50bfa81501f148c03dbcff",
+      "masteredSha256": "5bd3940d3a3cf01d745f97fd17cd42a19c0d832db51fb9ceb7ac82ffa8d1663d"
+    },
     "captions": "work/narration-captions.json",
     "ambientBed": "work/ambient-bed.wav",
     "logo": "../assets/favicon.svg"
@@ -40,7 +53,7 @@
       "end": 8,
       "captionPosition": "bottom",
       "segments": [
-        {"start": 0, "end": 8, "kind": "product", "source": "public", "sourceStart": 0.78, "sourceEnd": 6.20, "focus": [0.50, 0.48], "zoom": [1.00, 1.025], "provenance": "public", "publicUrl": "https://toolbraid-webmcp.vercel.app"}
+        {"start": 0, "end": 8, "kind": "product", "source": "public", "sourceStart": 2.50, "sourceEnd": 10.50, "playback": "linear-1x", "provenance": "public", "publicUrl": "https://toolbraid-webmcp.vercel.app"}
       ],
       "kicker": "WEBMCP CHALLENGE 2026",
       "headline": "One objective. Human authority.",
@@ -52,13 +65,14 @@
       "end": 21,
       "captionPosition": "bottom",
       "segments": [
-        {"start": 8, "end": 21, "kind": "product", "source": "public", "sourceStart": 0.78, "sourceEnd": 5.75, "focus": [0.17, 0.28], "zoom": [1.00, 1.075], "provenance": "public"}
+        {"start": 8, "end": 11.25, "kind": "product", "source": "public", "sourceStart": 10.50, "sourceEnd": 13.75, "playback": "linear-1x", "provenance": "public"},
+        {"start": 11.25, "end": 21, "kind": "diagram", "asset": "../docs/diagrams/toolbraid-how-it-works.svg", "motion": "scan"}
       ],
       "kicker": "THE OBJECTIVE",
       "headline": "Restore checkout safely",
       "subhead": "READ FIRST  ·  EXACT APPROVAL",
       "highlights": [
-        {"start": 10.0, "end": 18.5, "rect": [0.044, 0.132, 0.193, 0.385], "color": "cyan"}
+        {"start": 8.5, "end": 11.1, "rect": [0.044, 0.132, 0.193, 0.385], "color": "cyan"}
       ]
     },
     {
@@ -67,16 +81,12 @@
       "end": 36,
       "captionPosition": "bottom",
       "segments": [
-        {"start": 21, "end": 25, "kind": "product", "source": "public", "sourceStart": 0.78, "sourceEnd": 4.50, "focus": [0.76, 0.045], "zoom": [1.02, 1.16], "provenance": "public"},
-        {"start": 25, "end": 33, "kind": "diagram", "asset": "../docs/diagrams/toolbraid-cross-origin-architecture.svg", "motion": "radial"},
-        {"start": 33, "end": 36, "kind": "product", "source": "public", "sourceStart": 5.50, "sourceEnd": 7.45, "focus": [0.50, 0.48], "zoom": [1.045, 1.00], "provenance": "public"}
+        {"start": 21, "end": 36, "kind": "diagram", "asset": "../docs/diagrams/toolbraid-cross-origin-architecture.svg", "motion": "radial"}
       ],
       "kicker": "NATIVE WEBMCP",
       "headline": "Six isolated provider origins",
       "subhead": "registerTool  →  getTools  →  executeTool",
-      "highlights": [
-        {"start": 21.2, "end": 24.8, "rect": [0.675, 0.015, 0.815, 0.060], "color": "mint"}
-      ]
+      "highlights": []
     },
     {
       "id": "04-discovery-quarantine",
@@ -84,13 +94,14 @@
       "end": 51,
       "captionPosition": "bottom",
       "segments": [
-        {"start": 36, "end": 51, "kind": "product", "source": "public", "sourceStart": 5.80, "sourceEnd": 19.48, "focus": [0.46, 0.43], "zoom": [1.00, 1.055], "provenance": "public"}
+        {"start": 36, "end": 41.73, "kind": "product", "source": "public", "sourceStart": 13.75, "sourceEnd": 19.48, "playback": "linear-1x", "provenance": "public"},
+        {"start": 41.73, "end": 51, "kind": "diagram", "asset": "../docs/diagrams/toolbraid-how-it-works.svg", "motion": "scan"}
       ],
       "kicker": "UNTRUSTED METADATA",
       "headline": "Quarantine before scoring",
       "subhead": "9 DISCOVERED  ·  1 EXCLUDED",
       "highlights": [
-        {"start": 42.0, "end": 50.2, "rect": [0.326, 0.290, 0.382, 0.430], "color": "red"}
+        {"start": 36.8, "end": 41.5, "rect": [0.326, 0.290, 0.382, 0.430], "color": "red"}
       ]
     },
     {
@@ -99,14 +110,14 @@
       "end": 68,
       "captionPosition": "bottom",
       "segments": [
-        {"start": 51, "end": 63, "kind": "product", "source": "public", "sourceStart": 19.50, "sourceEnd": 24.94, "focus": [0.79, 0.47], "zoom": [1.00, 1.075], "provenance": "public"},
-        {"start": 63, "end": 68, "kind": "diagram", "asset": "../docs/diagrams/toolbraid-how-it-works.svg", "motion": "scan"}
+        {"start": 51, "end": 56.46, "kind": "product", "source": "public", "sourceStart": 19.48, "sourceEnd": 24.94, "playback": "linear-1x", "provenance": "public"},
+        {"start": 56.46, "end": 68, "kind": "diagram", "asset": "../docs/diagrams/toolbraid-how-it-works.svg", "motion": "flow"}
       ],
       "kicker": "SEMANTIC INTEROPERABILITY",
       "headline": "Seven canonical capabilities",
       "subhead": "HETEROGENEOUS CONTRACTS  →  9-NODE GRAPH",
       "highlights": [
-        {"start": 52.0, "end": 60.5, "rect": [0.770, 0.123, 0.995, 0.935], "color": "cyan"}
+        {"start": 52.0, "end": 56.2, "rect": [0.770, 0.123, 0.995, 0.935], "color": "cyan"}
       ]
     },
     {
@@ -115,14 +126,15 @@
       "end": 85,
       "captionPosition": "bottom",
       "segments": [
-        {"start": 68, "end": 85, "kind": "product", "source": "public", "sourceStart": 24.96, "sourceEnd": 36.45, "focus": [0.45, 0.48], "zoom": [1.00, 1.055], "provenance": "public"}
+        {"start": 68, "end": 79.51, "kind": "product", "source": "public", "sourceStart": 24.94, "sourceEnd": 36.45, "playback": "linear-1x", "provenance": "public"},
+        {"start": 79.51, "end": 85, "kind": "diagram", "asset": "../docs/diagrams/toolbraid-how-it-works.svg", "motion": "scan"}
       ],
       "kicker": "BOUNDED AUTONOMY",
       "headline": "Four reads in parallel",
       "subhead": "READ-ONLY FALLBACK  ·  NO MUTATION FAILOVER",
       "highlights": [
-        {"start": 72.5, "end": 81.5, "rect": [0.045, 0.390, 0.195, 0.795], "color": "green"},
-        {"start": 75.0, "end": 84.3, "rect": [0.270, 0.245, 0.570, 0.770], "color": "green"}
+        {"start": 72.5, "end": 79.3, "rect": [0.045, 0.390, 0.195, 0.795], "color": "green"},
+        {"start": 75.0, "end": 79.3, "rect": [0.270, 0.245, 0.570, 0.770], "color": "green"}
       ]
     },
     {
@@ -131,15 +143,12 @@
       "end": 103,
       "captionPosition": "top",
       "segments": [
-        {"start": 85, "end": 91, "kind": "diagram", "asset": "../docs/diagrams/toolbraid-how-it-works.svg", "motion": "flow"},
-        {"start": 91, "end": 103, "kind": "product", "source": "public", "sourceStart": 29.55, "sourceEnd": 36.45, "focus": [0.50, 0.70], "zoom": [1.025, 1.085], "provenance": "public"}
+        {"start": 85, "end": 103, "kind": "diagram", "asset": "../docs/diagrams/toolbraid-how-it-works.svg", "motion": "flow"}
       ],
       "kicker": "EVIDENCE FIRST",
       "headline": "Arguments finalize after reads",
       "subhead": "AGENT PREPARES  ·  HUMAN AUTHORIZES",
-      "highlights": [
-        {"start": 94.0, "end": 102.4, "rect": [0.250, 0.760, 0.680, 0.970], "color": "amber"}
-      ]
+      "highlights": []
     },
     {
       "id": "08-exact-approvals",
@@ -148,14 +157,14 @@
       "captionPosition": "top",
       "segments": [
         {"start": 103, "end": 108, "kind": "diagram", "asset": "../docs/diagrams/toolbraid-human-authority.svg", "motion": "authority"},
-        {"start": 108, "end": 112.5, "kind": "product", "source": "public", "sourceStart": 37.03, "sourceEnd": 44.00, "focus": [0.50, 0.48], "zoom": [1.01, 1.025], "provenance": "public"},
-        {"start": 112.5, "end": 122, "kind": "product", "source": "local", "sourceStart": 35.53, "sourceEnd": 49.27, "focus": [0.50, 0.48], "zoom": [1.01, 1.045], "provenance": "local-fixture"}
+        {"start": 108, "end": 115.55, "kind": "product", "source": "public", "sourceStart": 36.45, "sourceEnd": 44.00, "playback": "linear-1x", "provenance": "public"},
+        {"start": 115.55, "end": 122, "kind": "product", "source": "local", "sourceStart": 44.00, "sourceEnd": 50.45, "playback": "linear-1x", "provenance": "local-fixture"}
       ],
       "kicker": "TWO SEPARATE PACKETS",
       "headline": "Exact scope. Single use.",
       "subhead": "PRODUCTION  ≠  COMMUNICATION",
       "highlights": [
-        {"start": 109.0, "end": 121.0, "rect": [0.195, 0.120, 0.805, 0.835], "color": "amber"}
+        {"start": 109.0, "end": 121.7, "rect": [0.195, 0.120, 0.805, 0.835], "color": "amber"}
       ]
     },
     {
@@ -165,13 +174,13 @@
       "captionPosition": "top",
       "segments": [
         {"start": 122, "end": 126, "kind": "diagram", "asset": "../docs/diagrams/toolbraid-human-authority.svg", "motion": "execute"},
-        {"start": 126, "end": 140, "kind": "product", "source": "local", "sourceStart": 49.27, "sourceEnd": 61.40, "focus": [0.50, 0.56], "zoom": [1.03, 1.08], "provenance": "local-fixture"}
+        {"start": 126, "end": 140, "kind": "product", "source": "local", "sourceStart": 50.45, "sourceEnd": 64.45, "playback": "linear-1x", "provenance": "local-fixture"}
       ],
       "kicker": "FAIL-CLOSED EXECUTION",
       "headline": "Refresh. Revalidate. Claim.",
       "subhead": "1  APPLY RECOVERY   ·   2  PUBLISH UPDATE",
       "highlights": [
-        {"start": 127.0, "end": 139.2, "rect": [0.260, 0.660, 0.690, 0.800], "color": "green"}
+        {"start": 126.1, "end": 139.8, "rect": [0.260, 0.660, 0.690, 0.800], "color": "green"}
       ]
     },
     {
@@ -180,14 +189,15 @@
       "end": 156,
       "captionPosition": "top",
       "segments": [
-        {"start": 140, "end": 156, "kind": "product", "source": "local", "sourceStart": 54.53, "sourceEnd": 67.55, "focus": [0.51, 0.55], "zoom": [1.00, 1.065], "provenance": "local-fixture"}
+        {"start": 140, "end": 145.75, "kind": "product", "source": "local", "sourceStart": 64.45, "sourceEnd": 70.20, "playback": "linear-1x", "provenance": "local-fixture"},
+        {"start": 145.75, "end": 156, "kind": "diagram", "asset": "../docs/diagrams/toolbraid-how-it-works.svg", "motion": "flow"}
       ],
       "kicker": "VERIFIED LOCAL OUTCOME",
       "headline": "54 events. Audit sealed.",
       "subhead": "release-1841  ·  notice-r9  ·  sha256-chain-v1",
       "highlights": [
-        {"start": 141.5, "end": 149.0, "rect": [0.045, 0.125, 0.194, 0.382], "color": "green"},
-        {"start": 146.0, "end": 155.2, "rect": [0.050, 0.825, 0.760, 0.967], "color": "mint"}
+        {"start": 140.2, "end": 145.6, "rect": [0.045, 0.125, 0.194, 0.382], "color": "green"},
+        {"start": 140.4, "end": 145.6, "rect": [0.050, 0.825, 0.760, 0.967], "color": "mint"}
       ]
     },
     {

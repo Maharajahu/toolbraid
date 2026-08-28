@@ -26,6 +26,7 @@ EXPECTED_FPS = 30.0
 EXPECTED_DURATION = 162.0
 EXPECTED_FRAMES = int(EXPECTED_DURATION * EXPECTED_FPS)
 EXPECTED_SAMPLE_RATE = 48_000
+FINAL_TRUE_PEAK_CEILING_DBTP = -1.0
 SAMPLE_TIMES = (3.0, 12.0, 25.5, 41.0, 56.0, 72.0, 89.0, 105.0, 116.0, 130.0, 146.0, 159.0)
 
 
@@ -175,7 +176,9 @@ def validate(path: Path, report_path: Path, contact_sheet_path: Path) -> dict[st
         "audioIs48kStereo": audio["sampleRate"] == EXPECTED_SAMPLE_RATE and audio["channels"] == 2,
         "audioDurationMatchesVideo": abs(float(audio["decodedDurationSeconds"]) - duration) <= 0.05,
         "audioIsAudible": float(audio["integratedLufs"]) > -24.0,
-        "audioIsNotClipped": float(audio["truePeakEstimateDbtp"]) <= -0.1,
+        "audioTruePeakWithinCeiling": (
+            float(audio["truePeakEstimateDbtp"]) <= FINAL_TRUE_PEAK_CEILING_DBTP
+        ),
         "allVisualSamplesPresent": len(samples) == len(SAMPLE_TIMES),
         "noBlankSampledFrames": all(
             float(sample["lumaMean"]) > 3.0 and float(sample["lumaStdDev"]) > 3.0

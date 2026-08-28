@@ -19,6 +19,7 @@ import importlib.util
 import json
 import math
 import os
+import random
 import subprocess
 import sys
 import tempfile
@@ -194,10 +195,10 @@ class CaptureTimeline:
         self.entries.append(entry)
 
 
-def install_capture_cursor(page: Page) -> None:
-    """Install the only injected page artifact: a visible recording cursor."""
+def install_capture_cursor(page: Page, pointer: tuple[float, float]) -> None:
+    """Install a restrained system-style cursor for Playwright video capture."""
     page.evaluate(
-        """() => {
+        """({ x, y }) => {
           const prior = document.getElementById('__toolbraid_capture_cursor__');
           if (prior) prior.remove();
 
@@ -208,40 +209,29 @@ def install_capture_cursor(page: Page) -> None:
             'position:fixed',
             'left:0',
             'top:0',
-            'width:34px',
-            'height:42px',
+            'width:26px',
+            'height:32px',
             'pointer-events:none',
             'z-index:2147483647',
-            'transform:translate3d(960px,540px,0)',
-            'transform-origin:4px 4px',
-            'filter:drop-shadow(0 3px 7px rgba(0,0,0,.72))',
+            `transform:translate3d(${x}px,${y}px,0)`,
+            'transform-origin:2px 2px',
+            'filter:drop-shadow(0 2px 3px rgba(0,0,0,.62))',
             'will-change:transform',
           ].join(';');
           cursor.innerHTML = `
-            <svg width="34" height="42" viewBox="0 0 34 42" fill="none"
+            <svg width="26" height="32" viewBox="0 0 26 32" fill="none"
                  xmlns="http://www.w3.org/2000/svg">
-              <path d="M4 3L4.3 31.2L11.9 24.9L17.3 37.5L23.1 34.9L17.7 22.7L27.3 22.2L4 3Z"
-                    fill="#F7FBFF" stroke="#07101C" stroke-width="2.6"
+              <path d="M2 1.5L2.2 24.2L8.1 19.3L12.5 29.4L17.2 27.3L12.8 17.4L20.5 17L2 1.5Z"
+                    fill="#F7FBFF" stroke="#07101C" stroke-width="1.8"
                     stroke-linejoin="round"/>
-              <circle data-capture-pulse cx="8" cy="7" r="5.5"
-                      stroke="#59F6D2" stroke-width="2" opacity="0"/>
             </svg>`;
           document.documentElement.appendChild(cursor);
 
-          const pulse = cursor.querySelector('[data-capture-pulse]');
           document.addEventListener('mousemove', (event) => {
             cursor.style.transform = `translate3d(${event.clientX}px,${event.clientY}px,0)`;
           }, true);
-          document.addEventListener('mousedown', () => {
-            pulse.animate(
-              [
-                { opacity: 0.95, transform: 'scale(.55)' },
-                { opacity: 0, transform: 'scale(2.35)' },
-              ],
-              { duration: 360, easing: 'cubic-bezier(.2,.75,.25,1)' },
-            );
-          }, true);
-        }"""
+        }""",
+        {"x": pointer[0], "y": pointer[1]},
     )
 
 
@@ -257,7 +247,9 @@ class DemoDirector:
         self.timeline = timeline
         self.pace = pace
         self.target = target
-        self.pointer = (WIDTH * 0.5, HEIGHT * 0.72)
+        self.motion_seed = 20_260_828_01 + (1 if target == "local" else 0)
+        self.rng = random.Random(self.motion_seed)
+        self.pointer = (WIDTH * 0.86, HEIGHT * 0.82)
 
     def wait(self, seconds: float, *, floor_ms: int = 55) -> None:
         self.page.wait_for_timeout(max(floor_ms, round(seconds * self.pace * 1000)))
@@ -269,52 +261,219 @@ class DemoDirector:
             timeout=timeout * 1000,
         )
 
-    @staticmethod
-    def ease_in_out_cubic(value: float) -> float:
-        if value < 0.5:
-            return 4 * value * value * value
-        return 1 - ((-2 * value + 2) ** 3) / 2
+    def pause(self, low: float, high: float, *, floor_ms: int = 45) -> None:
+        self.wait(self.rng.uniform(low, high), floor_ms=floor_ms)
 
-    def move_pointer(self, destination: tuple[float, float]) -> None:
+    @staticmethod
+    def minimum_jerk(value: float) -> float:
+        value = max(0.0, min(1.0, value))
+        return value**3 * (10.0 - 15.0 * value + 6.0 * value * value)
+
+    @staticmethod
+    def cubic_bezier(
+        start: tuple[float, float],
+        control_a: tuple[float, float],
+        control_b: tuple[float, float],
+        end: tuple[float, float],
+        value: float,
+    ) -> tuple[float, float]:
+        inverse = 1.0 - value
+        x = (
+            inverse**3 * start[0]
+            + 3.0 * inverse * inverse * value * control_a[0]
+            + 3.0 * inverse * value * value * control_b[0]
+            + value**3 * end[0]
+        )
+        y = (
+            inverse**3 * start[1]
+            + 3.0 * inverse * inverse * value * control_a[1]
+            + 3.0 * inverse * value * value * control_b[1]
+            + value**3 * end[1]
+        )
+        return x, y
+
+    def _curve_pointer(
+        self,
+        destination: tuple[float, float],
+        duration: float,
+        *,
+        bend_scale: float = 1.0,
+    ) -> None:
         start_x, start_y = self.pointer
         target_x, target_y = destination
         distance = math.hypot(target_x - start_x, target_y - start_y)
-        steps = max(8, min(34, round(distance / 42) + 7))
-        total_ms = max(100, round((0.28 + min(distance, 900) / 1500) * self.pace * 1000))
-        per_step_ms = max(3, round(total_ms / steps))
+        if distance < 0.5:
+            return
+
+        direction_x = (target_x - start_x) / distance
+        direction_y = (target_y - start_y) / distance
+        normal_x, normal_y = -direction_y, direction_x
+        side = -1.0 if self.rng.random() < 0.5 else 1.0
+        bend = side * min(48.0, max(3.0, distance * self.rng.uniform(0.018, 0.044)))
+        bend *= bend_scale
+        first_anchor = self.rng.uniform(0.24, 0.34)
+        second_anchor = self.rng.uniform(0.68, 0.80)
+        control_a = (
+            start_x + (target_x - start_x) * first_anchor + normal_x * bend,
+            start_y + (target_y - start_y) * first_anchor + normal_y * bend,
+        )
+        control_b = (
+            start_x + (target_x - start_x) * second_anchor + normal_x * bend * self.rng.uniform(0.28, 0.62),
+            start_y + (target_y - start_y) * second_anchor + normal_y * bend * self.rng.uniform(0.28, 0.62),
+        )
+        scaled_duration = max(0.065, duration * self.pace)
+        steps = max(5, min(80, round(scaled_duration * 78)))
+        per_step_ms = max(4, round(scaled_duration * 1000 / steps))
+        wobble = min(2.2, max(0.35, distance / 360.0)) * self.rng.uniform(0.55, 1.0)
+        wobble_phase = self.rng.uniform(0.0, math.tau)
         for index in range(1, steps + 1):
-            progress = self.ease_in_out_cubic(index / steps)
-            x = start_x + (target_x - start_x) * progress
-            y = start_y + (target_y - start_y) * progress
+            linear_progress = index / steps
+            progress = self.minimum_jerk(linear_progress)
+            x, y = self.cubic_bezier(
+                (start_x, start_y),
+                control_a,
+                control_b,
+                destination,
+                progress,
+            )
+            lateral = (
+                math.sin(math.pi * progress)
+                * math.sin(3.0 * math.pi * progress + wobble_phase)
+                * wobble
+            )
+            x += normal_x * lateral
+            y += normal_y * lateral
             self.page.mouse.move(x, y)
             self.page.wait_for_timeout(per_step_ms)
         self.pointer = destination
 
-    def clickable_point(
+    def move_pointer(
+        self,
+        destination: tuple[float, float],
+        *,
+        target_width: float = 72.0,
+        allow_overshoot: bool = True,
+    ) -> None:
+        start_x, start_y = self.pointer
+        distance = math.hypot(destination[0] - start_x, destination[1] - start_y)
+        width = max(20.0, min(260.0, target_width))
+        difficulty = math.log2(distance / width + 1.0)
+        duration = max(
+            0.22,
+            min(0.88, 0.17 + 0.105 * difficulty + self.rng.uniform(-0.025, 0.055)),
+        )
+        should_overshoot = (
+            allow_overshoot
+            and distance > 280.0
+            and self.rng.random() < 0.27
+        )
+        if not should_overshoot:
+            self._curve_pointer(destination, duration)
+            return
+
+        direction_x = (destination[0] - start_x) / distance
+        direction_y = (destination[1] - start_y) / distance
+        normal_x, normal_y = -direction_y, direction_x
+        overshoot_distance = self.rng.uniform(4.0, min(12.0, width * 0.12))
+        overshoot = (
+            destination[0]
+            + direction_x * overshoot_distance
+            + normal_x * self.rng.uniform(-2.2, 2.2),
+            destination[1]
+            + direction_y * overshoot_distance
+            + normal_y * self.rng.uniform(-2.2, 2.2),
+        )
+        self._curve_pointer(overshoot, duration * self.rng.uniform(0.78, 0.88))
+        self.pause(0.045, 0.09, floor_ms=28)
+        self._curve_pointer(
+            destination,
+            self.rng.uniform(0.075, 0.135),
+            bend_scale=0.32,
+        )
+
+    def _scroll_target_into_view(self, locator: Locator, event: str) -> None:
+        margin = 72.0
+        for attempt in range(5):
+            rect = locator.evaluate(
+                """element => {
+                  const bounds = element.getBoundingClientRect();
+                  return {
+                    left: bounds.left,
+                    top: bounds.top,
+                    right: bounds.right,
+                    bottom: bounds.bottom,
+                    width: bounds.width,
+                    height: bounds.height,
+                    viewportWidth: window.innerWidth,
+                    viewportHeight: window.innerHeight,
+                  };
+                }"""
+            )
+            fits_vertically = rect["height"] <= rect["viewportHeight"] - margin * 2
+            if fits_vertically:
+                visible = rect["top"] >= margin and rect["bottom"] <= rect["viewportHeight"] - margin
+            else:
+                center_y = (rect["top"] + rect["bottom"]) * 0.5
+                visible = margin <= center_y <= rect["viewportHeight"] - margin
+            if visible:
+                return
+
+            if attempt == 0:
+                approach = (
+                    max(margin, min(rect["viewportWidth"] - margin, (rect["left"] + rect["right"]) * 0.5)),
+                    max(margin, min(rect["viewportHeight"] - margin, (rect["top"] + rect["bottom"]) * 0.5)),
+                )
+                self.move_pointer(approach, target_width=max(40.0, rect["width"]), allow_overshoot=False)
+
+            if rect["top"] < margin:
+                delta = rect["top"] - margin - self.rng.uniform(18.0, 42.0)
+            else:
+                delta = rect["bottom"] - (rect["viewportHeight"] - margin) + self.rng.uniform(18.0, 42.0)
+            steps = max(2, min(7, round(abs(delta) / 150.0) + 1))
+            previous = 0.0
+            for index in range(1, steps + 1):
+                progress = self.minimum_jerk(index / steps)
+                amount = delta * (progress - previous)
+                previous = progress
+                self.page.mouse.wheel(0, amount)
+                self.pause(0.045, 0.095, floor_ms=30)
+            self.pause(0.16, 0.31)
+
+        raise AssertionError(f"Pointer target for {event!r} could not be brought into view with wheel scrolling.")
+
+    def clickable_target(
         self,
         locator: Locator,
         event: str,
         timeout: float = 5.0,
-    ) -> tuple[float, float]:
+    ) -> dict[str, float]:
         """Find an unobscured point inside a locator, waiting out transient toasts."""
         deadline = time.monotonic() + timeout
         obstruction = "unknown"
         while time.monotonic() < deadline:
+            fractions = [
+                [
+                    max(0.30, min(0.70, 0.5 + self.rng.uniform(-0.13, 0.13))),
+                    max(0.28, min(0.72, 0.5 + self.rng.uniform(-0.15, 0.15))),
+                ],
+                [.43, .46], [.57, .54], [.48, .61], [.62, .42],
+                [.36, .56], [.54, .35], [.68, .58], [.32, .38],
+            ]
             probe = locator.evaluate(
-                r"""(element) => {
+                r"""(element, fractions) => {
                   const rect = element.getBoundingClientRect();
-                  const fractions = [
-                    [.50, .50], [.50, .32], [.50, .68],
-                    [.28, .50], [.72, .50], [.28, .32],
-                    [.72, .32], [.28, .68], [.72, .68],
-                  ];
                   let obstruction = null;
                   for (const [fx, fy] of fractions) {
                     const x = rect.left + rect.width * fx;
                     const y = rect.top + rect.height * fy;
                     const hit = document.elementFromPoint(x, y);
                     if (hit && (hit === element || element.contains(hit))) {
-                      return { point: { x, y }, obstruction: null };
+                      return {
+                        point: { x, y },
+                        width: rect.width,
+                        height: rect.height,
+                        obstruction: null,
+                      };
                     }
                     obstruction = hit
                       ? `${hit.tagName.toLowerCase()}${hit.id ? `#${hit.id}` : ''}${
@@ -325,23 +484,53 @@ class DemoDirector:
                       : 'none';
                   }
                   return { point: null, obstruction };
-                }"""
+                }""",
+                fractions,
             )
             if probe["point"] is not None:
-                return (float(probe["point"]["x"]), float(probe["point"]["y"]))
+                return {
+                    "x": float(probe["point"]["x"]),
+                    "y": float(probe["point"]["y"]),
+                    "width": float(probe["width"]),
+                    "height": float(probe["height"]),
+                }
             obstruction = probe["obstruction"] or "unknown"
             self.page.wait_for_timeout(100)
         raise AssertionError(
             f"Pointer target for {event!r} stayed obscured by {obstruction}."
         )
 
+    def hover(
+        self,
+        locator: Locator,
+        event: str,
+        note: str,
+        *,
+        dwell: tuple[float, float] = (0.75, 1.25),
+    ) -> None:
+        locator.wait_for(state="visible")
+        self._scroll_target_into_view(locator, event)
+        target = self.clickable_target(locator, event)
+        destination = (target["x"], target["y"])
+        self.move_pointer(
+            destination,
+            target_width=max(24.0, min(target["width"], target["height"])),
+        )
+        self.timeline.mark(event, note, self.page, destination)
+        self.pause(*dwell)
+
     def click(self, locator: Locator, event: str, note: str) -> None:
         locator.wait_for(state="visible")
-        locator.scroll_into_view_if_needed()
-        self.wait(0.18, floor_ms=35)
-        destination = self.clickable_point(locator, event)
-        self.move_pointer(destination)
-        self.wait(0.32, floor_ms=45)
+        self._scroll_target_into_view(locator, event)
+        self.pause(0.10, 0.24, floor_ms=35)
+        target = self.clickable_target(locator, event)
+        destination = (target["x"], target["y"])
+        self.move_pointer(
+            destination,
+            target_width=max(24.0, min(target["width"], target["height"])),
+        )
+        deliberate = any(token in event for token in ("approve", "review", "execute"))
+        self.pause(0.42, 0.78, floor_ms=45) if deliberate else self.pause(0.17, 0.43, floor_ms=45)
         hit = locator.evaluate(
             """(element, point) => {
               const hit = document.elementFromPoint(point.x, point.y);
@@ -350,14 +539,19 @@ class DemoDirector:
             {"x": destination[0], "y": destination[1]},
         )
         if not hit:
-            destination = self.clickable_point(locator, event)
-            self.move_pointer(destination)
-            self.wait(0.14, floor_ms=35)
+            target = self.clickable_target(locator, event)
+            destination = (target["x"], target["y"])
+            self.move_pointer(
+                destination,
+                target_width=max(24.0, min(target["width"], target["height"])),
+                allow_overshoot=False,
+            )
+            self.pause(0.10, 0.20, floor_ms=35)
         self.timeline.mark(event, note, self.page, destination)
         self.page.mouse.down(button="left")
-        self.wait(0.075, floor_ms=42)
+        self.pause(0.065, 0.118, floor_ms=42)
         self.page.mouse.up(button="left")
-        self.wait(0.22, floor_ms=45)
+        self.pause(0.48, 0.90, floor_ms=45) if deliberate else self.pause(0.32, 0.72, floor_ms=45)
 
     @staticmethod
     def assert_native_counts(snapshot: dict[str, Any]) -> dict[str, int]:
@@ -380,7 +574,7 @@ class DemoDirector:
         if state["phase"] != "idle":
             raise AssertionError(f"Expected idle phase, got {state['phase']!r}.")
 
-        install_capture_cursor(page)
+        install_capture_cursor(page, self.pointer)
         page.mouse.move(*self.pointer)
         self.timeline.mark(
             "objective",
@@ -388,7 +582,7 @@ class DemoDirector:
             page,
             self.pointer,
         )
-        self.wait(3.4)
+        self.pause(1.15, 1.75)
 
         self.click(
             page.get_by_role("button", name="Start mission", exact=True),
@@ -404,7 +598,7 @@ class DemoDirector:
             page,
             self.pointer,
         )
-        self.wait(4.4)
+        self.pause(3.8, 4.7)
 
         self.click(
             page.locator(
@@ -419,7 +613,7 @@ class DemoDirector:
             page,
             self.pointer,
         )
-        self.wait(4.0)
+        self.pause(3.45, 4.35)
 
         self.click(
             page.locator('[data-panel-tab="mapping"]'),
@@ -432,7 +626,7 @@ class DemoDirector:
             page,
             self.pointer,
         )
-        self.wait(4.1)
+        self.pause(3.5, 4.45)
 
         self.click(
             page.locator('[data-panel-tab="evidence"]'),
@@ -468,7 +662,7 @@ class DemoDirector:
             page,
             self.pointer,
         )
-        self.wait(5.4)
+        self.pause(4.7, 5.8)
 
         self.click(
             page.locator('[data-approval-dock] [data-action="review-approval"]'),
@@ -489,7 +683,19 @@ class DemoDirector:
             page,
             self.pointer,
         )
-        self.wait(7.0)
+        self.hover(
+            page.locator("[data-review-apply-arguments]"),
+            "read-recovery-effect",
+            "Read the exact recovery arguments before any approval.",
+            dwell=(1.05, 1.55),
+        )
+        self.hover(
+            page.locator("[data-review-publish-body]"),
+            "read-publication-effect",
+            "Read the evidence-derived publication body as a separate scope.",
+            dwell=(1.15, 1.75),
+        )
+        self.pause(0.85, 1.35)
 
         if self.target == "public":
             checkpoint_state = page.evaluate("window.__TOOLBRAID_V2__.getState()")
@@ -535,7 +741,7 @@ class DemoDirector:
                 page,
                 self.pointer,
             )
-            self.wait(2.2)
+            self.pause(1.8, 2.65)
             return {
                 "checkpoint": "exact-effect-review",
                 "mutationExecution": mutation_execution,
@@ -562,7 +768,7 @@ class DemoDirector:
             page,
             self.pointer,
         )
-        self.wait(3.0)
+        self.pause(2.25, 3.15)
 
         self.click(
             page.locator('[data-action="approve-publish"]'),
@@ -579,7 +785,7 @@ class DemoDirector:
             page,
             self.pointer,
         )
-        self.wait(3.0)
+        self.pause(2.35, 3.25)
 
         self.click(
             page.locator('[data-action="execute-approved"]'),
@@ -607,7 +813,7 @@ class DemoDirector:
             page,
             self.pointer,
         )
-        self.wait(5.2)
+        self.pause(4.65, 5.65)
 
         self.click(
             page.locator('[data-panel-tab="audit"]'),
@@ -623,7 +829,7 @@ class DemoDirector:
             page,
             self.pointer,
         )
-        self.wait(5.8)
+        self.pause(5.15, 6.15)
         return {
             "checkpoint": "complete",
             "mutationExecution": True,
@@ -929,7 +1135,12 @@ def main() -> int:
             "unexpectedBrowserErrors": len(browser_errors),
             "cursorOverlay": {
                 "present": True,
+                "style": "system-arrow-26px",
+                "clickPulse": False,
                 "pointerEvents": "trusted Playwright mouse",
+                "trajectory": "seeded-minimum-jerk-bezier",
+                "durationModel": "fitts-law",
+                "motionSeed": director.motion_seed,
                 "bypassCspPurpose": "capture cursor overlay only",
             },
             "video": video_report,

@@ -1,0 +1,16 @@
+# Isolated WSL narration environment. Install the tested CUDA PyTorch build first.
+numpy==1.26.4
+librosa==0.11.0
+s3tokenizer==0.3.0
+transformers==5.2.0
+diffusers==0.29.0
+resemble-perth @ git+https://github.com/resemble-ai/Perth.git@ce86c49d029f42272c1902eccb675556b9ed2330
+conformer==0.3.2
+safetensors==0.5.3
+spacy-pkuseg==1.0.1
+pykakasi==2.3.0
+pyloudnorm==0.2.0
+omegaconf==2.3.1
+faster-whisper==1.2.1
+scipy==1.17.1
+soundfile==0.14.0

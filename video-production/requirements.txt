@@ -8,6 +8,5 @@ numpy==1.26.4
 pedalboard==0.9.22
 Pillow==12.3.0
 pyloudnorm==0.2.0
-qwen-tts==0.1.1
 scipy==1.17.1
 soundfile==0.13.1

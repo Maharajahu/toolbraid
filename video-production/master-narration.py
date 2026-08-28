@@ -10,9 +10,12 @@ simple, safe limiter fallback.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
+import os
 import platform
+import re
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -36,6 +39,7 @@ VIDEO_DIR = ROOT / "video-production"
 DEFAULT_INPUT = VIDEO_DIR / "work" / "narration-master.wav"
 DEFAULT_OUTPUT = VIDEO_DIR / "work" / "narration-master-final.wav"
 DEFAULT_REPORT = VIDEO_DIR / "work" / "audio-mastering-report.json"
+DEFAULT_RENDER_CONFIG = VIDEO_DIR / "render-config.json"
 
 PRO_L_2 = Path(
     r"C:\Program Files\Common Files\VST3\FabFilter\FabFilter Pro-L 2.vst3"
@@ -46,6 +50,76 @@ DEFAULT_TARGET_LUFS = -16.0
 DEFAULT_CEILING_DBFS = -1.0
 MAX_TOTAL_GAIN_DB = 24.0
 LOUDNESS_TOLERANCE_LU = 0.75
+
+
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def seal_render_config(
+    config_path: Path,
+    input_path: Path,
+    output_path: Path,
+    source_sha256: str,
+    mastered_sha256: str,
+) -> dict[str, Any]:
+    """Atomically lock a successful source/master hash pair into render config."""
+
+    config_path = config_path.resolve()
+    if not config_path.is_file():
+        raise FileNotFoundError(config_path)
+    original = config_path.read_bytes().decode("utf-8")
+    payload = json.loads(original)
+    inputs = payload.get("inputs")
+    if not isinstance(inputs, dict):
+        raise ValueError(f"Render config has no inputs object: {config_path}")
+    configured_source = (config_path.parent / str(inputs.get("narration", ""))).resolve()
+    configured_mastered = (config_path.parent / str(inputs.get("narrationFinal", ""))).resolve()
+    if configured_source != input_path.resolve():
+        raise ValueError(
+            f"Render config narration path {configured_source} does not match mastered input {input_path.resolve()}"
+        )
+    if configured_mastered != output_path.resolve():
+        raise ValueError(
+            f"Render config narrationFinal path {configured_mastered} does not match mastered output {output_path.resolve()}"
+        )
+
+    provenance_pattern = re.compile(
+        r'("narrationProvenance"\s*:\s*\{\s*"sourceSha256"\s*:\s*")'
+        r'[0-9a-fA-F]{64}'
+        r'("\s*,\s*"masteredSha256"\s*:\s*")'
+        r'[0-9a-fA-F]{64}'
+        r'("\s*\})'
+    )
+    sealed, replacement_count = provenance_pattern.subn(
+        lambda match: (
+            f"{match.group(1)}{source_sha256}"
+            f"{match.group(2)}{mastered_sha256}{match.group(3)}"
+        ),
+        original,
+    )
+    if replacement_count != 1:
+        raise ValueError(
+            "Render config must contain exactly one narrationProvenance object with "
+            "sourceSha256 followed by masteredSha256."
+        )
+    staged = config_path.with_name(f".{config_path.name}.sealing-{os.getpid()}.tmp")
+    try:
+        staged.write_bytes(sealed.encode("utf-8"))
+        staged.replace(config_path)
+    finally:
+        staged.unlink(missing_ok=True)
+    return {
+        "path": str(config_path),
+        "sourceSha256": source_sha256,
+        "masteredSha256": mastered_sha256,
+        "configSha256": sha256_file(config_path),
+        "atomicReplace": True,
+    }
 
 
 def db_to_gain(value_db: float) -> float:
@@ -321,6 +395,7 @@ def master_file(
         "status": "PASS" if validation_pass else "FAIL",
         "input": {
             "path": str(input_path),
+            "sha256": sha256_file(input_path),
             "sampleRate": sample_rate,
             "channels": audio.shape[1],
             "frames": audio.shape[0],
@@ -329,6 +404,7 @@ def master_file(
         },
         "output": {
             "path": str(output_path),
+            "sha256": sha256_file(output_path),
             "sampleRate": encoded_rate,
             "channels": encoded.shape[1],
             "frames": encoded.shape[0],
@@ -401,6 +477,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--target-lufs", type=float, default=DEFAULT_TARGET_LUFS)
     parser.add_argument("--ceiling-dbfs", type=float, default=DEFAULT_CEILING_DBFS)
     parser.add_argument(
+        "--seal-config",
+        type=Path,
+        metavar="PATH",
+        help=(
+            "After a PASS, atomically update inputs.narrationProvenance in this render config "
+            f"(normally {DEFAULT_RENDER_CONFIG})."
+        ),
+    )
+    parser.add_argument(
         "--smoke-test",
         action="store_true",
         help="Master a generated, non-private voice-like signal in a temporary directory.",
@@ -416,6 +501,8 @@ def main() -> int:
         raise ValueError("--ceiling-dbfs must be between -6 and -1 dBFS.")
 
     if args.smoke_test:
+        if args.seal_config is not None:
+            raise ValueError("--seal-config cannot be combined with --smoke-test.")
         result = run_smoke_test(args.target_lufs, args.ceiling_dbfs)
     else:
         result = master_file(
@@ -425,6 +512,26 @@ def main() -> int:
             args.target_lufs,
             args.ceiling_dbfs,
         )
+        if result["status"] == "PASS" and args.seal_config is not None:
+            result["renderConfigSeal"] = seal_render_config(
+                args.seal_config,
+                args.input,
+                args.output,
+                str(result["input"]["sha256"]),
+                str(result["output"]["sha256"]),
+            )
+            report_path = args.report.resolve()
+            staged_report = report_path.with_name(
+                f".{report_path.name}.sealing-{os.getpid()}.tmp"
+            )
+            try:
+                staged_report.write_text(
+                    json.dumps(result, indent=2) + "\n",
+                    encoding="utf-8",
+                )
+                staged_report.replace(report_path)
+            finally:
+                staged_report.unlink(missing_ok=True)
     print(json.dumps(result, indent=2))
     return 0 if result["status"] == "PASS" else 2
 

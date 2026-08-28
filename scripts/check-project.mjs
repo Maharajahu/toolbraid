@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const required = [
   'index.html', 'manifest.webmanifest', 'package.json', 'vercel.json', 'README.md', 'LICENSE',
+  'THIRD_PARTY_NOTICES.md',
   'src/app/main.js', 'src/app/mission-controller.js', 'src/app/mission-state.js',
   'src/app/constellation.js', 'src/app/icons.js', 'src/app/mission-control.css',
   'src/engine/approval.js', 'src/engine/audit.js', 'src/engine/executor.js',
@@ -23,9 +24,11 @@ const required = [
   'scripts/build-vercel-multi-origin.mjs',
   'scripts/smoke.mjs', 'scripts/e2e.py', 'scripts/record-demo-video.py',
   'video-production/README.md', 'video-production/requirements.txt',
+  'video-production/requirements-chatterbox.txt',
   'video-production/capture-timeline.json', 'video-production/render-config.json',
   'video-production/script-and-storyboard.md',
-  'video-production/generate-ambient-bed.py', 'video-production/generate-narration.py',
+  'video-production/generate-ambient-bed.py',
+  'video-production/generate-chatterbox-narration.py',
   'video-production/master-narration.py', 'video-production/render-final-video.py',
   'video-production/validate-final-video.py',
   'docs/architecture.md', 'docs/threat-model.md', 'docs/testing.md',
@@ -49,6 +52,7 @@ const forbiddenLegacy = [
   'scripts/build-deploy-bootstrap.mjs', 'scripts/e2e-standalone.py', 'scripts/package.mjs',
   'docs/demo-script.md', 'docs/publication-runbook.md', 'docs/video-script.md',
   'docs/final-submission-checklist.md', 'docs/final-validation-report.md',
+  'video-production/generate-narration.py',
 ];
 
 const failures = [];

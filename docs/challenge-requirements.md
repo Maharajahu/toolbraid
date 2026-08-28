@@ -29,7 +29,7 @@ Native evidence is recorded in [native-e2e-validation.json](native-e2e-validatio
 | English description covering WebMCP fit, UX improvement, human-agent collaboration, and implementation | Repository description and judge documentation are complete; final Devpost copy remains pending |
 | Public YouTube demonstration under three minutes, with audio | English 1080p local master and captions are complete; public YouTube upload remains pending |
 | English video/text/testing instructions | Repository, video materials, and live-URL testing instructions are complete |
-| No unlicensed trademarks, copyrighted music, or third-party media in the demonstration | Local master uses first-party ToolBraid UI/assets, the owner's authorized voice, and an original deterministic ambient bed; final manual IP/trademark review passed |
+| No unlicensed trademarks, copyrighted music, or third-party media in the demonstration | Local master uses first-party ToolBraid UI/assets, the owner's authorized voice cloned locally with MIT-licensed Resemble AI Chatterbox, and an original deterministic ambient bed; exact revisions and attribution are recorded in `THIRD_PARTY_NOTICES.md` |
 | Free judge access through the end of judging | Live deployment is anonymously accessible; availability through the end of judging remains an operational monitoring gate |
 | Completed Devpost fields and submitted entry | Pending |
 

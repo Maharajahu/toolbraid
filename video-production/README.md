@@ -5,11 +5,12 @@ This folder reproduces the 162-second English WebMCP Challenge master from a rea
 ## Tested environment
 
 - Windows 11, Python 3.12.10, Node.js 22+
-- NVIDIA CUDA runtime with PyTorch 2.11.0+cu128
+- Ubuntu/WSL2 with Python 3.11 for the isolated Chatterbox voice environment
+- NVIDIA CUDA runtime with PyTorch `2.8.0+cu129` and torchaudio `2.8.0+cu129` for RTX 5090
 - Chrome 149+ with native WebMCP enabled for the product capture
 - Python packages pinned in `requirements.txt`
 
-Install a PyTorch build compatible with the local CUDA driver, then run:
+Install the Windows media dependencies with:
 
 ```powershell
 python -m pip install -r requirements-e2e.txt
@@ -18,10 +19,60 @@ python -m pip install -r video-production/requirements.txt
 
 The public/local recorder controls the installed Chrome build and does not download another browser. The public target is locked to `https://toolbraid-webmcp.vercel.app`, verifies the exact six provider origins and seven safe result IDs, and stops before either approval. The local target is the only capture allowed to complete deterministic fixture mutations. Both captures bake in a visible recording cursor driven by trusted Playwright mouse events.
 
-The voice-clone model is the Apache-2.0 `Qwen/Qwen3-TTS-12Hz-1.7B-Base` checkpoint. Place its complete files at:
+## Local Chatterbox voice environment
+
+Final narration uses the original English
+[`ResembleAI/chatterbox`](https://github.com/resemble-ai/chatterbox) model, not
+the Turbo variant. The original model exposes both `exaggeration` and
+`cfg_weight`; the official tuning guide recommends lower CFG and higher
+exaggeration for more expressive speech. The official source and model card are
+MIT licensed, and generated audio includes Chatterbox's built-in PerTh neural
+watermark.
+
+The pipeline pins every mutable upstream used by synthesis and ASR verification:
 
 ```text
-video-production/models/Qwen3-TTS-12Hz-1.7B-Base/
+code:    resemble-ai/chatterbox@5de7a54aa4e5e2baadb0182dde554908b48b85c2
+weights: ResembleAI/chatterbox@5bb1f6ee58e50c3b8d408bc82a6d3740c2db6e18
+ASR:     Systran/faster-whisper-medium.en@a29b04bd15381511a9af671baec01072039215e3
+```
+
+Create the isolated environment from a fresh WSL shell. PyTorch is installed
+first at the RTX-5090-compatible build; Chatterbox is then installed with
+`--no-deps` so its older `torch==2.6.0` package pin cannot downgrade CUDA support.
+The checkout is detached at ToolBraid's reviewed commit:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y git python3.11 python3.11-venv ffmpeg
+python3.11 -m venv "$HOME/.venvs/toolbraid-chatterbox"
+source "$HOME/.venvs/toolbraid-chatterbox/bin/activate"
+python -m pip install --upgrade pip
+python -m pip install torch==2.8.0 torchaudio==2.8.0 \
+  --index-url https://download.pytorch.org/whl/cu129
+mkdir -p "$HOME/src"
+git clone https://github.com/resemble-ai/chatterbox.git "$HOME/src/toolbraid-chatterbox"
+git -C "$HOME/src/toolbraid-chatterbox" checkout --detach 5de7a54aa4e5e2baadb0182dde554908b48b85c2
+python -m pip install -r "/mnt/d/local ai/ToolBraid/video-production/requirements-chatterbox.txt"
+python -m pip install --no-deps -e "$HOME/src/toolbraid-chatterbox"
+```
+
+Prepare only the public model assets at their exact revisions. This is the only
+voice-pipeline step that needs network access:
+
+```bash
+cd "/mnt/d/local ai/ToolBraid"
+python video-production/generate-chatterbox-narration.py --prepare-models
+```
+
+Normal generation loads the model and ASR exclusively from ignored local
+directories. It has no server URL and no hosted inference path, so the private
+reference audio is never transmitted:
+
+```bash
+cd "/mnt/d/local ai/ToolBraid"
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+  python video-production/generate-chatterbox-narration.py --candidates 2
 ```
 
 ## Private input contract
@@ -29,23 +80,40 @@ video-production/models/Qwen3-TTS-12Hz-1.7B-Base/
 Only use a voice recording you own or have explicit permission to clone. Provide:
 
 ```text
-.private/voice/reference.wav  # source recording
-.private/voice/reference.txt # exact transcript of the selected reference interval
+.private/voice/reference-11s-mono-24k.wav # selected owner-authorized prompt
+.private/voice/reference.txt                # exact prompt transcript
 ```
 
-The current reference interval is controlled by `REFERENCE_START` and `REFERENCE_END` in `generate-narration.py`; change both values for a different recording. No private input is sent to a remote inference service.
+`generate-chatterbox-narration.py` creates ten short semantic blocks, each under
+300 characters, so emotional delivery can vary naturally without risking model
+truncation. It renders at least two seeded candidates per block. Selection fails
+closed above `0.06` WER, when any critical phrase is not recognized as an exact
+contiguous token sequence, or when more than `1.02x` time compression would be
+needed. No semantic ASR correction is allowed: a spoken "note" cannot be
+silently normalized to "node".
 
-Scene candidates use fixed seeds and deterministic selection metadata. Scene 11 intentionally selects candidate 3 through `SCENE_CANDIDATE_OVERRIDES` because it preserves the correct product-name pronunciation; this is recorded in the ignored QC report instead of being applied as an undocumented manual copy.
+The generator refuses a dirty Chatterbox checkout and verifies every TTS and
+ASR file against the committed per-file SHA-256 manifest before loading either
+model. Each cached WAV is tied to a SHA-256 request digest containing those
+exact weight hashes, the pinned source revision, narration text, all Chatterbox
+inference controls, device, reference audio and transcript hashes, and
+post-processing settings. The cache is reused only when that digest and the
+rendered-audio hash both match.
 
 ## Build sequence
 
-From the repository root, using the same Python environment throughout:
+Capture and final rendering run in the Windows media environment:
 
 ```powershell
 python video-production/record-public-demo.py public
 python video-production/record-public-demo.py local
-python video-production/generate-narration.py --candidates 2
-python video-production/master-narration.py
+```
+
+Generate narration in the isolated WSL environment using the offline command
+above, then return to the Windows media environment:
+
+```powershell
+python video-production/master-narration.py --seal-config video-production/render-config.json
 python video-production/generate-ambient-bed.py
 python video-production/render-final-video.py
 python video-production/validate-final-video.py
