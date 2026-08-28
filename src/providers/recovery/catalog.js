@@ -1,4 +1,4 @@
-export const RECOVERY_PROVIDER_ORIGINS = Object.freeze({
+const CANONICAL_PROVIDER_ORIGINS = Object.freeze({
   signals: 'https://signals.toolbraid.dev',
   pulse: 'https://pulse.toolbraid.dev',
   source: 'https://source.toolbraid.dev',
@@ -6,6 +6,48 @@ export const RECOVERY_PROVIDER_ORIGINS = Object.freeze({
   status: 'https://status.toolbraid.dev',
   mirage: 'https://mirage.toolbraid.dev',
 });
+
+const VERCEL_STABLE_PROVIDER_ORIGINS = Object.freeze(Object.fromEntries(
+  Object.keys(CANONICAL_PROVIDER_ORIGINS).map((providerId) => [
+    providerId,
+    `https://toolbraid-${providerId}-webmcp.vercel.app`,
+  ]),
+));
+
+export const RECOVERY_DEPLOYMENT_PROFILES = Object.freeze({
+  canonical: Object.freeze({
+    id: 'canonical',
+    orchestratorOrigin: 'https://app.toolbraid.dev',
+    providerOrigins: CANONICAL_PROVIDER_ORIGINS,
+  }),
+  vercelStable: Object.freeze({
+    id: 'vercel-stable',
+    orchestratorOrigin: 'https://toolbraid-webmcp.vercel.app',
+    providerOrigins: VERCEL_STABLE_PROVIDER_ORIGINS,
+  }),
+});
+
+const VERCEL_STABLE_ORIGINS = new Set([
+  RECOVERY_DEPLOYMENT_PROFILES.vercelStable.orchestratorOrigin,
+  ...Object.values(RECOVERY_DEPLOYMENT_PROFILES.vercelStable.providerOrigins),
+]);
+
+export function resolveRecoveryDeploymentProfile(locationHref = globalThis.location?.href) {
+  let origin;
+  try {
+    origin = new URL(locationHref).origin;
+  } catch {
+    return RECOVERY_DEPLOYMENT_PROFILES.canonical;
+  }
+  return VERCEL_STABLE_ORIGINS.has(origin)
+    ? RECOVERY_DEPLOYMENT_PROFILES.vercelStable
+    : RECOVERY_DEPLOYMENT_PROFILES.canonical;
+}
+
+const ACTIVE_DEPLOYMENT_PROFILE = resolveRecoveryDeploymentProfile();
+
+export const RECOVERY_ORCHESTRATOR_ORIGIN = ACTIVE_DEPLOYMENT_PROFILE.orchestratorOrigin;
+export const RECOVERY_PROVIDER_ORIGINS = ACTIVE_DEPLOYMENT_PROFILE.providerOrigins;
 
 export const RECOVERY_PROVIDER_DESCRIPTORS = Object.freeze([
   { id: 'signals', origin: RECOVERY_PROVIDER_ORIGINS.signals, label: 'Service Signals' },

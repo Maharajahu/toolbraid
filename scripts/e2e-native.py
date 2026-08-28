@@ -17,8 +17,37 @@ ROOT = Path(__file__).resolve().parents[1]
 HOST = "127.0.0.1"
 PORTS = range(4173, 4180)
 BASE_URL = "http://127.0.0.1:4173"
+PUBLIC_BASE_URL = "https://toolbraid-webmcp.vercel.app"
+TARGET_URL = os.environ.get("TOOLBRAID_NATIVE_BASE_URL", BASE_URL).rstrip("/")
+READ_ONLY = os.environ.get("TOOLBRAID_NATIVE_READ_ONLY") == "1"
 DEFAULT_CHROME = Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe")
 CHROME = Path(os.environ.get("TOOLBRAID_CHROME", DEFAULT_CHROME))
+
+PUBLIC_PROVIDER_ORIGINS = sorted([
+    "https://toolbraid-signals-webmcp.vercel.app",
+    "https://toolbraid-pulse-webmcp.vercel.app",
+    "https://toolbraid-source-webmcp.vercel.app",
+    "https://toolbraid-deploy-webmcp.vercel.app",
+    "https://toolbraid-status-webmcp.vercel.app",
+    "https://toolbraid-mirage-webmcp.vercel.app",
+])
+SAFE_RESULT_IDS = sorted([
+    "read-service-health",
+    "read-release-history",
+    "read-deployment-history",
+    "read-status-notice",
+    "correlate-evidence",
+    "prepare-recovery-option",
+    "draft-status-update",
+])
+MUTATION_NODE_IDS = {"apply-recovery-option", "publish-status-update"}
+MUTATION_AUDIT_EVENTS = {
+    "node.started",
+    "node.completed",
+    "node.failed",
+    "tool.execution_started",
+    "tool.execution_failed",
+}
 
 
 def wait_for_ports(timeout: float = 15.0) -> None:
@@ -64,17 +93,25 @@ def wait_until(page: Any, expression: str, timeout: float = 15.0) -> None:
 def main() -> int:
     if not CHROME.is_file():
         raise SystemExit(f"Chrome executable not found: {CHROME}")
+    if READ_ONLY and TARGET_URL != PUBLIC_BASE_URL:
+        raise SystemExit(
+            "TOOLBRAID_NATIVE_READ_ONLY=1 is reserved for the exact public judge URL "
+            f"({PUBLIC_BASE_URL})."
+        )
 
-    server = subprocess.Popen(
-        ["node", "scripts/serve-multi-origin.mjs"],
-        cwd=ROOT,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-    )
+    server = None
+    if TARGET_URL == BASE_URL:
+        server = subprocess.Popen(
+            ["node", "scripts/serve-multi-origin.mjs"],
+            cwd=ROOT,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
     browser = None
     try:
-        wait_for_ports()
+        if server is not None:
+            wait_for_ports()
         errors: list[str] = []
         expected_provider_errors: list[str] = []
         with sync_playwright() as playwright:
@@ -82,7 +119,6 @@ def main() -> int:
                 executable_path=str(CHROME),
                 headless=os.environ.get("TOOLBRAID_NATIVE_HEADED") != "1",
                 args=[
-                    "--no-sandbox",
                     "--disable-dev-shm-usage",
                     "--enable-experimental-web-platform-features",
                     "--enable-features=WebMCP,WebMCPTesting,DevToolsWebMCPSupport",
@@ -104,7 +140,7 @@ def main() -> int:
                 lambda message: errors.append(f"console.{message.type}: {message.text}")
                 if message.type == "error" else None,
             )
-            page.goto(BASE_URL, wait_until="networkidle", timeout=30_000)
+            page.goto(TARGET_URL, wait_until="networkidle", timeout=30_000)
             wait_until(page, "() => Boolean(window.__TOOLBRAID_V2__)")
 
             surface = page.evaluate(
@@ -129,6 +165,62 @@ def main() -> int:
 
             page.get_by_role("button", name="Run 4 safe reads", exact=True).click()
             wait_until(page, "() => window.__TOOLBRAID_V2__.getState().phase === 'review'")
+            if READ_ONLY:
+                checkpoint = page.evaluate(
+                    """() => ({
+                      state: window.__TOOLBRAID_V2__.getState(),
+                      engine: window.__TOOLBRAID_V2__.getEngineSnapshot(),
+                    })"""
+                )
+                assert_equal(checkpoint["state"]["phase"], "review", "read-only checkpoint")
+                assert_equal(checkpoint["engine"]["mode"], "native", "read-only runtime mode")
+                result_ids = sorted(checkpoint["engine"]["results"])
+                provider_origins = sorted(
+                    provider["origin"] for provider in checkpoint["engine"]["providerDescriptors"]
+                )
+                mutation_audit = [
+                    entry for entry in checkpoint["engine"]["audit"]
+                    if entry["event"] in MUTATION_AUDIT_EVENTS
+                    and entry.get("details", {}).get("nodeId") in MUTATION_NODE_IDS
+                ]
+                mutation_result_ids = sorted(MUTATION_NODE_IDS.intersection(result_ids))
+                mutation_execution = bool(mutation_result_ids or mutation_audit)
+
+                assert_equal(result_ids, SAFE_RESULT_IDS, "exact safe-stage result ids")
+                assert_equal(provider_origins, PUBLIC_PROVIDER_ORIGINS, "public provider origins")
+                assert_equal(mutation_result_ids, [], "mutation results before approval")
+                assert_equal(mutation_audit, [], "mutation execution audit before approval")
+                assert_equal(mutation_execution, False, "mutation execution before approval")
+                assert_equal(len(expected_provider_errors), 1, "expected primary-provider failure")
+                assert_equal(checkpoint["engine"]["auditVerified"], True, "read-only audit integrity")
+                if errors:
+                    raise AssertionError("Browser errors:\n" + "\n".join(errors))
+
+                report = {
+                    "status": "PASS",
+                    "browser": surface["userAgent"],
+                    "target": TARGET_URL,
+                    "runtime": checkpoint["engine"]["mode"],
+                    "checkpoint": checkpoint["state"]["phase"],
+                    "providers": len(checkpoint["engine"]["providerDescriptors"]),
+                    "providerOrigins": provider_origins,
+                    "discoveredTools": len(checkpoint["engine"]["discoveredTools"]),
+                    "quarantined": len(checkpoint["engine"]["normalization"]["quarantined"]),
+                    "safeResults": len(result_ids),
+                    "safeResultIds": result_ids,
+                    "expectedProviderFailures": len(expected_provider_errors),
+                    "mutationResultIds": mutation_result_ids,
+                    "mutationAuditEvents": mutation_audit,
+                    "mutationExecution": mutation_execution,
+                    "auditVerified": checkpoint["engine"]["auditVerified"],
+                }
+                text = json.dumps(report, indent=2)
+                (ROOT / "docs" / "native-public-readonly-validation.json").write_text(text + "\n", encoding="utf-8")
+                print(text)
+                browser.close()
+                browser = None
+                return 0
+
             page.locator('[data-approval-dock] [data-action="review-approval"]').click()
             page.locator('[data-action="approve-apply"]').click()
             wait_until(page, "() => window.__TOOLBRAID_V2__.getState().approvals.apply.granted")
@@ -174,14 +266,15 @@ def main() -> int:
                 browser.close()
             except Exception:
                 pass
-        server.terminate()
-        try:
-            server.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            server.kill()
-        if server.returncode not in (0, -15, None):
-            output = server.stdout.read() if server.stdout else ""
-            print(output, file=sys.stderr)
+        if server is not None:
+            server.terminate()
+            try:
+                server.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                server.kill()
+            if server.returncode not in (0, -15, None):
+                output = server.stdout.read() if server.stdout else ""
+                print(output, file=sys.stderr)
 
 
 if __name__ == "__main__":

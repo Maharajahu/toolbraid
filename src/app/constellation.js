@@ -145,6 +145,7 @@ function normaliseInputs({ providers = [], capabilities, tools, mutations, hub =
     const origin = requiredText(provider?.origin, 'Provider origin');
     if (providerMap.has(origin)) throw new TypeError(`Duplicate provider origin: ${origin}`);
     providerMap.set(origin, {
+      providerId: provider.id ?? provider.providerId ?? null,
       origin,
       label: String(provider.label ?? provider.title ?? providerLabel(origin)),
       state: stateOf(provider.state),

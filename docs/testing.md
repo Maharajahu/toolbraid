@@ -62,7 +62,19 @@ npm run test:native
 
 The run must use the real `document.modelContext` surface and the UI badge must read **Native WebMCP**. Harness results must never be relabelled as native evidence. A passing run writes `docs/native-e2e-validation.json`.
 
-Latest native result: **PASS** in Chrome 151 with six provider origins, nine discovered tools, one quarantined tool, one expected read-provider failure followed by fallback, `release-1841`, `notice-r9`, and a verified 54-entry local integrity chain. The run also fails on any unexpected console, page, or CSP error.
+Latest local full-mission native result: **PASS** in Chrome 151 with six provider origins, nine discovered tools, one quarantined tool, one expected read-provider failure followed by fallback, `release-1841`, `notice-r9`, and a verified 54-entry local integrity chain. The run also fails on any unexpected console, page, or CSP error.
+
+## Public deployment native read-only gate
+
+The same validator can target the public release while stopping before either deterministic fixture mutation:
+
+```powershell
+$env:TOOLBRAID_NATIVE_BASE_URL = 'https://toolbraid-webmcp.vercel.app'
+$env:TOOLBRAID_NATIVE_READ_ONLY = '1'
+npm run test:native
+```
+
+This gate must stop in `review` with `mutationExecution: false`. It verifies six provider origins, nine live tools, one quarantine, read-only fallback, seven safe-stage results, and audit-chain integrity. A passing run writes [native-public-readonly-validation.json](native-public-readonly-validation.json).
 
 ## Generated artifact
 

@@ -1,0 +1,33 @@
+{
+  "status": "PASS",
+  "browser": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/151.0.0.0 Safari/537.36",
+  "target": "https://toolbraid-webmcp.vercel.app",
+  "runtime": "native",
+  "checkpoint": "review",
+  "providers": 6,
+  "providerOrigins": [
+    "https://toolbraid-deploy-webmcp.vercel.app",
+    "https://toolbraid-mirage-webmcp.vercel.app",
+    "https://toolbraid-pulse-webmcp.vercel.app",
+    "https://toolbraid-signals-webmcp.vercel.app",
+    "https://toolbraid-source-webmcp.vercel.app",
+    "https://toolbraid-status-webmcp.vercel.app"
+  ],
+  "discoveredTools": 9,
+  "quarantined": 1,
+  "safeResults": 7,
+  "safeResultIds": [
+    "correlate-evidence",
+    "draft-status-update",
+    "prepare-recovery-option",
+    "read-deployment-history",
+    "read-release-history",
+    "read-service-health",
+    "read-status-notice"
+  ],
+  "expectedProviderFailures": 1,
+  "mutationResultIds": [],
+  "mutationAuditEvents": [],
+  "mutationExecution": false,
+  "auditVerified": true
+}

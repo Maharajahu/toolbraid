@@ -310,8 +310,25 @@ class ToolBraidCompositor:
         self.fonts = FontBook()
         self.captions = captions
         self.scenes: list[dict[str, Any]] = config["scenes"]
-        product_path = resolve_from_config(config_path, config["inputs"]["productVideo"])
-        self.product = ProductVideoReader(product_path)
+        configured_products = config["inputs"].get("productVideos")
+        if isinstance(configured_products, dict) and configured_products:
+            self.products = {
+                str(key): ProductVideoReader(resolve_from_config(config_path, str(value)))
+                for key, value in configured_products.items()
+            }
+            self.default_product_key = str(
+                config["inputs"].get("defaultProductVideo", next(iter(self.products)))
+            )
+            if self.default_product_key not in self.products:
+                raise ValueError(
+                    f"Unknown defaultProductVideo {self.default_product_key!r}; "
+                    f"available sources are {sorted(self.products)}"
+                )
+        else:
+            product_path = resolve_from_config(config_path, config["inputs"]["productVideo"])
+            self.default_product_key = "default"
+            self.products = {self.default_product_key: ProductVideoReader(product_path)}
+        self.last_product_image: Image.Image | None = None
         self.diagram_cache: dict[Path, Image.Image] = {}
         self.background = self._build_background()
         self.vignette = self._build_vignette()
@@ -426,8 +443,8 @@ class ToolBraidCompositor:
     def _render_outro(self, timestamp: float, segment: dict[str, Any]) -> tuple[Image.Image, dict[str, Any]]:
         local = timestamp - float(segment["start"])
         duration = float(segment["end"]) - float(segment["start"])
-        if self.product.current_image is not None:
-            backdrop = self.product.current_image.resize((self.width, self.height), Image.Resampling.BICUBIC)
+        if self.last_product_image is not None:
+            backdrop = self.last_product_image.resize((self.width, self.height), Image.Resampling.BICUBIC)
             backdrop = backdrop.filter(ImageFilter.GaussianBlur(12)).convert("RGBA")
             shade = Image.new("RGBA", backdrop.size, (*self.colors["background"], 218))
             image = Image.alpha_composite(backdrop, shade)
@@ -518,7 +535,13 @@ class ToolBraidCompositor:
         start, end = float(segment["start"]), float(segment["end"])
         progress = smoothstep((timestamp - start) / max(0.001, end - start))
         source_time = lerp(float(segment["sourceStart"]), float(segment["sourceEnd"]), progress)
-        source = self.product.get(source_time)
+        source_key = str(segment.get("source", self.default_product_key))
+        if source_key not in self.products:
+            raise ValueError(
+                f"Unknown product source {source_key!r}; available sources are {sorted(self.products)}"
+            )
+        source = self.products[source_key].get(source_time)
+        self.last_product_image = source.copy()
         zoom_start, zoom_end = segment.get("zoom", [1.0, 1.04])
         zoom = lerp(float(zoom_start), float(zoom_end), progress)
         focus_values = segment.get("focus", [0.5, 0.5])
@@ -532,6 +555,9 @@ class ToolBraidCompositor:
             "crop": crop,
             "sourceSize": source.size,
             "sourceTime": source_time,
+            "sourceKey": source_key,
+            "provenance": segment.get("provenance"),
+            "publicUrl": segment.get("publicUrl"),
         }
 
     def _render_base(self, timestamp: float, segment: dict[str, Any]) -> tuple[Image.Image, dict[str, Any]]:
@@ -747,6 +773,96 @@ class ToolBraidCompositor:
         draw.text((x + 21, y + 7), text, font=font, fill=(*self.colors["amber"], 230))
         image.alpha_composite(overlay)
 
+    def _draw_product_provenance(
+        self,
+        image: Image.Image,
+        timestamp: float,
+        metadata: dict[str, Any],
+    ) -> None:
+        provenance = metadata.get("provenance")
+        if metadata.get("kind") != "product" or provenance not in {"public", "local-fixture"}:
+            return
+        if provenance == "local-fixture" and timestamp >= 147.0:
+            # Scene 10 already carries the longer deterministic-fixture
+            # disclosure at this point; avoid two competing footer chips.
+            return
+        if provenance == "public":
+            text = "LIVE PUBLIC DEPLOYMENT  ·  NATIVE WEBMCP  ·  READ-ONLY UNTIL HUMAN CHECKPOINT"
+            color = self.colors["green"]
+        else:
+            text = "LOCAL DETERMINISTIC FIXTURE  ·  APPROVAL & EXECUTION  ·  NO EXTERNAL SYSTEM CHANGED"
+            color = self.colors["amber"]
+        overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
+        draw = ImageDraw.Draw(overlay)
+        font = self.fonts.get("mono", 14)
+        bbox = draw.textbbox((0, 0), text, font=font)
+        width = bbox[2] - bbox[0] + 38
+        x = 32
+        y = self.height - 40
+        draw.rounded_rectangle(
+            (x, y, x + width, y + 28),
+            radius=9,
+            fill=(1, 8, 15, 226),
+            outline=(*color, 130),
+            width=1,
+        )
+        draw.text((x + 19, y + 6), text, font=font, fill=(*color, 236))
+        image.alpha_composite(overlay)
+
+    def _draw_public_url_hook(self, image: Image.Image, timestamp: float, metadata: dict[str, Any]) -> None:
+        url = str(metadata.get("publicUrl") or "https://toolbraid-webmcp.vercel.app")
+        overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
+        draw = ImageDraw.Draw(overlay)
+        local = timestamp - float(self.scenes[0]["start"])
+        visibility = smoothstep(local / 0.45) * smoothstep((8.0 - local) / 0.45)
+        alpha = int(238 * visibility)
+        if alpha <= 0:
+            return
+
+        bar_width = 980
+        bar_height = 58
+        x = (self.width - bar_width) // 2
+        y = 28
+        draw.rounded_rectangle(
+            (x, y, x + bar_width, y + bar_height),
+            radius=21,
+            fill=(2, 10, 18, alpha),
+            outline=(*self.colors["cyan"], int(150 * visibility)),
+            width=2,
+        )
+        dot_x = x + 34
+        dot_y = y + bar_height // 2
+        draw.ellipse(
+            (dot_x - 7, dot_y - 7, dot_x + 7, dot_y + 7),
+            fill=(*self.colors["green"], alpha),
+        )
+        draw.text(
+            (x + 58, y + 17),
+            url,
+            font=self.fonts.get("mono", 19),
+            fill=(*self.colors["text"], alpha),
+        )
+        chip = "LIVE PRODUCT"
+        chip_font = self.fonts.get("semibold", 14)
+        chip_bbox = draw.textbbox((0, 0), chip, font=chip_font)
+        chip_width = chip_bbox[2] - chip_bbox[0] + 30
+        chip_x = x + bar_width - chip_width - 14
+        draw.rounded_rectangle(
+            (chip_x, y + 12, chip_x + chip_width, y + 46),
+            radius=15,
+            fill=(*self.colors["green"], int(35 * visibility)),
+            outline=(*self.colors["green"], int(130 * visibility)),
+            width=1,
+        )
+        draw.text(
+            (chip_x + chip_width // 2, y + 20),
+            chip,
+            anchor="ma",
+            font=chip_font,
+            fill=(*self.colors["green"], alpha),
+        )
+        image.alpha_composite(overlay)
+
     def _draw_master_chrome(self, image: Image.Image, timestamp: float, scene_index: int) -> None:
         overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
         draw = ImageDraw.Draw(overlay)
@@ -771,7 +887,10 @@ class ToolBraidCompositor:
         image = base.convert("RGBA")
         self._draw_highlights(image, timestamp, scene, metadata)
         if scene["id"] == "01-intro":
-            self._draw_intro_titles(image, timestamp, scene)
+            if metadata.get("kind") == "intro":
+                self._draw_intro_titles(image, timestamp, scene)
+            else:
+                self._draw_public_url_hook(image, timestamp, metadata)
         elif scene["id"] == "11-outro":
             self._draw_outro_titles(image, timestamp, scene)
         elif metadata.get("kind") != "diagram" and scene.get("captionPosition") != "top":
@@ -782,12 +901,14 @@ class ToolBraidCompositor:
             self._draw_scene_label(image, timestamp, scene_index, scene)
         self._draw_disclosure(image, timestamp, scene)
         self._draw_caption(image, timestamp, scene)
+        self._draw_product_provenance(image, timestamp, metadata)
         self._draw_master_chrome(image, timestamp, scene_index)
         self._apply_scene_transition(image, timestamp, scene)
         return image.convert("RGB")
 
     def close(self) -> None:
-        self.product.close()
+        for product in self.products.values():
+            product.close()
 
 
 def resampled_audio(path: Path, sample_rate: int) -> np.ndarray:
@@ -1023,9 +1144,32 @@ def validate_config(config: dict[str, Any], config_path: Path) -> None:
                     raise FileNotFoundError(asset)
     if abs(cursor - 162.0) > 1e-6:
         raise ValueError(f"Scene timeline ends at {cursor}, expected 162")
-    product = resolve_from_config(config_path, config["inputs"]["productVideo"])
+    configured_products = config["inputs"].get("productVideos")
+    if isinstance(configured_products, dict) and configured_products:
+        product_paths = {
+            str(key): resolve_from_config(config_path, str(value))
+            for key, value in configured_products.items()
+        }
+        default_key = str(config["inputs"].get("defaultProductVideo", next(iter(product_paths))))
+        if default_key not in product_paths:
+            raise ValueError(
+                f"Unknown defaultProductVideo {default_key!r}; available sources are {sorted(product_paths)}"
+            )
+        for scene in scenes:
+            for segment in scene["segments"]:
+                if segment["kind"] != "product":
+                    continue
+                source_key = str(segment.get("source", default_key))
+                if source_key not in product_paths:
+                    raise ValueError(
+                        f"Scene {scene['id']} references unknown product source {source_key!r}"
+                    )
+    else:
+        product_paths = {
+            "default": resolve_from_config(config_path, config["inputs"]["productVideo"])
+        }
     logo = resolve_from_config(config_path, config["inputs"]["logo"])
-    for required in (product, logo):
+    for required in (*product_paths.values(), logo):
         if not required.exists():
             raise FileNotFoundError(required)
 
@@ -1166,6 +1310,14 @@ def render_master(args: argparse.Namespace) -> dict[str, Any]:
             "narration": str(narration),
             "preferredFinalPresent": narration_final.exists(),
             "ambient": str(ambient) if ambient.exists() and not args.no_ambient else None,
+        },
+        "videoSources": {
+            str(key): str(resolve_from_config(config_path, str(value)))
+            for key, value in (
+                config["inputs"].get("productVideos")
+                if isinstance(config["inputs"].get("productVideos"), dict)
+                else {"default": config["inputs"]["productVideo"]}
+            ).items()
         },
         "captions": {
             "path": str(captions_path),

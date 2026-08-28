@@ -29,7 +29,7 @@ import {
 
 const DEFAULT_OBJECTIVE = 'Diagnose checkout after the latest deployment, prepare a safe recovery and a customer update. Do not change production or publish without my approval.';
 
-const PROVIDERS = Object.freeze(RECOVERY_PROVIDER_DESCRIPTORS.map(({ origin, label }) => ({ origin, label })));
+const PROVIDERS = Object.freeze(RECOVERY_PROVIDER_DESCRIPTORS.map(({ id, origin, label }) => ({ id, origin, label })));
 
 const capabilityTitle = (capabilityId) => RECOVERY_CAPABILITIES.find(({ id }) => id === capabilityId)?.title ?? capabilityId;
 
@@ -747,9 +747,9 @@ function graphInput() {
     providers: PROVIDERS.map((provider) => {
       const node = nodeBySemantic(provider.origin, 'provider');
       let visualState = nodeStates.get(node.id);
-      if (provider.origin === 'https://signals.toolbraid.dev'
+      if (provider.origin === RECOVERY_PROVIDER_ORIGINS.signals
         && (semanticNodeState('service.health.read') === NODE_STATUS.FAILED || providerSwapRequested)) visualState = 'idle';
-      if (provider.origin === 'https://pulse.toolbraid.dev' && providerSwapRequested) {
+      if (provider.origin === RECOVERY_PROVIDER_ORIGINS.pulse && providerSwapRequested) {
         visualState = semanticNodeState('service.health.read') === NODE_STATUS.COMPLETED ? 'complete' : 'active';
       }
       return { ...provider, state: visualState };
@@ -793,7 +793,7 @@ function pulseEdgesForEvent(event) {
     .filter((edge) => edge.from === nodeId || edge.to === nodeId)
     .map((edge) => edge.id);
   const healthNodeId = nodeBySemantic('service.health.read', 'capability').id;
-  const pulseProviderId = nodeBySemantic('https://pulse.toolbraid.dev', 'provider').id;
+  const pulseProviderId = nodeBySemantic(RECOVERY_PROVIDER_ORIGINS.pulse, 'provider').id;
 
   switch (event.type) {
     case EVENT.START:
@@ -1229,10 +1229,10 @@ function confidenceForNode(node) {
 function nodeDescription(node) {
   if (node.type === 'hub') return 'Correlates provider evidence into one explainable, approval-bound recovery plan.';
   if (node.type === 'provider') {
-    if (providerSwapRequested && node.origin === 'https://pulse.toolbraid.dev') {
+    if (providerSwapRequested && node.origin === RECOVERY_PROVIDER_ORIGINS.pulse) {
       return 'Selected compatible read-only fallback. Pulse Monitor completed the health read without changing the recovery plan.';
     }
-    if (providerSwapRequested && node.origin === 'https://signals.toolbraid.dev') {
+    if (providerSwapRequested && node.origin === RECOVERY_PROVIDER_ORIGINS.signals) {
       return 'Primary health provider became unavailable and was safely substituted; its origin remains recorded in the audit.';
     }
     return `Independent WebMCP document at ${node.origin}. ToolBraid preserves its origin identity.`;

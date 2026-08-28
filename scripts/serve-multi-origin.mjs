@@ -113,7 +113,7 @@ function permissionsPolicy(origins) {
   return `tools=(self${origins.map((origin) => ` "${origin}"`).join('')})`;
 }
 
-function appHeaders(providerOrigins) {
+export function appHeaders(providerOrigins) {
   const sourceList = providerOrigins.join(' ');
   return Object.freeze({
     'Cache-Control': 'no-store',
@@ -126,7 +126,7 @@ function appHeaders(providerOrigins) {
   });
 }
 
-function providerHeaders(orchestratorOrigin) {
+export function providerHeaders(orchestratorOrigin) {
   return Object.freeze({
     'Cache-Control': 'no-store',
     'Content-Security-Policy': `default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'none'; img-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors ${orchestratorOrigin}`,

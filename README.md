@@ -16,6 +16,8 @@ No real production system or public status page is changed. The bundled provider
 
 **Judge path:** [Judge Guide](docs/JUDGING.md) · [Start Here](START-HERE.md) · [Architecture](docs/architecture.md) · [Threat Model](docs/threat-model.md) · [Testing](docs/testing.md)
 
+**Live demo:** [toolbraid-webmcp.vercel.app](https://toolbraid-webmcp.vercel.app)
+
 ## How ToolBraid works
 
 [![ToolBraid execution story from one human objective through WebMCP discovery, semantic normalization, a nine-node plan, two exact approvals, ordered effects, and a sealed audit chain](docs/diagrams/toolbraid-how-it-works.svg)](docs/diagrams/toolbraid-how-it-works.svg)
@@ -55,9 +57,30 @@ npm run dev:native
 
 Open `http://127.0.0.1:4173`.
 
-## Build the public multi-origin artifact
+## Live deployment
 
-The production contract uses one mission-control origin and six isolated provider origins:
+The judge-facing mission-control application is live at:
+
+```text
+https://toolbraid-webmcp.vercel.app
+```
+
+It loads six independently deployed provider origins:
+
+```text
+https://toolbraid-signals-webmcp.vercel.app
+https://toolbraid-pulse-webmcp.vercel.app
+https://toolbraid-source-webmcp.vercel.app
+https://toolbraid-deploy-webmcp.vercel.app
+https://toolbraid-status-webmcp.vercel.app
+https://toolbraid-mirage-webmcp.vercel.app
+```
+
+The live release uses seven separate Vercel projects. Only mission control is judge-facing; the provider URLs remain isolated documents loaded through the explicit WebMCP allowlist. The exact project map and reproducible release command are checked in under [Deployment](docs/deployment.md).
+
+## Optional custom-domain artifact
+
+The repository also retains a future branded-domain profile:
 
 ```text
 https://app.toolbraid.dev
@@ -69,14 +92,14 @@ https://status.toolbraid.dev
 https://mirage.toolbraid.dev
 ```
 
-`vercel.json` routes those exact hosts to separate allowlisted static roots and applies the same origin-specific CSP and Permissions Policy used by the native local server. Build and verify the artifact with:
+`vercel.json` describes that optional single-project custom-domain topology. It routes the hosts to separate allowlisted static roots and applies the same origin-specific CSP and Permissions Policy used by the native local server. Build and verify the artifact with:
 
 ```bash
 npm run build:vercel
 npm run validate:vercel
 ```
 
-The output is written to `dist/vercel-multi-origin/`. Attach all seven HTTPS hostnames to the same Vercel project before judge testing; only `https://app.toolbraid.dev` is the judge-facing URL.
+The output is written to `dist/vercel-multi-origin/`. This build command does not deploy the seven active `.vercel.app` projects.
 
 ## Validate
 
@@ -119,7 +142,7 @@ Approval creation is accepted only from a trusted human DOM activation. A synthe
 
 ## Current scope
 
-The engineering build is a native-validated release candidate. Its multi-origin Vercel artifact and local 1080p competition-video pipeline are complete. Public DNS/deployment, public repository visibility, public YouTube upload, and the final Devpost entry remain separate release gates tracked in [Challenge Requirements](docs/challenge-requirements.md).
+The engineering build is a native-validated release candidate. The public seven-origin Vercel deployment is live and has passed native Chrome 151 read-only validation. Public repository visibility, the public YouTube upload, and the final Devpost entry remain release gates tracked in [Challenge Requirements](docs/challenge-requirements.md).
 
 See [Start Here](START-HERE.md), [Architecture](docs/architecture.md), [Threat Model](docs/threat-model.md), and [Testing](docs/testing.md).
 

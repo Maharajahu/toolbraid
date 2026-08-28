@@ -1,0 +1,33 @@
+{
+  "profile": "vercel-stable",
+  "projects": {
+    "app": {
+      "project": "toolbraid-webmcp",
+      "origin": "https://toolbraid-webmcp.vercel.app"
+    },
+    "signals": {
+      "project": "toolbraid-signals-webmcp",
+      "origin": "https://toolbraid-signals-webmcp.vercel.app"
+    },
+    "pulse": {
+      "project": "toolbraid-pulse-webmcp",
+      "origin": "https://toolbraid-pulse-webmcp.vercel.app"
+    },
+    "source": {
+      "project": "toolbraid-source-webmcp",
+      "origin": "https://toolbraid-source-webmcp.vercel.app"
+    },
+    "deploy": {
+      "project": "toolbraid-deploy-webmcp",
+      "origin": "https://toolbraid-deploy-webmcp.vercel.app"
+    },
+    "status": {
+      "project": "toolbraid-status-webmcp",
+      "origin": "https://toolbraid-status-webmcp.vercel.app"
+    },
+    "mirage": {
+      "project": "toolbraid-mirage-webmcp",
+      "origin": "https://toolbraid-mirage-webmcp.vercel.app"
+    }
+  }
+}

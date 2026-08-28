@@ -1,5 +1,7 @@
 # Judge Guide
 
+**Live demo:** [toolbraid-webmcp.vercel.app](https://toolbraid-webmcp.vercel.app)
+
 ## The proof mission
 
 Restore checkout after the latest deployment and prepare a customer update, while keeping both production and public communication under separate human authority.
@@ -35,6 +37,8 @@ audit:           sha256-chain-v1, 54 entries
 All incident, provider, recovery, and notice data are deterministic fixtures. The proof does not touch real production or publish a real customer message.
 
 Native and harness runs are visibly labelled. Only a run whose badge reads **Native WebMCP** is native API evidence.
+
+The public release passed native Chrome 151 read-only validation across all six provider origins; see [native-public-readonly-validation.json](native-public-readonly-validation.json). The automated public gate stops at review because trusted human activation is part of the mutation-authority proof.
 
 ## Why the boundary is credible
 

@@ -1,8 +1,12 @@
 # Start Here
 
-For a fast product overview, open the [Judge Guide](docs/JUDGING.md) or the [full-resolution completed mission](docs/screenshots/toolbraid-recovery-completed.png).
+For a fast product overview, open the [live demo](https://toolbraid-webmcp.vercel.app), the [Judge Guide](docs/JUDGING.md), or the [full-resolution completed mission](docs/screenshots/toolbraid-recovery-completed.png).
 
-## Run the product
+## Open the live release
+
+Open [toolbraid-webmcp.vercel.app](https://toolbraid-webmcp.vercel.app) in Chrome 149+ with WebMCP enabled. No login is required. The badge must read **Native WebMCP** for a native run.
+
+## Run locally
 
 ```bash
 npm run dev
@@ -23,6 +27,8 @@ Chrome 149+ native verification can be run reproducibly with:
 ```bash
 npm run test:native
 ```
+
+The public read-only gate is documented in [Testing](docs/testing.md).
 
 ## Walk through the mission
 

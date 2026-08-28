@@ -48,6 +48,15 @@ const NODE_ICON_NAMES = Object.freeze({
   toolbraid: 'braid',
 });
 
+const PROVIDER_ICON_NAMES = Object.freeze({
+  signals: 'waveform',
+  pulse: 'radar',
+  source: 'branch',
+  deploy: 'deployment',
+  status: 'status-board',
+  mirage: 'mirage',
+});
+
 function escapeText(value) {
   return String(value)
     .replace(/&/g, '&amp;')
@@ -68,7 +77,8 @@ export function iconMarkup(name, { className = 'ui-icon', label = '' } = {}) {
 
 export function iconNameForNode(node) {
   if (!node) return 'spark';
-  return NODE_ICON_NAMES[node.semanticId]
+  return PROVIDER_ICON_NAMES[node.providerId]
+    ?? NODE_ICON_NAMES[node.semanticId]
     ?? NODE_ICON_NAMES[node.origin]
     ?? (node.type === 'provider' ? 'provider' : node.type === 'mutation' ? 'lock' : 'spark');
 }

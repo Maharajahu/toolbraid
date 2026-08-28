@@ -1,16 +1,14 @@
 import {
+  RECOVERY_DEPLOYMENT_PROFILES,
   RECOVERY_PROVIDER_DESCRIPTORS,
   createRecoveryProviderCatalog,
+  resolveRecoveryDeploymentProfile,
 } from '../../src/providers/recovery/catalog.js';
 
 const ORCHESTRATOR_PORT = '4173';
-const PRODUCTION_ORCHESTRATOR_ORIGIN = 'https://app.toolbraid.dev';
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]']);
 const LOCAL_PROVIDER_PORTS = Object.freeze(Object.fromEntries(
   RECOVERY_PROVIDER_DESCRIPTORS.map(({ id }, index) => [id, String(4174 + index)]),
-));
-const PRODUCTION_ORCHESTRATORS = Object.freeze(Object.fromEntries(
-  RECOVERY_PROVIDER_DESCRIPTORS.map(({ origin }) => [origin, PRODUCTION_ORCHESTRATOR_ORIGIN]),
 ));
 
 function invalidOrigin(message = 'The provider can expose tools only to its assigned ToolBraid orchestrator.') {
@@ -29,10 +27,15 @@ function parseAbsoluteUrl(value, label) {
 }
 
 function expectedOrchestratorOrigin(provider, providerLocation) {
-  const productionOrchestrator = PRODUCTION_ORCHESTRATORS[providerLocation.origin];
-  if (provider.origin === providerLocation.origin && productionOrchestrator) {
-    return productionOrchestrator;
+  const deploymentProfile = resolveRecoveryDeploymentProfile(providerLocation.href);
+  const productionProviderOrigin = deploymentProfile.providerOrigins[provider.id];
+  if (provider.origin === productionProviderOrigin && providerLocation.origin === productionProviderOrigin) {
+    return deploymentProfile.orchestratorOrigin;
   }
+
+  const knownProvider = Object.values(RECOVERY_DEPLOYMENT_PROFILES)
+    .some((profile) => profile.providerOrigins[provider.id] === provider.origin);
+  if (!knownProvider) throw invalidOrigin();
 
   const providerHost = providerLocation.hostname.toLowerCase();
   const expectedLocalPort = LOCAL_PROVIDER_PORTS[provider.id];
