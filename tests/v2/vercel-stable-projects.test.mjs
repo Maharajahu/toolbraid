@@ -54,7 +54,7 @@ test('stable manifest pins all seven project names and production aliases', () =
   }
 });
 
-test('stable build emits one self-contained static root per Vercel project', async () => {
+test('stable build emits one self-contained root per Vercel project with scoped live functions', async () => {
   assert.deepEqual((await readdir(output)).sort(), [...originIds].sort());
   assert.equal((await stat(path.join(output, 'app/index.html'))).isFile(), true);
   assert.equal((await stat(path.join(output, 'app/src/app/main.js'))).isFile(), true);
@@ -64,7 +64,22 @@ test('stable build emits one self-contained static root per Vercel project', asy
     assert.equal((await stat(path.join(providerRoot, 'index.html'))).isFile(), true);
     assert.equal((await stat(path.join(providerRoot, 'provider.js'))).isFile(), true);
     assert.equal((await stat(path.join(providerRoot, 'runtime.js'))).isFile(), true);
+    assert.equal((await stat(path.join(providerRoot, 'live-services.js'))).isFile(), true);
   }
+
+  const liveRoutes = {
+    signals: 'live-health.mjs',
+    pulse: 'live-health.mjs',
+    source: 'live-source.mjs',
+    deploy: 'live-deploy.mjs',
+    status: 'live-status.mjs',
+  };
+  for (const [providerId, route] of Object.entries(liveRoutes)) {
+    assert.equal((await stat(path.join(output, providerId, 'api', route))).isFile(), true);
+    assert.equal((await stat(path.join(output, providerId, 'server/live-services'))).isDirectory(), true);
+  }
+  await assert.rejects(stat(path.join(output, 'app/api')));
+  await assert.rejects(stat(path.join(output, 'mirage/api')));
 });
 
 test('each stable project carries only its exact production security policy', async () => {
@@ -82,5 +97,9 @@ test('each stable project carries only its exact production security policy', as
     ));
     assert.equal(providerConfig.rewrites, undefined);
     assert.deepEqual(headerObject(providerConfig), providerHeaders(profile.orchestratorOrigin));
+    assert.deepEqual(
+      providerConfig.functions,
+      providerId === 'deploy' ? { 'api/live-deploy.mjs': { maxDuration: 60 } } : undefined,
+    );
   }
 });

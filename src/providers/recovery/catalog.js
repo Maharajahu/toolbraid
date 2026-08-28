@@ -50,11 +50,11 @@ export const RECOVERY_ORCHESTRATOR_ORIGIN = ACTIVE_DEPLOYMENT_PROFILE.orchestrat
 export const RECOVERY_PROVIDER_ORIGINS = ACTIVE_DEPLOYMENT_PROFILE.providerOrigins;
 
 export const RECOVERY_PROVIDER_DESCRIPTORS = Object.freeze([
-  { id: 'signals', origin: RECOVERY_PROVIDER_ORIGINS.signals, label: 'Service Signals' },
-  { id: 'pulse', origin: RECOVERY_PROVIDER_ORIGINS.pulse, label: 'Pulse Monitor' },
-  { id: 'source', origin: RECOVERY_PROVIDER_ORIGINS.source, label: 'Release Source' },
-  { id: 'deploy', origin: RECOVERY_PROVIDER_ORIGINS.deploy, label: 'Deploy Control' },
-  { id: 'status', origin: RECOVERY_PROVIDER_ORIGINS.status, label: 'Customer Status' },
+  { id: 'signals', origin: RECOVERY_PROVIDER_ORIGINS.signals, label: 'Vercel Health Probe' },
+  { id: 'pulse', origin: RECOVERY_PROVIDER_ORIGINS.pulse, label: 'HTTP Health Fallback' },
+  { id: 'source', origin: RECOVERY_PROVIDER_ORIGINS.source, label: 'GitHub Release Source' },
+  { id: 'deploy', origin: RECOVERY_PROVIDER_ORIGINS.deploy, label: 'Vercel Deploy Control' },
+  { id: 'status', origin: RECOVERY_PROVIDER_ORIGINS.status, label: 'GitHub Incident Log' },
   { id: 'mirage', origin: RECOVERY_PROVIDER_ORIGINS.mirage, label: 'Mirage Fixture' },
 ]);
 
@@ -87,6 +87,7 @@ export function createRecoveryProviderCatalog({
   now = () => new Date(),
   failPrimaryHealth = true,
   failPublish = false,
+  liveServices = null,
 } = {}) {
   const state = {
     activeReleaseId: 'release-1842',
@@ -109,7 +110,8 @@ export function createRecoveryProviderCatalog({
           window_minutes: integerField('Window minutes', 'Lookback interval for health evidence.'),
         }, ['service']),
         annotations: { readOnlyHint: true, untrustedContentHint: true },
-        async execute() {
+        async execute(input, options = {}) {
+          if (liveServices?.health) return liveServices.health.probe(input, options);
           if (failPrimaryHealth) throw providerError('SIGNALS_WINDOW_UNAVAILABLE', 'Primary health window is temporarily unavailable.');
           return {
             state: 'degraded',
@@ -132,7 +134,8 @@ export function createRecoveryProviderCatalog({
           lookback: { type: 'integer', title: 'Lookback minutes' },
         }, ['target']),
         annotations: { readOnlyHint: true, untrustedContentHint: true },
-        async execute() {
+        async execute(input, options = {}) {
+          if (liveServices?.health) return liveServices.health.probe(input, options);
           return {
             condition: 'degraded',
             user_impact: 'Checkout failures affect 8.7% of payment attempts.',
@@ -153,8 +156,9 @@ export function createRecoveryProviderCatalog({
           repository: stringField('Repository', 'Application or repository whose release history is required.'),
           max_results: integerField('Maximum results', 'Maximum number of recent releases.'),
         }, ['repository']),
-        annotations: { readOnlyHint: true },
-        async execute() {
+        annotations: { readOnlyHint: true, untrustedContentHint: true },
+        async execute(input, options = {}) {
+          if (liveServices?.source) return liveServices.source.traceChanges(input, options);
           return {
             changes: [
               {
@@ -186,8 +190,9 @@ export function createRecoveryProviderCatalog({
             env: stringField('Deployment environment', 'Production environment.'),
             count: integerField('Deployment count', 'Deployment record count.'),
           }, ['component', 'env']),
-          annotations: { readOnlyHint: true },
-          async execute() {
+          annotations: { readOnlyHint: true, untrustedContentHint: true },
+          async execute(input, options = {}) {
+            if (liveServices?.deploy) return liveServices.deploy.listRollouts(input, options);
             return {
               rollouts: [
                 {
@@ -211,7 +216,8 @@ export function createRecoveryProviderCatalog({
             action: { ...stringField('Recovery mode', 'Recovery strategy to preview.'), enum: ['rollback'] },
           }, ['rollout_id', 'rollback_target', 'action']),
           annotations: { readOnlyHint: false, idempotentHint: true },
-          async execute(input) {
+          async execute(input, options = {}) {
+            if (liveServices?.deploy) return liveServices.deploy.stageRecovery(input, options);
             if (input.rollback_target !== 'release-1841') {
               throw providerError('RECOVERY_TARGET_INVALID', 'Only the verified stable release can be staged.');
             }
@@ -235,7 +241,8 @@ export function createRecoveryProviderCatalog({
             request_id: stringField('Request ID', 'Single-use idempotency key.'),
           }, ['option_id', 'revision', 'request_id']),
           annotations: { readOnlyHint: false, idempotentHint: true },
-          async execute(input) {
+          async execute(input, options = {}) {
+            if (liveServices?.deploy) return liveServices.deploy.executeRollback(input, options);
             const signature = JSON.stringify([input.option_id, input.revision]);
             const replay = replayIdempotent(state.appliedRequestIds, input.request_id, signature);
             if (replay) return replay;
@@ -264,8 +271,9 @@ export function createRecoveryProviderCatalog({
           inputSchema: objectSchema({
             product: stringField('Product', 'Service whose customer notice should be read.'),
           }, ['product']),
-          annotations: { readOnlyHint: true },
-          async execute() {
+          annotations: { readOnlyHint: true, untrustedContentHint: true },
+          async execute(input, options = {}) {
+            if (liveServices?.status) return liveServices.status.readNotice(input, options);
             return {
               incident_id: 'notice-checkout',
               headline: 'Checkout availability',
@@ -288,7 +296,8 @@ export function createRecoveryProviderCatalog({
             request_id: stringField('Request ID', 'Single-use idempotency key.'),
           }, ['incident_id', 'version', 'content', 'request_id']),
           annotations: { readOnlyHint: false, idempotentHint: true },
-          async execute(input) {
+          async execute(input, options = {}) {
+            if (liveServices?.status) return liveServices.status.publishNotice(input, options);
             const signature = JSON.stringify([input.incident_id, input.version, input.headline ?? '', input.content]);
             const replay = replayIdempotent(state.publishedRequestIds, input.request_id, signature);
             if (replay) return replay;

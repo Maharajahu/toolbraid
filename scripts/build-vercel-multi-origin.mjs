@@ -50,6 +50,7 @@ for (const providerId of providerIds) {
   await copyIntoOrigin(providerId, `providers/recovery/${providerId}.js`, 'provider.js');
   await copyIntoOrigin(providerId, 'providers/recovery/provider.css', 'provider.css');
   await copyIntoOrigin(providerId, 'providers/recovery/runtime.js', 'runtime.js');
+  await copyIntoOrigin(providerId, 'providers/recovery/live-services.js', 'live-services.js');
   await copyIntoOrigin(providerId, 'src/providers/recovery/catalog.js');
 }
 

@@ -74,7 +74,7 @@ $env:TOOLBRAID_NATIVE_READ_ONLY = '1'
 npm run test:native
 ```
 
-This gate must stop in `review` with `mutationExecution: false`. It verifies six provider origins, nine live tools, one quarantine, read-only fallback, seven safe-stage results, and audit-chain integrity. A passing run writes [native-public-readonly-validation.json](native-public-readonly-validation.json).
+This gate must stop in `review` with `mutationExecution: false`. It verifies six provider origins, nine live tools, one quarantine, seven live safe-stage results, and audit-chain integrity. The deliberately failed primary-to-fallback path remains a deterministic local test; the public lab normally returns a valid `degraded` health result and therefore does not manufacture a provider failure. A passing run writes [native-public-readonly-validation.json](native-public-readonly-validation.json).
 
 ## Generated artifact
 

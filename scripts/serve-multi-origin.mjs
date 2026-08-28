@@ -103,6 +103,7 @@ function providerFileFor(providerId, pathname) {
     ['/provider.js', `providers/recovery/${providerId}.js`],
     ['/provider.css', 'providers/recovery/provider.css'],
     ['/runtime.js', 'providers/recovery/runtime.js'],
+    ['/live-services.js', 'providers/recovery/live-services.js'],
     ['/src/providers/recovery/catalog.js', 'src/providers/recovery/catalog.js'],
   ]);
   const relativePath = routes.get(pathname);
@@ -129,7 +130,7 @@ export function appHeaders(providerOrigins) {
 export function providerHeaders(orchestratorOrigin) {
   return Object.freeze({
     'Cache-Control': 'no-store',
-    'Content-Security-Policy': `default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'none'; img-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors ${orchestratorOrigin}`,
+    'Content-Security-Policy': `default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors ${orchestratorOrigin}`,
     'Cross-Origin-Opener-Policy': 'same-origin-allow-popups',
     'Permissions-Policy': permissionsPolicy([orchestratorOrigin]),
     'Referrer-Policy': 'no-referrer',

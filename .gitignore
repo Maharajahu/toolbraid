@@ -5,6 +5,10 @@ node_modules/
 *.log
 coverage/
 dist/
+.vercel/
+.env
+.env*.local
+!.env.example
 .private/
 video-production/work/
 video-production/output/

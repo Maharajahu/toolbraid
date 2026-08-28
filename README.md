@@ -8,7 +8,7 @@ The current proof mission is production recovery:
 
 > Restore checkout after the latest deployment. Find the safest recovery path and prepare a customer update, but do not change production or publish anything without my approval.
 
-No real production system or public status page is changed. The bundled providers are deterministic fixtures that exercise the complete control path.
+The judge deployment targets a disposable recovery lab: GitHub commit/incident data and Vercel deployment state are read live, while the two approved mutations perform a real rollback of that sandbox and append a real GitHub issue comment. Local development keeps deterministic fixtures so the engine and safety boundary remain reproducible without credentials. No customer or business production system is in scope.
 
 [![ToolBraid completed production-recovery mission with six provider origins, verified mutations, and a sealed audit trail](docs/screenshots/toolbraid-recovery-completed.png)](docs/screenshots/toolbraid-recovery-completed.png)
 
@@ -32,7 +32,7 @@ No real production system or public status page is changed. The bundled provider
 - two-stage planning: evidence first, exact mutation arguments second;
 - separate human approvals for recovery and customer communication;
 - approval binding to plan revision, origin, tool, schema, arguments, effect, and one-time nonce;
-- idempotent mutations, replay rejection, and registry-change invalidation;
+- replay-safe completed mutations, browser nonce rejection, server-side target allowlists, signed short-lived recovery quotes, and registry-change invalidation;
 - an append-only local SHA-256 integrity chain with a final seal.
 
 ## Runtime topology
@@ -76,7 +76,7 @@ https://toolbraid-status-webmcp.vercel.app
 https://toolbraid-mirage-webmcp.vercel.app
 ```
 
-The live release uses seven separate Vercel projects. Only mission control is judge-facing; the provider URLs remain isolated documents loaded through the explicit WebMCP allowlist. The exact project map and reproducible release command are checked in under [Deployment](docs/deployment.md).
+The live release uses seven separate Vercel projects. Only mission control is judge-facing; the provider URLs remain isolated documents loaded through the explicit WebMCP allowlist. Provider server functions hold the GitHub/Vercel credentials and expose only the exact `checkout` sandbox alias to the browser. The exact project map, environment contract, and reproducible release command are checked in under [Deployment](docs/deployment.md).
 
 ## Optional custom-domain artifact
 
@@ -123,8 +123,11 @@ recovery release-1841 · notice notice-r9 · 54 audit entries
 ```text
 src/engine/                 provider-neutral discovery, policy, graph, execution, approvals, audit
 src/packs/recovery/         recovery ontology, adapters, and two-stage plan
-src/providers/recovery/     deterministic provider catalog used by the local harness
-providers/recovery/         six native provider documents
+src/providers/recovery/     provider catalog and deterministic local fixtures
+providers/recovery/         six native provider documents plus same-origin live clients
+server/live-services/       allowlisted GitHub, Vercel, health, signing, and HTTP services
+api/                        scoped Vercel Function entrypoints for live providers
+sandbox/recovery-lab/       disposable stable/degraded target for real rollback evidence
 src/app/                    mission controller, state projection, constellation UI
 tests/v2/                   unit, integration, security, and multi-origin contract tests
 scripts/                    servers, checks, standalone/Vercel builds, capture, and browser E2E
@@ -142,7 +145,7 @@ Approval creation is accepted only from a trusted human DOM activation. A synthe
 
 ## Current scope
 
-The engineering build is a native-validated release candidate. The public seven-origin Vercel deployment has passed an independent native Chrome 151 read-only gate. The judge video separately records the full approved mutation path on that public URL inside ToolBraid's deterministic deployed-browser sandbox; it uses no production credentials and changes no external system. Public repository visibility, the public YouTube upload, and the final Devpost entry remain release gates tracked in [Challenge Requirements](docs/challenge-requirements.md).
+The engineering build is a native-validated release candidate. The public seven-origin profile can run entirely against the disposable GitHub/Vercel recovery lab; the local profile remains deterministic for repeatable tests. Public repository visibility, the public YouTube upload, and the final Devpost entry remain release gates tracked in [Challenge Requirements](docs/challenge-requirements.md).
 
 See [Start Here](START-HERE.md), [Architecture](docs/architecture.md), [Threat Model](docs/threat-model.md), and [Testing](docs/testing.md).
 

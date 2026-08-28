@@ -12,6 +12,13 @@ const output = path.resolve(process.argv[2] ?? path.join(projectRoot, 'dist', 'v
 const multiOriginOutput = path.resolve(process.argv[3] ?? path.join(projectRoot, 'dist', 'vercel-multi-origin'));
 const manifestPath = path.join(projectRoot, 'deployment', 'vercel-stable-projects.json');
 const profile = RECOVERY_DEPLOYMENT_PROFILES.vercelStable;
+const LIVE_API_BY_PROVIDER = Object.freeze({
+  signals: 'live-health.mjs',
+  pulse: 'live-health.mjs',
+  source: 'live-source.mjs',
+  deploy: 'live-deploy.mjs',
+  status: 'live-status.mjs',
+});
 
 function isWithin(parent, child) {
   const relative = path.relative(path.resolve(parent), path.resolve(child));
@@ -25,11 +32,14 @@ function assertSafeOutput(target) {
   }
 }
 
-function vercelConfig(headers) {
+function vercelConfig(headers, { liveApi } = {}) {
   return {
     $schema: 'https://openapi.vercel.sh/vercel.json',
     cleanUrls: false,
     trailingSlash: false,
+    ...(liveApi === 'live-deploy.mjs'
+      ? { functions: { 'api/live-deploy.mjs': { maxDuration: 60 } } }
+      : {}),
     headers: [{
       source: '/(.*)',
       headers: Object.entries(headers).map(([key, value]) => ({ key, value })),
@@ -75,12 +85,23 @@ for (const originId of expectedIds) {
     recursive: true,
     force: true,
   });
+  const liveApi = LIVE_API_BY_PROVIDER[originId];
+  if (liveApi) {
+    await mkdir(path.join(projectOutput, 'api'), { recursive: true });
+    await cp(path.join(projectRoot, 'api', liveApi), path.join(projectOutput, 'api', liveApi), {
+      force: true,
+    });
+    await cp(path.join(projectRoot, 'server', 'live-services'), path.join(projectOutput, 'server', 'live-services'), {
+      recursive: true,
+      force: true,
+    });
+  }
   const securityHeaders = originId === 'app'
     ? appHeaders(Object.values(profile.providerOrigins))
     : providerHeaders(profile.orchestratorOrigin);
   await writeFile(
     path.join(projectOutput, 'vercel.json'),
-    `${JSON.stringify(vercelConfig(securityHeaders), null, 2)}\n`,
+    `${JSON.stringify(vercelConfig(securityHeaders, { liveApi }), null, 2)}\n`,
     'utf8',
   );
 }

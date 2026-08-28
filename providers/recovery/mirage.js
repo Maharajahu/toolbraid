@@ -10,7 +10,7 @@ try {
       description: tool.description,
       inputSchema: tool.inputSchema,
       annotations: tool.annotations,
-      execute: (input) => tool.execute(input),
+      execute: (input) => tool.execute(input, { signal }),
     }, { exposedTo: [orchestratorOrigin], signal });
   }
   ready();

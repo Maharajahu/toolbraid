@@ -1,0 +1,9 @@
+{
+  "name": "toolbraid-recovery-lab-stable",
+  "version": "1.0.0",
+  "private": true,
+  "type": "commonjs",
+  "engines": {
+    "node": ">=20"
+  }
+}

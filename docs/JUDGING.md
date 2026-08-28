@@ -16,10 +16,10 @@ Restore checkout after the latest deployment and prepare a customer update, whil
 
 1. **WebMCP leverage:** six provider documents contribute nine live tools from explicit origins. ToolBraid retains and executes the opaque registered objects rather than calling provider functions directly.
 2. **Semantic interoperability:** unfamiliar names and schemas become seven canonical capabilities, with confidence and evidence visible in the inspector.
-3. **Execution:** four evidence reads run concurrently; a failed health provider is replaced by a heterogeneous read-only fallback; the planner itself does not change.
+3. **Execution:** four live evidence reads run concurrently. The same planner supports a heterogeneous read-only fallback, proven by the deterministic local failure test without manufacturing an outage in the public lab.
 4. **Safety:** hostile metadata is quarantined before scoring. Mutation arguments remain deferred until safe evidence is complete.
 5. **Human collaboration:** production recovery and status publication each show exact origin, tool, schema-bound arguments, and effect in separate approval dialogs.
-6. **Integrity:** synthetic approval attempts fail, registry changes invalidate the plan, both nonces are claimed atomically, recovery completes before publication, providers enforce idempotency, and the local integrity chain is sealed.
+6. **Integrity:** synthetic approval attempts fail, registry changes invalidate the plan, both browser nonces are claimed atomically, recovery completes before publication, live services enforce exact sandbox targets and replay-safe state checks, and the local integrity chain is sealed.
 
 ## Expected completed state
 
@@ -34,7 +34,7 @@ notice result:   notice-r9
 audit:           sha256-chain-v1, 54 entries
 ```
 
-All incident, provider, recovery, and notice data are deterministic fixtures. The proof does not touch real production or publish a real customer message.
+In the judge deployment, GitHub and Vercel reads are live. The recovery action rolls the disposable Vercel recovery lab back to its immediately previous production deployment, and the communication action appends a real comment to one dedicated GitHub incident issue. Local runs use deterministic fixtures. The proof never targets a customer or business production system.
 
 Native and harness runs are visibly labelled. Only a run whose badge reads **Native WebMCP** is native API evidence.
 

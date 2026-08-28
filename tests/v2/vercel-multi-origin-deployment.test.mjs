@@ -130,6 +130,7 @@ test('generated artifact contains only browser-public application and provider f
     assert.match(html, new RegExp(`${providerId}\\s·|${providerId} ·`));
     assert.match(source, new RegExp(`createProviderRuntime\\('${providerId}'\\)`));
     assert.equal((await stat(path.join(providerRoot, 'runtime.js'))).isFile(), true);
+    assert.equal((await stat(path.join(providerRoot, 'live-services.js'))).isFile(), true);
     assert.equal((await stat(path.join(providerRoot, 'src/providers/recovery/catalog.js'))).isFile(), true);
     assert.equal(files.some((file) => file.startsWith(`_toolbraid_origins/${providerId}/providers/`)), false);
   }
@@ -152,8 +153,8 @@ test('each Vercel provider has the isolated provider policy and only app authori
     const actual = configuredHeaders(providerHosts[index]);
     assert.deepEqual(actual, expected);
     assert.equal(actual['permissions-policy'], `tools=(self \"${appOrigin}\")`);
+    assert.match(actual['content-security-policy'], /connect-src 'self'/);
     assert.match(actual['content-security-policy'], new RegExp(`frame-ancestors ${appOrigin}$`));
-    assert.equal(actual['connect-src'], undefined);
     assert.equal(actual['x-frame-options'], undefined);
   }
 });

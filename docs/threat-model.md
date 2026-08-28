@@ -31,7 +31,7 @@ Trusted authority is limited to a genuine top-level human UI activation. Agent c
 | Synthetic UI activation | `event.isTrusted` guard; Playwright verifies synthetic `.click()` cannot approve |
 | Partial approval ambiguity | separate visible envelopes are verified and claimed as one all-or-none set before execution |
 | Approval tampering or expiry | canonical serialization, SHA-256 fingerprint, strict field set, TTL validation |
-| Replay or duplicate mutation | nonce atomically claimed before await; provider idempotency key rejects reuse with different arguments |
+| Replay or duplicate mutation | browser nonce atomically claimed before await; the live sandbox revalidates Vercel state and uses a hashed GitHub marker to make completed retries observable and replay-safe |
 | Unsafe automatic failover | alternatives are allowed only for read-only nodes; mutations fail closed |
 | Registry change after planning | generation is rechecked around each async refresh, metadata is rescanned, and validity is asserted immediately before each mutation |
 | Malformed provider output | capability-specific canonicalizers accept only expected structured fields |
@@ -58,10 +58,12 @@ The Mirage provider registers instruction-like metadata that asks the orchestrat
 | External mutation | exact human approval required; no automatic retry or provider substitution |
 | Irreversible/high-impact | out of scope and denied |
 
-## Privacy
+## Live sandbox boundary and privacy
 
-The fixtures use synthetic incident and deployment data. There is no backend, analytics, credential collection, or third-party transmission. State and audit evidence remain in the browser session.
+The local profile uses synthetic incident and deployment data. The judge profile adds narrowly scoped Vercel Functions that call GitHub and Vercel with server-side credentials. Those credentials never enter provider HTML, browser tool arguments, responses, logs, or Git; the browser can request only the public alias `checkout`, which resolves server-side to one repository, one issue, one Vercel project, and one health URL.
+
+`x-toolbraid-intent: approved` is a same-origin request signal, not user authentication and not an anti-forgery security boundary. The public mutation endpoints therefore target only a disposable lab with no customer data or business dependency. Signed short-lived recovery quotes, exact project/alias checks, version revalidation, bounded bodies, and post-rollback polling constrain impact. GitHub comment markers and Vercel state checks make completed retries replay-safe, but without a durable transactional lock they do not claim cross-instance exactly-once execution.
 
 ## Residual risk
 
-This is not a production security boundary. Pattern-based metadata scanning cannot detect every semantic attack; the in-memory approval/audit stores do not survive page loss and their unkeyed hash chain proves local integrity rather than authorship; fixture providers are not authenticated organizations; and the app has not been authorized for real infrastructure. Production use would require signed provider identity, durable protected approval storage, an externally anchored or server-signed audit head, payload/time limits, redaction, CSP/Trusted Types hardening, operator authentication, compensation strategy, and an external security review.
+This is not a production security boundary. Pattern-based metadata scanning cannot detect every semantic attack; the in-memory approval/audit stores do not survive page loss and their unkeyed hash chain proves local integrity rather than authorship; provider origins are allowlisted but are not signed organizations; and live authority is intentionally limited to the disposable GitHub/Vercel lab. Production use would require operator authentication, durable transactional idempotency and approval storage, signed provider identity, an externally anchored or server-signed audit head, rate limits, redaction, CSP/Trusted Types hardening, compensation strategy, and an external security review.

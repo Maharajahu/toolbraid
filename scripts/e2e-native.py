@@ -191,7 +191,7 @@ def main() -> int:
                 assert_equal(mutation_result_ids, [], "mutation results before approval")
                 assert_equal(mutation_audit, [], "mutation execution audit before approval")
                 assert_equal(mutation_execution, False, "mutation execution before approval")
-                assert_equal(len(expected_provider_errors), 1, "expected primary-provider failure")
+                assert_equal(len(expected_provider_errors), 0, "unexpected fixture-only provider failure")
                 assert_equal(checkpoint["engine"]["auditVerified"], True, "read-only audit integrity")
                 if errors:
                     raise AssertionError("Browser errors:\n" + "\n".join(errors))

@@ -4,6 +4,7 @@ import {
   createRecoveryProviderCatalog,
   resolveRecoveryDeploymentProfile,
 } from '../../src/providers/recovery/catalog.js';
+import { createLiveRecoveryServices } from './live-services.js';
 
 const ORCHESTRATOR_PORT = '4173';
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]']);
@@ -97,8 +98,23 @@ function renderState(state, message) {
   if (output) output.textContent = message;
 }
 
+function isLiveProviderOrigin(providerId, locationHref) {
+  let providerLocation;
+  try {
+    providerLocation = new URL(locationHref);
+  } catch {
+    return false;
+  }
+  const profile = resolveRecoveryDeploymentProfile(providerLocation.href);
+  return profile.id === RECOVERY_DEPLOYMENT_PROFILES.vercelStable.id
+    && profile.providerOrigins[providerId] === providerLocation.origin;
+}
+
 export function createProviderRuntime(providerId) {
-  const catalog = createRecoveryProviderCatalog();
+  const liveServices = isLiveProviderOrigin(providerId, globalThis.location?.href)
+    ? createLiveRecoveryServices({ baseOrigin: globalThis.location.origin })
+    : null;
+  const catalog = createRecoveryProviderCatalog({ liveServices });
   const provider = catalog.providers.find((candidate) => candidate.id === providerId);
   if (!provider) throw new Error(`Unknown recovery provider: ${providerId}`);
 
