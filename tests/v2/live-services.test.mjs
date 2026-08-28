@@ -343,6 +343,104 @@ test('Vercel live deployment history, signed quote, revalidation, rollback, and 
   );
 });
 
+test('Vercel rollback confirms from the production alias when lastAliasRequest is absent', async () => {
+  const deployments = deploymentFixtures();
+  let activeAliasDeploymentId = 'dpl_current';
+  let rollbackPosts = 0;
+  const service = createVercelService({
+    config: vercelConfig,
+    now: FIXED_NOW,
+    sleep: async () => {},
+    async fetchImpl(url, options) {
+      const parsed = new URL(url);
+      if (options.method === 'GET' && parsed.pathname === '/v4/aliases/toolbraid-recovery-lab.vercel.app') {
+        return jsonResponse({
+          alias: vercelConfig.productionAlias,
+          deploymentId: activeAliasDeploymentId,
+          projectId: vercelConfig.projectId,
+        });
+      }
+      if (options.method === 'GET' && parsed.pathname === '/v6/deployments') {
+        return jsonResponse({ deployments });
+      }
+      if (options.method === 'GET' && parsed.pathname === '/v9/projects/prj_toolbraid_sandbox') {
+        return jsonResponse({ id: vercelConfig.projectId, lastAliasRequest: null });
+      }
+      if (options.method === 'POST' && parsed.pathname === '/v1/projects/prj_toolbraid_sandbox/rollback/dpl_previous') {
+        rollbackPosts += 1;
+        activeAliasDeploymentId = 'dpl_previous';
+        return { ok: true, status: 201 };
+      }
+      throw new Error(`Unexpected Vercel mock request: ${options.method} ${parsed.pathname}`);
+    },
+  });
+
+  const quote = await service.prepareRecovery({
+    rollout_id: 'dpl_current',
+    rollback_target: 'release-good',
+    action: 'rollback',
+  });
+  const result = await service.applyRecovery({
+    option_id: quote.option_id,
+    revision: quote.revision,
+    request_id: 'alias-confirmed-rollback',
+  });
+
+  assert.equal(result.outcome, 'applied');
+  assert.equal(result.version, 'release-good');
+  assert.equal(rollbackPosts, 1);
+});
+
+test('Vercel recovery skips duplicate deployments of the active release', async () => {
+  const deployments = [
+    ...deploymentFixtures().slice(0, 1),
+    {
+      uid: 'dpl_duplicate',
+      projectId: vercelConfig.projectId,
+      target: 'production',
+      readyState: 'READY',
+      createdAt: Date.parse('2026-08-28T10:30:00.000Z'),
+      meta: { githubCommitSha: 'release-bad' },
+    },
+    ...deploymentFixtures().slice(1),
+  ];
+  const service = createVercelService({
+    config: vercelConfig,
+    now: FIXED_NOW,
+    sleep: async () => {},
+    async fetchImpl(url, options) {
+      const parsed = new URL(url);
+      if (options.method === 'GET' && parsed.pathname === '/v4/aliases/toolbraid-recovery-lab.vercel.app') {
+        return jsonResponse({
+          alias: vercelConfig.productionAlias,
+          deploymentId: 'dpl_current',
+          projectId: vercelConfig.projectId,
+        });
+      }
+      if (options.method === 'GET' && parsed.pathname === '/v6/deployments') {
+        return jsonResponse({ deployments });
+      }
+      throw new Error(`Unexpected Vercel mock request: ${options.method} ${parsed.pathname}`);
+    },
+  });
+
+  const history = await service.readDeploymentHistory({ component: 'checkout', count: 3 });
+  assert.deepEqual(
+    history.rollouts.map(({ rollout_id, version }) => ({ rollout_id, version })),
+    [
+      { rollout_id: 'dpl_current', version: 'release-bad' },
+      { rollout_id: 'dpl_previous', version: 'release-good' },
+      { rollout_id: 'dpl_older', version: 'release-older' },
+    ],
+  );
+  const quote = await service.prepareRecovery({
+    rollout_id: 'dpl_current',
+    rollback_target: 'release-good',
+    action: 'rollback',
+  });
+  assert.equal(quote.rollback_target, 'release-good');
+});
+
 test('recovery quote HMAC rejects payload and signature tampering', () => {
   const payload = {
     projectId: 'prj_toolbraid_sandbox',

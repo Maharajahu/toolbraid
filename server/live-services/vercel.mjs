@@ -77,7 +77,12 @@ function arrangeDeployments(deployments, environment, currentDeploymentId) {
       status: 409,
     });
   }
-  return [current, ...ready.filter((deployment) => deployment.id !== current.id)];
+  return [
+    current,
+    ...ready.filter(
+      (deployment) => deployment.id !== current.id && deployment.version !== current.version,
+    ),
+  ];
 }
 
 function optionPayload(optionId) {
@@ -255,6 +260,15 @@ export function createVercelService({
     const maximumPolls = config.rollbackMaxPolls ?? 20;
     const intervalMs = config.rollbackPollIntervalMs ?? 250;
     for (let attempt = 0; attempt < maximumPolls; attempt += 1) {
+      const currentDeploymentId = await readCurrentDeploymentId();
+      if (currentDeploymentId === payload.targetDeploymentId) {
+        return {
+          status: 'succeeded',
+          targetDeploymentId: payload.targetDeploymentId,
+          requestedAt: now().valueOf(),
+          type: 'rollback',
+        };
+      }
       const status = await readProjectRollback();
       if (matchingCompletedRollback(status, payload)) return status;
       if (

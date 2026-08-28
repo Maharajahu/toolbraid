@@ -25,7 +25,7 @@
     "read-service-health",
     "read-status-notice"
   ],
-  "expectedProviderFailures": 1,
+  "expectedProviderFailures": 0,
   "mutationResultIds": [],
   "mutationAuditEvents": [],
   "mutationExecution": false,
