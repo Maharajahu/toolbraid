@@ -20,7 +20,14 @@ const required = [
   'providers/recovery/status.html', 'providers/recovery/status.js',
   'providers/recovery/mirage.html', 'providers/recovery/mirage.js',
   'scripts/serve.mjs', 'scripts/serve-multi-origin.mjs', 'scripts/build-standalone.mjs',
-  'scripts/smoke.mjs', 'scripts/e2e.py',
+  'scripts/build-vercel-multi-origin.mjs',
+  'scripts/smoke.mjs', 'scripts/e2e.py', 'scripts/record-demo-video.py',
+  'video-production/README.md', 'video-production/requirements.txt',
+  'video-production/capture-timeline.json', 'video-production/render-config.json',
+  'video-production/script-and-storyboard.md',
+  'video-production/generate-ambient-bed.py', 'video-production/generate-narration.py',
+  'video-production/master-narration.py', 'video-production/render-final-video.py',
+  'video-production/validate-final-video.py',
   'docs/architecture.md', 'docs/threat-model.md', 'docs/testing.md',
   'docs/challenge-requirements.md', 'docs/competition/product-definition.md',
   'docs/competition/native-webmcp-contract.md', 'docs/e2e-validation.json',
@@ -29,6 +36,7 @@ const required = [
   'docs/diagrams/toolbraid-human-authority.svg',
   'docs/screenshots/toolbraid-recovery-completed.png',
   'tests/v2/mission-controller.test.mjs', 'tests/v2/multi-origin-server.test.mjs',
+  'tests/v2/vercel-multi-origin-deployment.test.mjs',
   '.github/workflows/ci.yml', '.nojekyll',
 ];
 
@@ -63,8 +71,13 @@ async function walk(directory) {
   const entries = await readdir(directory, { withFileTypes: true });
   const files = [];
   for (const entry of entries) {
-    if (['.git', 'node_modules'].includes(entry.name)) continue;
     const full = path.join(directory, entry.name);
+    if (entry.isDirectory() && [
+      '.git', 'node_modules', '.private', '.tmp', '.playwright', 'coverage', 'dist', '__pycache__',
+    ].includes(entry.name)) continue;
+    if (entry.isDirectory()
+      && path.dirname(full) === path.join(root, 'video-production')
+      && ['models', 'work', 'output'].includes(entry.name)) continue;
     if (entry.isDirectory()) files.push(...await walk(full));
     else files.push(full);
   }
@@ -73,8 +86,13 @@ async function walk(directory) {
 
 const files = await walk(root);
 const codeFiles = files.filter((file) => /\.(?:js|mjs)$/.test(file));
+const pythonFiles = files.filter((file) => file.endsWith('.py'));
 
-for (const relative of ['package.json', 'manifest.webmanifest', 'docs/e2e-validation.json']) {
+for (const relative of [
+  'package.json', 'manifest.webmanifest', 'vercel.json',
+  'docs/e2e-validation.json', 'video-production/capture-timeline.json',
+  'video-production/render-config.json',
+]) {
   try {
     JSON.parse(await readFile(path.join(root, relative), 'utf8'));
   } catch (error) {
@@ -100,6 +118,18 @@ for (const file of files.filter((item) => item.endsWith('.md'))) {
 for (const file of codeFiles) {
   const result = spawnSync(process.execPath, ['--check', file], { encoding: 'utf8' });
   if (result.status !== 0) failures.push(`${path.relative(root, file)}: syntax error\n${result.stderr.trim()}`);
+}
+if (pythonFiles.length) {
+  const python = process.env.PYTHON || (process.platform === 'win32' ? 'python' : 'python3');
+  const compileOnly = [
+    '-c',
+    "import pathlib,sys; [compile(pathlib.Path(p).read_text(encoding='utf-8'), p, 'exec') for p in sys.argv[1:]]",
+    ...pythonFiles,
+  ];
+  const result = spawnSync(python, compileOnly, { encoding: 'utf8' });
+  if (result.status !== 0) {
+    failures.push(`Python source syntax check failed\n${(result.stderr || result.error?.message || '').trim()}`);
+  }
 }
 
 for (const file of files.filter((item) => /\.(?:js|mjs|html|css)$/.test(item) && path.basename(item) !== 'check-project.mjs')) {
@@ -138,4 +168,4 @@ if (failures.length) {
   for (const failure of failures) console.error(`- ${failure}`);
   process.exit(1);
 }
-console.log(`Project check passed: ${required.length} required artifacts, ${codeFiles.length} JavaScript modules, no rejected demo surface, no unresolved implementation markers.`);
+console.log(`Project check passed: ${required.length} required artifacts, ${codeFiles.length} JavaScript modules, ${pythonFiles.length} Python sources, no rejected demo surface, no unresolved implementation markers.`);

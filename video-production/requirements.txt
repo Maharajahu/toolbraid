@@ -1,0 +1,13 @@
+# Tested media-pipeline environment on Python 3.12.10.
+# Install a CUDA-compatible PyTorch build separately before this file.
+av==17.0.1
+CairoSVG==2.9.0
+faster-whisper==1.2.1
+librosa==0.11.0
+numpy==1.26.4
+pedalboard==0.9.22
+Pillow==12.3.0
+pyloudnorm==0.2.0
+qwen-tts==0.1.1
+scipy==1.17.1
+soundfile==0.13.1

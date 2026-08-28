@@ -16,6 +16,8 @@
     "validate:full": "npm run validate && python scripts/e2e.py",
     "smoke": "node scripts/smoke.mjs",
     "build": "node scripts/build-standalone.mjs",
+    "build:vercel": "node scripts/build-vercel-multi-origin.mjs",
+    "validate:vercel": "node scripts/build-vercel-multi-origin.mjs && node --test tests/v2/vercel-multi-origin-deployment.test.mjs",
     "validate:ci": "npm run validate"
   },
   "engines": {

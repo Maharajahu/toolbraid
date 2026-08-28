@@ -1,0 +1,200 @@
+{
+  "format": "toolbraid-final-render-config-v1",
+  "master": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 30,
+    "durationSeconds": 162,
+    "sampleRate": 48000,
+    "channels": 2
+  },
+  "palette": {
+    "background": "#020914",
+    "surface": "#071522",
+    "cyan": "#38C7FF",
+    "blue": "#3F7CFF",
+    "mint": "#63EFD1",
+    "green": "#7FE36A",
+    "amber": "#FFBD67",
+    "red": "#FF6B55",
+    "text": "#F4FAFF",
+    "muted": "#91A8BB"
+  },
+  "inputs": {
+    "productVideo": "work/toolbraid-product-demo-1080p30.webm",
+    "narrationFinal": "work/narration-master-final.wav",
+    "narration": "work/narration-master.wav",
+    "captions": "work/narration-captions.json",
+    "ambientBed": "work/ambient-bed.wav",
+    "logo": "../assets/favicon.svg"
+  },
+  "scenes": [
+    {
+      "id": "01-intro",
+      "start": 0,
+      "end": 8,
+      "captionPosition": "bottom",
+      "segments": [
+        {"start": 0, "end": 8, "kind": "intro"}
+      ],
+      "kicker": "WEBMCP CHALLENGE 2026",
+      "headline": "One objective. Human authority.",
+      "subhead": "SIX ORIGINS  ·  NINE TOOLS  ·  TWO EXACT APPROVALS"
+    },
+    {
+      "id": "02-objective",
+      "start": 8,
+      "end": 21,
+      "captionPosition": "bottom",
+      "segments": [
+        {"start": 8, "end": 21, "kind": "product", "sourceStart": 0.70, "sourceEnd": 5.03, "focus": [0.17, 0.28], "zoom": [1.00, 1.075]}
+      ],
+      "kicker": "THE OBJECTIVE",
+      "headline": "Restore checkout safely",
+      "subhead": "READ FIRST  ·  EXACT APPROVAL",
+      "highlights": [
+        {"start": 10.0, "end": 18.5, "rect": [0.044, 0.132, 0.193, 0.385], "color": "cyan"}
+      ]
+    },
+    {
+      "id": "03-native-cross-origin",
+      "start": 21,
+      "end": 36,
+      "captionPosition": "bottom",
+      "segments": [
+        {"start": 21, "end": 25, "kind": "product", "sourceStart": 0.70, "sourceEnd": 3.40, "focus": [0.76, 0.045], "zoom": [1.02, 1.16]},
+        {"start": 25, "end": 33, "kind": "diagram", "asset": "../docs/diagrams/toolbraid-cross-origin-architecture.svg", "motion": "radial"},
+        {"start": 33, "end": 36, "kind": "product", "sourceStart": 4.10, "sourceEnd": 5.35, "focus": [0.50, 0.48], "zoom": [1.045, 1.00]}
+      ],
+      "kicker": "NATIVE WEBMCP",
+      "headline": "Six isolated provider origins",
+      "subhead": "registerTool  →  getTools  →  executeTool",
+      "highlights": [
+        {"start": 21.2, "end": 24.8, "rect": [0.675, 0.015, 0.815, 0.060], "color": "mint"}
+      ]
+    },
+    {
+      "id": "04-discovery-quarantine",
+      "start": 36,
+      "end": 51,
+      "captionPosition": "bottom",
+      "segments": [
+        {"start": 36, "end": 51, "kind": "product", "sourceStart": 5.03, "sourceEnd": 16.34, "focus": [0.46, 0.43], "zoom": [1.00, 1.055]}
+      ],
+      "kicker": "UNTRUSTED METADATA",
+      "headline": "Quarantine before scoring",
+      "subhead": "9 DISCOVERED  ·  1 EXCLUDED",
+      "highlights": [
+        {"start": 42.0, "end": 50.2, "rect": [0.326, 0.290, 0.382, 0.430], "color": "red"}
+      ]
+    },
+    {
+      "id": "05-semantic-graph",
+      "start": 51,
+      "end": 68,
+      "captionPosition": "bottom",
+      "segments": [
+        {"start": 51, "end": 63, "kind": "product", "sourceStart": 16.34, "sourceEnd": 21.68, "focus": [0.79, 0.47], "zoom": [1.00, 1.075]},
+        {"start": 63, "end": 68, "kind": "diagram", "asset": "../docs/diagrams/toolbraid-how-it-works.svg", "motion": "scan"}
+      ],
+      "kicker": "SEMANTIC INTEROPERABILITY",
+      "headline": "Seven canonical capabilities",
+      "subhead": "HETEROGENEOUS CONTRACTS  →  9-NODE GRAPH",
+      "highlights": [
+        {"start": 52.0, "end": 60.5, "rect": [0.770, 0.123, 0.995, 0.935], "color": "cyan"}
+      ]
+    },
+    {
+      "id": "06-safe-reads-fallback",
+      "start": 68,
+      "end": 85,
+      "captionPosition": "bottom",
+      "segments": [
+        {"start": 68, "end": 85, "kind": "product", "sourceStart": 21.68, "sourceEnd": 29.46, "focus": [0.45, 0.48], "zoom": [1.00, 1.055]}
+      ],
+      "kicker": "BOUNDED AUTONOMY",
+      "headline": "Four reads in parallel",
+      "subhead": "READ-ONLY FALLBACK  ·  NO MUTATION FAILOVER",
+      "highlights": [
+        {"start": 72.5, "end": 81.5, "rect": [0.045, 0.390, 0.195, 0.795], "color": "green"},
+        {"start": 75.0, "end": 84.3, "rect": [0.270, 0.245, 0.570, 0.770], "color": "green"}
+      ]
+    },
+    {
+      "id": "07-evidence-first",
+      "start": 85,
+      "end": 103,
+      "captionPosition": "top",
+      "segments": [
+        {"start": 85, "end": 91, "kind": "diagram", "asset": "../docs/diagrams/toolbraid-how-it-works.svg", "motion": "flow"},
+        {"start": 91, "end": 103, "kind": "product", "sourceStart": 22.95, "sourceEnd": 28.00, "focus": [0.50, 0.70], "zoom": [1.025, 1.085]}
+      ],
+      "kicker": "EVIDENCE FIRST",
+      "headline": "Arguments finalize after reads",
+      "subhead": "AGENT PREPARES  ·  HUMAN AUTHORIZES",
+      "highlights": [
+        {"start": 94.0, "end": 102.4, "rect": [0.250, 0.760, 0.680, 0.970], "color": "amber"}
+      ]
+    },
+    {
+      "id": "08-exact-approvals",
+      "start": 103,
+      "end": 122,
+      "captionPosition": "top",
+      "segments": [
+        {"start": 103, "end": 108, "kind": "diagram", "asset": "../docs/diagrams/toolbraid-human-authority.svg", "motion": "authority"},
+        {"start": 108, "end": 122, "kind": "product", "sourceStart": 29.53, "sourceEnd": 45.39, "focus": [0.50, 0.48], "zoom": [1.01, 1.045]}
+      ],
+      "kicker": "TWO SEPARATE PACKETS",
+      "headline": "Exact scope. Single use.",
+      "subhead": "PRODUCTION  ≠  COMMUNICATION",
+      "highlights": [
+        {"start": 109.0, "end": 121.0, "rect": [0.195, 0.120, 0.805, 0.835], "color": "amber"}
+      ]
+    },
+    {
+      "id": "09-ordered-execution",
+      "start": 122,
+      "end": 140,
+      "captionPosition": "top",
+      "segments": [
+        {"start": 122, "end": 126, "kind": "diagram", "asset": "../docs/diagrams/toolbraid-human-authority.svg", "motion": "execute"},
+        {"start": 126, "end": 140, "kind": "product", "sourceStart": 45.39, "sourceEnd": 52.34, "focus": [0.50, 0.56], "zoom": [1.03, 1.08]}
+      ],
+      "kicker": "FAIL-CLOSED EXECUTION",
+      "headline": "Refresh. Revalidate. Claim.",
+      "subhead": "1  APPLY RECOVERY   ·   2  PUBLISH UPDATE",
+      "highlights": [
+        {"start": 127.0, "end": 139.2, "rect": [0.260, 0.660, 0.690, 0.800], "color": "green"}
+      ]
+    },
+    {
+      "id": "10-sealed-outcome",
+      "start": 140,
+      "end": 156,
+      "captionPosition": "top",
+      "segments": [
+        {"start": 140, "end": 156, "kind": "product", "sourceStart": 45.53, "sourceEnd": 59.39, "focus": [0.51, 0.55], "zoom": [1.00, 1.065]}
+      ],
+      "kicker": "VERIFIED LOCAL OUTCOME",
+      "headline": "54 events. Audit sealed.",
+      "subhead": "release-1841  ·  notice-r9  ·  sha256-chain-v1",
+      "highlights": [
+        {"start": 141.5, "end": 149.0, "rect": [0.045, 0.125, 0.194, 0.382], "color": "green"},
+        {"start": 146.0, "end": 155.2, "rect": [0.050, 0.825, 0.760, 0.967], "color": "mint"}
+      ]
+    },
+    {
+      "id": "11-outro",
+      "start": 156,
+      "end": 162,
+      "captionPosition": "bottom",
+      "segments": [
+        {"start": 156, "end": 162, "kind": "outro"}
+      ],
+      "kicker": "TOOLBRAID",
+      "headline": "Cross-site execution, explained.",
+      "subhead": "THE HUMAN STILL HOLDS THE FINAL SAY"
+    }
+  ]
+}

@@ -55,6 +55,29 @@ npm run dev:native
 
 Open `http://127.0.0.1:4173`.
 
+## Build the public multi-origin artifact
+
+The production contract uses one mission-control origin and six isolated provider origins:
+
+```text
+https://app.toolbraid.dev
+https://signals.toolbraid.dev
+https://pulse.toolbraid.dev
+https://source.toolbraid.dev
+https://deploy.toolbraid.dev
+https://status.toolbraid.dev
+https://mirage.toolbraid.dev
+```
+
+`vercel.json` routes those exact hosts to separate allowlisted static roots and applies the same origin-specific CSP and Permissions Policy used by the native local server. Build and verify the artifact with:
+
+```bash
+npm run build:vercel
+npm run validate:vercel
+```
+
+The output is written to `dist/vercel-multi-origin/`. Attach all seven HTTPS hostnames to the same Vercel project before judge testing; only `https://app.toolbraid.dev` is the judge-facing URL.
+
 ## Validate
 
 ```bash
@@ -81,7 +104,8 @@ src/providers/recovery/     deterministic provider catalog used by the local har
 providers/recovery/         six native provider documents
 src/app/                    mission controller, state projection, constellation UI
 tests/v2/                   unit, integration, security, and multi-origin contract tests
-scripts/                    servers, checks, standalone build, and browser E2E
+scripts/                    servers, checks, standalone/Vercel builds, capture, and browser E2E
+video-production/           reproducible English voice-over, mastering, captions, and 1080p compositor ([runbook](video-production/README.md))
 docs/                       architecture, threat model, test evidence, and challenge notes
 ```
 
@@ -95,7 +119,7 @@ Approval creation is accepted only from a trusted human DOM activation. A synthe
 
 ## Current scope
 
-The engineering build is a native-validated release candidate. It deliberately claims no completed competition submission, public deployment, or final video. Those release gates remain separate from product evidence and are tracked in [Challenge Requirements](docs/challenge-requirements.md).
+The engineering build is a native-validated release candidate. Its multi-origin Vercel artifact and local 1080p competition-video pipeline are complete. Public DNS/deployment, public repository visibility, public YouTube upload, and the final Devpost entry remain separate release gates tracked in [Challenge Requirements](docs/challenge-requirements.md).
 
 See [Start Here](START-HERE.md), [Architecture](docs/architecture.md), [Threat Model](docs/threat-model.md), and [Testing](docs/testing.md).
 

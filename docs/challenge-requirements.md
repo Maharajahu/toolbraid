@@ -14,7 +14,7 @@ Verified on **27 August 2026** against the [official rules](https://webmcp.devpo
 - unique idempotency keys, replay defense, live-registry revalidation, partial-failure receipts, and a sealed local integrity chain;
 - deterministic unit, integration, multi-origin, desktop, mobile, keyboard, dialog, CSP, and native-browser validation;
 - local MIT license and reproducible setup documentation;
-- dated Git history beginning during the submission period (`249f5f8`, 26 August 2026).
+- dated Git history beginning during the submission period (`b615fa7`, 25 August 2026).
 
 Native evidence is recorded in [native-e2e-validation.json](native-e2e-validation.json). Harness evidence and screenshots are recorded in [e2e-validation.json](e2e-validation.json).
 
@@ -22,12 +22,13 @@ Native evidence is recorded in [native-e2e-validation.json](native-e2e-validatio
 
 | Official requirement | Current state |
 |---|---|
-| Working live URL accessible in ChatGPT's in-app browser or Chrome 149+ with WebMCP enabled | Pending public HTTPS deployment |
+| Working live URL accessible in ChatGPT's in-app browser or Chrome 149+ with WebMCP enabled | Seven-origin Vercel build, host routing, CSP, Permissions Policy, and deployment tests are complete; public HTTPS domains and live judge validation remain pending |
 | Public source repository with all source/assets/instructions | Complete private development branch is synchronized; public visibility and default-branch promotion remain pending |
 | Open-source license detectable on the repository page and visible in About | GitHub detects the MIT license while private; recheck after public release |
 | English description covering WebMCP fit, UX improvement, human-agent collaboration, and implementation | Repository description and judge documentation are complete; final Devpost copy remains pending |
-| Public YouTube demonstration under three minutes, with audio | Intentionally deferred by the project owner |
-| English video/text/testing instructions | Pending final submission package |
+| Public YouTube demonstration under three minutes, with audio | English 1080p local master and captions are complete; public YouTube upload remains pending |
+| English video/text/testing instructions | Repository and video materials are complete; final live-URL testing instructions remain pending |
+| No unlicensed trademarks, copyrighted music, or third-party media in the demonstration | Local master uses first-party ToolBraid UI/assets, the owner's authorized voice, and an original deterministic ambient bed; final manual IP/trademark review passed |
 | Free judge access through the end of judging | Pending deployment and availability check |
 | Completed Devpost fields and submitted entry | Pending |
 
@@ -39,4 +40,4 @@ The four equally weighted official criteria are WebMCP Leverage, Execution, Pote
 
 ## Readiness verdict
 
-The engineering product is a native-validated release candidate. The competition submission is **not ready to submit** until the public deployment, current public repository, English submission package, video, and Devpost entry are complete. No publication or video work is included in the present scope.
+The engineering product, seven-origin deployment artifact, and local English video master are complete. The competition submission is **not ready to submit** until the public HTTPS deployment is judge-tested, the repository is made public, the video is uploaded publicly to YouTube, and the Devpost entry is completed.
