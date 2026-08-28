@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "validatedAt": "2026-08-28T21:55:23Z",
+  "scope": {
+    "application": "https://toolbraid-webmcp.vercel.app",
+    "recoveryLab": "https://toolbraid-recovery-lab.vercel.app",
+    "githubIncident": "https://github.com/Maharajahu/toolbraid/issues/1",
+    "customerProductionAffected": false
+  },
+  "rehearsal": {
+    "before": {
+      "healthStatus": 503,
+      "failureRatePercent": 37.6,
+      "activeRelease": "2c74c6079909b32ed92248c0a947d8fd0640eb7d",
+      "rollbackTarget": "65c1dcdffab843495af15842a36638d020d3edaf"
+    },
+    "approvedRecovery": {
+      "changeId": "RCV-c67180897f6f",
+      "outcome": "applied",
+      "completedAt": "2026-08-28T21:53:56.183Z",
+      "restoredRelease": "65c1dcdffab843495af15842a36638d020d3edaf",
+      "healthStatusAfter": 200,
+      "replayReturnedSameChange": true
+    },
+    "approvedStatusPublication": {
+      "updateId": "github-comment-5458165986",
+      "outcome": "published",
+      "createdAt": "2026-08-28T21:55:23Z",
+      "comment": "https://github.com/Maharajahu/toolbraid/issues/1#issuecomment-5458165986",
+      "replayReturnedSameUpdate": true
+    }
+  },
+  "finalJudgeState": {
+    "healthStatus": 503,
+    "failureRatePercent": 37.6,
+    "activeRelease": "2c74c6079909b32ed92248c0a947d8fd0640eb7d",
+    "rollbackTarget": "65c1dcdffab843495af15842a36638d020d3edaf",
+    "readyForFreshMission": true
+  }
+}

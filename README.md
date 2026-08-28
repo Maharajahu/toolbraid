@@ -14,7 +14,7 @@ The judge deployment targets a disposable recovery lab: GitHub commit/incident d
 
 *The implemented product after a deterministic recovery mission. Open the image for the full-resolution evidence view.*
 
-**Judge path:** [Judge Guide](docs/JUDGING.md) · [Start Here](START-HERE.md) · [Architecture](docs/architecture.md) · [Threat Model](docs/threat-model.md) · [Testing](docs/testing.md)
+**Judge path:** [Judge Guide](docs/JUDGING.md) · [Start Here](START-HERE.md) · [Live mutation receipt](docs/live-mutation-validation.json) · [Architecture](docs/architecture.md) · [Threat Model](docs/threat-model.md) · [Testing](docs/testing.md)
 
 **Live demo:** [toolbraid-webmcp.vercel.app](https://toolbraid-webmcp.vercel.app)
 

@@ -38,7 +38,13 @@ npx vercel@latest deploy --cwd .\stable --prod --yes `
 Save the immutable deployment URL printed by Vercel as `STABLE_DEPLOYMENT_URL`. Verify it before introducing the incident:
 
 ```powershell
-Invoke-RestMethod "https://<production-domain>/api/health"
+npx vercel@latest alias set <STABLE_DEPLOYMENT_URL> toolbraid-recovery-lab.vercel.app
+```
+
+Assign the fixed lab alias explicitly. Depending on the account namespace, `--prod` may update only Vercel's team-qualified project domain; ToolBraid deliberately polls the exact alias configured in `TOOLBRAID_VERCEL_PRODUCTION_ALIAS`.
+
+```powershell
+Invoke-RestMethod "https://toolbraid-recovery-lab.vercel.app/api/health"
 ```
 
 Expected result: HTTP `200`, version `2026.08.28-stable`, checkout state `operational`.
@@ -58,10 +64,16 @@ npx vercel@latest deploy --cwd .\degraded --prod --yes `
   --meta "githubCommitRef=competition-final"
 ```
 
+Save the new immutable URL as `DEGRADED_DEPLOYMENT_URL`, then move the same fixed alias to it:
+
+```powershell
+npx vercel@latest alias set <DEGRADED_DEPLOYMENT_URL> toolbraid-recovery-lab.vercel.app
+```
+
 The same production domain now serves the bad release. Verify while preserving the HTTP 503 response body:
 
 ```powershell
-$result = Invoke-WebRequest "https://<production-domain>/api/health" -SkipHttpErrorCheck
+$result = Invoke-WebRequest "https://toolbraid-recovery-lab.vercel.app/api/health" -SkipHttpErrorCheck
 $result.StatusCode
 $result.Content
 ```

@@ -76,6 +76,10 @@ npm run test:native
 
 This gate must stop in `review` with `mutationExecution: false`. It verifies six provider origins, nine live tools, one quarantine, seven live safe-stage results, and audit-chain integrity. The deliberately failed primary-to-fallback path remains a deterministic local test; the public lab normally returns a valid `degraded` health result and therefore does not manufacture a provider failure. A passing run writes [native-public-readonly-validation.json](native-public-readonly-validation.json).
 
+## Live mutation rehearsal
+
+The complete human-approved public path was rehearsed on 28 August 2026 against the disposable recovery lab. ToolBraid restored the exact stable Vercel deployment, verified HTTP 200 after rollback, published one GitHub incident comment, and returned the same receipts when both requests were replayed. The lab was then reset to its degraded release for a fresh judge mission. The redacted machine-readable receipt is [live-mutation-validation.json](live-mutation-validation.json).
+
 ## Generated artifact
 
 `npm run build` creates `dist/index.html`, a self-contained ordinary-browser verification harness. Provider documents are intentionally not embedded because native execution depends on their distinct origins.

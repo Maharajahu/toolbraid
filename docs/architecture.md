@@ -37,11 +37,13 @@ document.modelContext.registerTool(definition, {
 
 The orchestrator calls `getTools({ fromOrigins })`, retains each opaque live registration, and passes that exact object to `executeTool()`. Origin, name, normalized input schema, and registration generation form tool identity.
 
+In the public Vercel profile, each provider page calls a same-origin `/api/live-*` server function. Those functions resolve the public `checkout` alias to one allowlisted GitHub repository and issue #1, one disposable Vercel project and production alias, and one recovery-lab health URL. They hold the credentials and access the allowlisted GitHub, Vercel, and health APIs; source and deployment reads return matching exact real commit SHAs.
+
 [![Native ToolBraid topology across the orchestrator and six isolated WebMCP provider origins](diagrams/toolbraid-cross-origin-architecture.svg)](diagrams/toolbraid-cross-origin-architecture.svg)
 
 ### Local verification harness
 
-When native WebMCP is unavailable on localhost, ToolBraid creates an in-memory catalog with the same observable registration, exposure, discovery, execution, cancellation, and tool-change rules. The UI labels this mode **Verified local harness**. It is for deterministic development and E2E validation, not native compliance evidence.
+When native WebMCP is unavailable on localhost, ToolBraid creates an in-memory catalog with the same observable registration, exposure, discovery, execution, cancellation, and tool-change rules. The UI labels this mode **Verified local harness**. This deterministic fixture catalog is a local fallback only; it is not selected for the public Vercel profile and is not native compliance evidence.
 
 Outside localhost/file origins, an unsupported native API fails closed.
 
@@ -54,7 +56,7 @@ Outside localhost/file origins, an unsupported native API fails closed.
 | Planning and execution | `src/engine/graph.js`, `executor.js` | DAG lifecycle, concurrent safe work, read-only fallback, fail-closed mutations |
 | Authority and evidence | `src/engine/approval.js`, `audit.js` | exact approval envelopes, nonce claims, replay rejection, SHA-256 chain |
 | Domain pack | `src/packs/recovery/` | seven capabilities, aliases, canonical results, nine-node two-stage recovery graph |
-| Providers | `providers/recovery/` | six independent native documents and deterministic state |
+| Providers | `providers/recovery/`, `api/`, `server/live-services/` | six independent native documents, same-origin server functions, allowlisted external APIs, and deterministic local fallback state |
 | Application | `src/app/` | mission controller, UI state projection, constellation, approvals, receipts, audit inspector |
 
 ## Recovery capability pack
@@ -102,7 +104,7 @@ Each approval envelope binds:
 - normalized arguments and effect summary;
 - risk, issued/expiry times, and one-time nonce.
 
-Approval creation is a top-level trusted DOM action and is absent from the public automation surface. Before any mutation, ToolBraid refreshes and rescans both live tools, then verifies and claims the complete approval set synchronously. Recovery applies first; publication cannot start unless recovery succeeds. A failed claim consumes nothing. Once claimed, failure does not release a nonce, and any partial outcome is retained in a sealed local record.
+Approval creation is a top-level trusted DOM action and is absent from the public automation surface. Before any mutation, ToolBraid refreshes and rescans both live tools, then verifies and claims the complete approval set synchronously. Recovery applies first; publication cannot start unless recovery succeeds. In the public profile, those separate approvals authorize only rollback of the disposable Vercel recovery lab to its immediately previous production deployment and one comment on the allowlisted GitHub issue #1. A failed claim consumes nothing. Once claimed, failure does not release a nonce, and any partial outcome is retained in a sealed local record.
 
 ## Audit
 
@@ -110,6 +112,6 @@ Every discovery, quarantine, mapping, node lifecycle, provider attempt, fallback
 
 ## Origin policy
 
-The multi-origin server applies explicit `Permissions-Policy`, CSP `frame-src`, provider `frame-ancestors`, sandboxing, path allowlists, no-store caching, and no provider network access. The app sends only capability-required fields to each provider.
+The multi-origin server applies explicit `Permissions-Policy`, CSP `frame-src`, provider `frame-ancestors`, sandboxing, path allowlists, and no-store caching. Provider pages send only capability-required fields to same-origin server functions; those functions keep credentials server-side and enforce exact sandbox targets for outbound GitHub, Vercel, and health API access.
 
 See [Native WebMCP Contract](competition/native-webmcp-contract.md) for the pinned API behavior.

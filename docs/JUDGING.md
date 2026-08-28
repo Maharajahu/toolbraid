@@ -29,12 +29,14 @@ tools:           9 discovered
 quarantine:      1
 capabilities:    7
 graph:           9 nodes
-recovery result: release-1841
-notice result:   notice-r9
+recovery result: <exact previous commit SHA>
+notice result:   github-comment-<real comment ID> on issue #1
 audit:           sha256-chain-v1, 54 entries
 ```
 
-In the judge deployment, GitHub and Vercel reads are live. The recovery action rolls the disposable Vercel recovery lab back to its immediately previous production deployment, and the communication action appends a real comment to one dedicated GitHub incident issue. Local runs use deterministic fixtures. The proof never targets a customer or business production system.
+In the judge deployment, GitHub reads use an exact configured 40-character commit SHA, and Vercel deployment metadata reports the same real commit SHAs. The two separately approved mutations are bounded: recovery rolls only the disposable Vercel recovery lab back to its immediately previous production deployment, and communication appends a real comment to the allowlisted GitHub incident issue #1. Deterministic fixtures remain a local development and test fallback; they do not replace the public live integrations. The proof never targets a customer or business production system.
+
+Each public provider page calls its own same-origin server function. Those functions hold the credentials and access only the allowlisted GitHub, Vercel, or recovery-lab health API target.
 
 Native and harness runs are visibly labelled. Only a run whose badge reads **Native WebMCP** is native API evidence.
 

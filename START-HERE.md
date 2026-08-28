@@ -6,13 +6,15 @@ For a fast product overview, open the [live demo](https://toolbraid-webmcp.verce
 
 Open [toolbraid-webmcp.vercel.app](https://toolbraid-webmcp.vercel.app) in Chrome 149+ with WebMCP enabled. No login is required. The badge must read **Native WebMCP** for a native run.
 
+The public profile reads exact real commit SHAs from GitHub and matching Vercel deployment metadata. Each provider page calls its own same-origin server function, which accesses only the allowlisted GitHub, Vercel, or recovery-lab health API target.
+
 ## Run locally
 
 ```bash
 npm run dev
 ```
 
-Open `http://127.0.0.1:4173`. The badge must read **Verified local harness** in an ordinary browser.
+Open `http://127.0.0.1:4173`. The badge must read **Verified local harness** in an ordinary browser. This deterministic fixture path is a local fallback only; the public Vercel profile uses the live sandbox integrations.
 
 For the native multi-origin path, use a browser build that implements WebMCP:
 
@@ -33,14 +35,14 @@ The public read-only gate is documented in [Testing](docs/testing.md).
 ## Walk through the mission
 
 1. Start discovery and inspect six origins, nine tools, one quarantine, and seven capability mappings.
-2. Run safe reads. The primary health provider fails and the graph visibly substitutes the read-only fallback.
+2. Run safe reads. In the local harness, the primary health fixture fails and the graph visibly substitutes the read-only fallback; the public profile reads the live sandbox state.
 3. Inspect the evidence, proposed recovery, drafted notice, and exact mutation arguments.
 4. Approve the recovery action and status publication separately.
 5. Execute the approved mutations.
-6. Confirm `release-1841`, `notice-r9`, and the sealed local SHA-256 integrity chain.
+6. Confirm the exact rollback-target commit SHA, the GitHub comment receipt, and the sealed local SHA-256 integrity chain.
 7. Reset to begin a fresh mission.
 
-No real infrastructure or public status page is changed.
+In the public demo, the two approvals cause real, bounded effects: recovery rolls only the disposable Vercel recovery lab back to its immediately previous production deployment, and publication appends a comment to the allowlisted GitHub issue #1. No customer or business production system is changed.
 
 ## Validate the repository
 
