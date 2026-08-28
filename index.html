@@ -100,29 +100,41 @@
           </div>
         </header>
 
-        <article class="mission-brief" data-mission-brief>
-          <div class="mission-brief-head">
-            <span class="brief-icon" data-ui-icon="mission" aria-hidden="true"></span>
-            <div><p data-mission-kicker>Human objective</p><strong data-mission-title>Restore checkout safely</strong></div>
-            <button type="button" data-action="edit-objective" aria-label="Edit mission objective">Edit</button>
-          </div>
-          <p data-objective-copy>Diagnose checkout after the latest deployment, prepare a safe recovery and a customer update. Do not change production or publish without my approval.</p>
-          <div class="mission-constraints">
-            <span data-constraint="environment">Production</span><span data-constraint="mode">Read first</span><span data-constraint="authority">Exact approval</span>
-          </div>
-          <button class="primary-action" type="button" data-action="start-mission">
-            <span data-start-label>Start mission</span><span data-start-icon aria-hidden="true">→</span>
-          </button>
-        </article>
+        <div class="mission-rail-stack">
+          <article class="mission-brief" data-mission-brief>
+            <div class="mission-brief-head">
+              <span class="brief-icon" data-ui-icon="mission" aria-hidden="true"></span>
+              <div><p data-mission-kicker>Human objective</p><strong data-mission-title>Restore checkout safely</strong></div>
+              <button type="button" data-action="edit-objective" aria-label="Edit mission objective">Edit</button>
+            </div>
+            <p data-objective-copy>Diagnose checkout after the latest deployment, prepare a safe recovery and a customer update. Do not change production or publish without my approval.</p>
+            <div class="mission-constraints">
+              <span data-constraint="environment">Production</span><span data-constraint="mode">Read first</span><span data-constraint="authority">Exact approval</span>
+            </div>
+            <button class="primary-action" type="button" data-action="start-mission">
+              <span data-start-label>Start mission</span><span data-start-icon aria-hidden="true">→</span>
+            </button>
+          </article>
 
-        <section class="provider-legend" aria-label="Provider status legend">
-          <p>Provider origins</p>
-          <span><i class="healthy"></i>Healthy <b data-healthy-count>0</b></span>
-          <span><i class="degraded"></i>Degraded <b data-degraded-count>0</b></span>
-          <span><i class="quarantined"></i>Quarantined <b data-quarantine-count>0</b></span>
-          <button type="button" data-action="swap-provider">Test provider swap <span>↔</span></button>
-          <div class="provider-swap-status" data-swap-status hidden><span data-ui-icon="check" aria-hidden="true"></span><p><strong>Pulse Monitor substituted</strong><small>Read-only fallback · healthy</small></p></div>
-        </section>
+          <section class="provider-legend" aria-label="Provider status legend">
+            <p>Provider origins</p>
+            <span><i class="healthy"></i>Healthy <b data-healthy-count>0</b></span>
+            <span><i class="degraded"></i>Degraded <b data-degraded-count>0</b></span>
+            <span><i class="quarantined"></i>Quarantined <b data-quarantine-count>0</b></span>
+            <button type="button" data-action="swap-provider">Test provider swap <span>↔</span></button>
+            <div class="provider-swap-status" data-swap-status hidden><span data-ui-icon="check" aria-hidden="true"></span><p><strong>Pulse Monitor substituted</strong><small>Read-only fallback · healthy</small></p></div>
+          </section>
+
+          <section class="parallel-reads" aria-labelledby="parallel-title">
+            <header><div><p>Parallel evidence</p><h2 id="parallel-title">Read-only batch</h2></div><span data-read-summary aria-live="polite">0 / 4</span></header>
+            <ol data-read-list>
+              <li data-read="health"><i></i><span><strong>Service health</strong><small>Waiting</small></span><time>—</time></li>
+              <li data-read="release"><i></i><span><strong>Release history</strong><small>Waiting</small></span><time>—</time></li>
+              <li data-read="deployment"><i></i><span><strong>Deployment state</strong><small>Waiting</small></span><time>—</time></li>
+              <li data-read="notice"><i></i><span><strong>Status notice</strong><small>Waiting</small></span><time>—</time></li>
+            </ol>
+          </section>
+        </div>
 
         <div class="constellation-viewport" data-constellation-viewport role="region" aria-label="Interactive provider constellation. On small screens, scroll horizontally to inspect all nodes." tabindex="0">
           <div class="constellation-placeholder" data-constellation-placeholder>
@@ -132,16 +144,6 @@
           </div>
           <div class="constellation-mount" data-constellation hidden></div>
         </div>
-
-        <section class="parallel-reads" aria-labelledby="parallel-title">
-          <header><div><p>Parallel evidence</p><h2 id="parallel-title">Read-only batch</h2></div><span data-read-summary aria-live="polite">0 / 4</span></header>
-          <ol data-read-list>
-            <li data-read="health"><i></i><span><strong>Service health</strong><small>Waiting</small></span><time>—</time></li>
-            <li data-read="release"><i></i><span><strong>Release history</strong><small>Waiting</small></span><time>—</time></li>
-            <li data-read="deployment"><i></i><span><strong>Deployment state</strong><small>Waiting</small></span><time>—</time></li>
-            <li data-read="notice"><i></i><span><strong>Status notice</strong><small>Waiting</small></span><time>—</time></li>
-          </ol>
-        </section>
 
         <section class="approval-dock" data-approval-dock aria-labelledby="approval-gate-title">
           <div class="approval-gate-copy">

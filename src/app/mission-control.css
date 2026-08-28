@@ -463,13 +463,25 @@ body[data-guided="active"] .guided-control { color: #02131e; background: var(--c
 .mission-trajectory li[data-state="complete"] > span { color: var(--green-soft); border-color: rgb(127 227 106 / 30%); background: rgb(127 227 106 / 7%); }
 body[data-phase="complete"] .mission-trajectory li[data-state="complete"] { color: var(--green-soft); background: rgb(127 227 106 / 6%); }
 
+.mission-rail-stack {
+  position: absolute;
+  z-index: 8;
+  top: 80px;
+  bottom: 154px;
+  left: 16px;
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  width: 220px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-color: rgb(56 199 255 / 24%) transparent;
+  scrollbar-width: thin;
+}
+
 .mission-brief,
 .provider-legend,
 .parallel-reads {
-  position: absolute;
-  z-index: 8;
-  left: 16px;
-  width: 220px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--surface-glass);
@@ -477,7 +489,11 @@ body[data-phase="complete"] .mission-trajectory li[data-state="complete"] { colo
   backdrop-filter: blur(18px) saturate(120%);
 }
 
-.mission-brief { top: 80px; padding: 14px; }
+.mission-brief,
+.provider-legend,
+.parallel-reads { position: relative; width: 100%; }
+
+.mission-brief { padding: 14px; }
 .mission-brief-head { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; align-items: center; gap: 9px; }
 .brief-icon { display: grid; place-items: center; width: 34px; height: 34px; border: 1px solid rgb(56 199 255 / 28%); border-radius: 50%; color: var(--cyan-bright); background: rgb(56 199 255 / 8%); }
 .brief-icon .ui-icon { width: 17px; height: 17px; }
@@ -516,7 +532,7 @@ body[data-phase="complete"] .mission-trajectory li[data-state="complete"] { colo
 
 .primary-action { display: flex; align-items: center; justify-content: space-between; width: 100%; margin-top: 12px; padding: 10px 12px; font-size: 11px; }
 
-.provider-legend { top: 334px; padding: 12px 14px; }
+.provider-legend { padding: 12px 14px; }
 .provider-legend > p { margin: 0 0 9px; color: var(--muted); font-size: 9px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
 .provider-legend > span { display: grid; grid-template-columns: 8px 1fr auto; align-items: center; gap: 7px; padding: 5px 0; color: var(--text-soft); font-size: 10px; }
 .provider-legend > span i { width: 7px; height: 7px; border-radius: 50%; }
@@ -563,7 +579,7 @@ body[data-phase="complete"] .mission-trajectory li[data-state="complete"] { colo
 .placeholder-orbits i:nth-child(3) { inset: 49px; border-color: rgb(127 227 106 / 24%); animation-delay: -2s; }
 .placeholder-orbits b { position: absolute; inset: 66px; border-radius: 50%; background: var(--cyan); box-shadow: 0 0 28px rgb(56 199 255 / 54%); }
 
-.parallel-reads { bottom: 168px; padding: 12px; }
+.parallel-reads { padding: 12px; }
 .parallel-reads header { display: flex; justify-content: space-between; align-items: flex-start; padding: 1px 2px 9px; border-bottom: 1px solid var(--border); }
 .parallel-reads header p { margin: 0; color: var(--muted); font-size: 9px; text-transform: uppercase; }
 .parallel-reads h2 { margin: 1px 0 0; font-size: 12px; }
@@ -1000,7 +1016,6 @@ body[data-phase="complete"] .mission-brief { padding: 12px; }
 body[data-phase="complete"] .mission-brief > p { margin-block: 10px; font-size: 11px; line-height: 1.5; -webkit-line-clamp: 5; }
 body[data-phase="complete"] .mission-constraints span { padding: 3px 6px; font-size: 9px; }
 body[data-phase="complete"] .primary-action { margin-top: 10px; padding: 8px 10px; }
-body[data-phase="complete"] .provider-legend { top: 360px; }
 body[data-phase="complete"] .brief-icon { color: var(--green-soft); border-color: rgb(127 227 106 / 38%); background: rgb(127 227 106 / 8%); }
 body[data-phase="complete"] .primary-action:disabled { color: #03170a; border-color: rgb(127 227 106 / 34%); background: var(--green); opacity: .94; }
 body[data-phase="complete"] .mission-constraints span { color: var(--green-soft); border-color: rgb(127 227 106 / 20%); }
@@ -1074,9 +1089,7 @@ body[data-phase="complete"] .review-action { color: #03170a; border-color: rgb(1
 @media (max-width: 1380px) {
   .workspace { grid-template-columns: minmax(680px, 1fr) 330px; }
   .runtime-chip.lock { display: none; }
-  .mission-brief,
-  .provider-legend,
-  .parallel-reads { width: 205px; left: 12px; }
+  .mission-rail-stack { width: 205px; left: 12px; }
   .approval-dock { grid-template-columns: minmax(154px, .7fr) repeat(2, minmax(165px, 1fr)) auto; right: 10px; left: 10px; }
   .approval-gate-copy { padding: 8px; }
   .gate-lock { flex-basis: 34px; height: 34px; }
@@ -1117,6 +1130,7 @@ body[data-phase="complete"] .review-action { color: #03170a; border-color: rgb(1
   .rail-bottom { margin-top: 0; }
   .workspace { display: block; overflow: visible; }
   .topology-stage { height: 900px; border-right: 0; border-bottom: 1px solid var(--border); }
+  .mission-rail-stack { bottom: 230px; }
   .evidence-panel { height: 620px; }
   .activity-ticker { position: relative; display: none; }
   .approval-dock { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -1141,9 +1155,7 @@ body[data-phase="complete"] .review-action { color: #03170a; border-color: rgb(1
   .stage-tools [data-action="zoom-in"],
   .stage-tools [data-action="fit-graph"],
   .stage-tools output { display: none; }
-  .mission-brief { top: 76px; right: 12px; left: 12px; width: auto; }
-  .provider-legend { top: 287px; left: 12px; width: 178px; }
-  .parallel-reads { top: 287px; right: 12px; bottom: auto; left: auto; width: calc(100% - 214px); min-width: 170px; }
+  .mission-rail-stack { top: 76px; right: 12px; bottom: auto; left: 12px; width: auto; overflow: visible; }
   .constellation-viewport { inset: 400px 0 246px; }
   .constellation-placeholder { left: 50%; width: 80%; }
   .approval-dock { right: 8px; bottom: 8px; left: 8px; grid-template-columns: 1fr; max-height: 232px; overflow: auto; }
@@ -1221,7 +1233,7 @@ body[data-phase="complete"] .mission-trajectory li[data-state="complete"] {
 .provider-legend { padding: 10px 12px; }
 .provider-legend > p { margin-bottom: 6px; }
 .provider-legend > span { padding: 3px 0; }
-.parallel-reads { top: 524px; bottom: auto; padding: 10px; }
+.parallel-reads { padding: 10px; }
 .parallel-reads header { padding-bottom: 7px; }
 .parallel-reads ol { margin-top: 6px; }
 .parallel-reads li { min-height: 30px; padding-block: 2px; }
@@ -1394,22 +1406,19 @@ body[data-phase="complete"] .review-action:hover { background: rgb(18 67 92 / 90
 }
 
 @media (max-height: 920px) and (min-width: 961px) {
-  body[data-phase="complete"] .mission-brief { top: 74px; }
+  body[data-phase="complete"] .mission-rail-stack { top: 74px; }
   body[data-phase="complete"] .mission-brief > p { -webkit-line-clamp: 3; }
-  body[data-phase="complete"] .provider-legend { top: 304px; }
-  body[data-phase="complete"] .parallel-reads { top: 480px; }
   body[data-phase="complete"] .parallel-reads ol { display: none; }
   body[data-phase="complete"] .parallel-reads header { padding-bottom: 0; border-bottom: 0; }
   body[data-phase="complete"] .approval-dock { min-height: 104px; }
 }
 
 @media (max-height: 820px) and (min-width: 961px) {
-  body[data-phase="complete"] .mission-brief { top: 70px; padding: 10px; }
+  body[data-phase="complete"] .mission-rail-stack { top: 70px; }
+  body[data-phase="complete"] .mission-brief { padding: 10px; }
   body[data-phase="complete"] .mission-brief > p { margin-block: 8px; -webkit-line-clamp: 3; }
   body[data-phase="complete"] .mission-constraints { gap: 3px; }
   body[data-phase="complete"] .primary-action { margin-top: 7px; padding-block: 6px; }
-  body[data-phase="complete"] .provider-legend { top: 266px; }
-  body[data-phase="complete"] .parallel-reads { top: 432px; }
   body[data-phase="complete"] .approval-dock { min-height: 98px; padding: 8px; }
   body[data-phase="complete"] .approval-gate-copy { padding-block: 6px; }
   body[data-phase="complete"] .mutation-card { min-height: 76px; padding-block: 7px; }
@@ -1417,20 +1426,6 @@ body[data-phase="complete"] .review-action:hover { background: rgb(18 67 92 / 90
 
 @media (max-width: 680px) {
   .topology-stage { height: 1830px; }
-  .mission-brief { top: 76px; }
-  .provider-legend {
-    top: 376px;
-    right: 12px;
-    left: 12px;
-    width: auto;
-  }
-  .parallel-reads {
-    top: 582px;
-    right: 12px;
-    left: 12px;
-    width: auto;
-    min-width: 0;
-  }
   .constellation-viewport {
     top: 780px;
     right: 0;
