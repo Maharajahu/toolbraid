@@ -1,13 +1,38 @@
 {
-  "format": "toolbraid-capture-timeline-v1",
-  "generatedAt": "2026-08-27T22:46:06.560158+00:00",
+  "format": "toolbraid-public-capture-timeline-v2",
+  "generatedAt": "2026-08-28T18:23:47.240784+00:00",
+  "target": "public-full",
+  "publicUrl": "https://toolbraid-webmcp.vercel.app",
+  "executionMode": "public-sandbox-full",
+  "sandboxExecution": true,
   "runtime": "native",
   "resolution": "1920x1080",
   "fps": 30,
   "pace": 1.0,
-  "durationSeconds": 59.833,
-  "output": "video-production\\work\\toolbraid-product-demo-1080p30.webm",
-  "rawOutput": "video-production\\work\\toolbraid-product-demo-1080p30-raw.webm",
+  "durationSeconds": 66.8,
+  "source": {
+    "artifact": "toolbraid-public-full-demo-1080p30.webm",
+    "durationSeconds": 68.033,
+    "decodedFrames": 2041,
+    "sha256": "9aef0f6371a6d040932ae5953c50660fe02e7c4ba279a4220153e927fa16e2b5"
+  },
+  "edit": {
+    "sourceStartSeconds": 1.2333333333333334,
+    "sourceEndSeconds": 68.03333333333333,
+    "sourceFramesInclusive": "37-2040",
+    "playback": "linear-1x"
+  },
+  "validatedOutcome": {
+    "providers": 6,
+    "tools": 9,
+    "quarantined": 1,
+    "safeResults": 7,
+    "approvals": 2,
+    "activeReleaseId": "release-1841",
+    "noticeRevision": "notice-r9",
+    "auditEntries": 54,
+    "auditAlgorithm": "sha256-chain-v1"
+  },
   "entries": [
     {
       "timeSeconds": 0.0,
@@ -16,133 +41,145 @@
       "note": "Browser capture begins before product load."
     },
     {
-      "timeSeconds": 0.703,
+      "timeSeconds": 1.573,
       "scene": "objective",
       "phase": "idle",
       "note": "Human objective and read-first authority boundary are visible."
     },
     {
-      "timeSeconds": 5.047,
+      "timeSeconds": 4.448,
       "scene": "discover-interaction",
       "phase": "idle",
       "note": "Start cross-origin WebMCP discovery."
     },
     {
-      "timeSeconds": 5.219,
+      "timeSeconds": 5.808,
       "scene": "normalized-topology",
       "phase": "mapping",
       "note": "Six origins, seven canonical mappings, and one quarantined tool are visible."
     },
     {
-      "timeSeconds": 10.953,
+      "timeSeconds": 10.901,
       "scene": "quarantine-interaction",
       "phase": "mapping",
       "note": "Inspect the unsafe approval-bypass tool excluded before semantic scoring."
     },
     {
-      "timeSeconds": 11.0,
+      "timeSeconds": 11.401,
       "scene": "quarantine-inspector",
       "phase": "mapping",
       "note": "Inspector shows the quarantine decision and metadata security signals."
     },
     {
-      "timeSeconds": 16.344,
+      "timeSeconds": 16.698,
       "scene": "mapping-interaction",
       "phase": "mapping",
       "note": "Open canonical capability mappings."
     },
     {
-      "timeSeconds": 16.375,
+      "timeSeconds": 17.183,
       "scene": "semantic-mapping",
       "phase": "mapping",
       "note": "The normalized capability pack and confidence bindings are visible."
     },
     {
-      "timeSeconds": 21.687,
+      "timeSeconds": 22.37,
       "scene": "observe-interaction",
       "phase": "mapping",
       "note": "Return to live evidence inspection."
     },
     {
-      "timeSeconds": 22.25,
+      "timeSeconds": 24.651,
       "scene": "observe-interaction",
       "phase": "mapping",
       "note": "Run the four independent read-only evidence tools."
     },
     {
-      "timeSeconds": 22.906,
+      "timeSeconds": 26.823,
       "scene": "failover-interaction",
       "phase": "review",
       "note": "Inspect evidence from the compatible read-only fallback provider."
     },
     {
-      "timeSeconds": 22.953,
+      "timeSeconds": 27.355,
       "scene": "safe-evidence-ready",
       "phase": "review",
       "note": "Evidence is correlated; fallback is recorded; both mutations remain locked."
     },
     {
-      "timeSeconds": 29.469,
+      "timeSeconds": 33.823,
       "scene": "authorize-interaction",
       "phase": "review",
       "note": "Open the exact-effect human authority checkpoint."
     },
     {
-      "timeSeconds": 29.531,
+      "timeSeconds": 34.73,
       "scene": "exact-effects",
       "phase": "review",
       "note": "Separate single-use approvals show exact origins, tools, schemas and arguments."
     },
     {
-      "timeSeconds": 36.547,
+      "timeSeconds": 38.495,
       "scene": "approve-apply-interaction",
       "phase": "review",
       "note": "Grant only the recovery mutation scope."
     },
     {
-      "timeSeconds": 36.609,
+      "timeSeconds": 39.511,
       "scene": "recovery-approved",
       "phase": "review",
       "note": "Recovery scope is fingerprint-bound; publication is still locked."
     },
     {
-      "timeSeconds": 40.328,
+      "timeSeconds": 42.776,
       "scene": "approve-publish-interaction",
       "phase": "review",
       "note": "Grant the separate publication scope."
     },
     {
-      "timeSeconds": 40.39,
+      "timeSeconds": 43.605,
       "scene": "authority-complete",
       "phase": "approved",
       "note": "Both exact scopes are approved and ready for ordered execution."
     },
     {
-      "timeSeconds": 45.406,
+      "timeSeconds": 48.542,
       "scene": "execute-interaction",
       "phase": "approved",
       "note": "Execute only the two reviewed actions."
     },
     {
-      "timeSeconds": 45.531,
+      "timeSeconds": 49.448,
       "scene": "verified-outcome",
       "phase": "complete",
       "note": "Checkout restored, customer update published, receipts present, audit sealed."
     },
     {
-      "timeSeconds": 52.344,
+      "timeSeconds": 55.292,
       "scene": "audit-interaction",
       "phase": "complete",
-      "note": "Open the full local integrity trail."
+      "note": "Open the deployed browser-sandbox integrity trail."
     },
     {
-      "timeSeconds": 52.375,
+      "timeSeconds": 55.745,
       "scene": "audit-seal",
       "phase": "complete",
       "note": "Ordered receipts and the verified SHA-256 chain close the demonstration."
     },
     {
-      "timeSeconds": 59.39,
+      "timeSeconds": 56.245,
+      "scene": "inspect-audit-events",
+      "phase": "complete",
+      "note": "Follow the ordered mutation receipts in the integrity trail."
+    },
+    {
+      "timeSeconds": 60.464,
+      "scene": "verify-audit-hash",
+      "phase": "complete",
+      "note": "Verify the final SHA-256 chain head."
+    },
+    {
+      "timeSeconds": 66.933,
       "scene": "capture-end",
       "phase": "complete",
       "note": "Hold complete; close the recorded page."

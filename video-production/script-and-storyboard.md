@@ -1,62 +1,59 @@
 # ToolBraid WebMCP Challenge — Final Video Script and Storyboard
 
-**Locked duration:** 2:42 (must remain below 3:00)
-**Master:** 1920 × 1080, 30 fps, English voice-over, English captions, stereo 48 kHz
-**Product evidence:** record the real application. A native run must visibly show the **Native WebMCP** badge. Never label the verification harness as native evidence.
-**Disclosure:** the recovery data and providers are deterministic fixtures; the demo changes no real production system or public status page.
+**Locked duration:** 1:09.700
 
-## Storyboard and exact voice-over
+**Master:** 1920 × 1080, 30 fps, English voice-over and captions, stereo 48 kHz
 
-| Time | Picture and edit direction | Narration coverage | On-screen text |
-|---|---|---|---|
-| **00:00–00:08** | Begin directly on the live public deployment. The pointer reaches **Start mission** and clicks within the first two to three seconds. No opening title card. | **“Let me show you how ToolBraid handles a real cross-site run. I start the mission.”** | `LIVE PUBLIC DEPLOYMENT`<br>`NATIVE WEBMCP` |
-| **00:08–00:21** | Keep the real capture at 1:1 through discovery, then cut to the first explanatory diagram. Never zoom or retime the baked pointer. | **“It discovers nine tools across six separate WebMCP origins.”** | `Restore checkout safely`<br>`Read first · Exact approval` |
-| **00:21–00:36** | Hold the cross-origin architecture diagram long enough to read all six provider origins. Each packet moves once and settles; no looping pulse. | **“One tool hides an instruction-like override in its metadata, so ToolBraid quarantines it before scoring.”** | `NATIVE WEBMCP`<br>`registerTool → getTools → executeTool`<br>`6 isolated origins` |
-| **00:36–00:51** | Continue chronologically to the red Mirage fixture, then show the normalization diagram and visible graph. | **“The remaining contracts use different names, schemas, and result shapes. ToolBraid maps them to seven canonical capabilities and builds a visible nine-node dependency graph.”** | `9 tools discovered`<br>`1 quarantined before scoring`<br>`Provider metadata ≠ authority` |
-| **00:51–01:08** | Select **Mapping**, then move naturally toward the safe-read controls. The cursor follows the recorded path at exactly 1:1. | **“Now it runs four safe reads in parallel.”** | `HETEROGENEOUS CONTRACTS`<br>`7 canonical capabilities`<br>`9-node explainable graph` |
-| **01:08–01:25** | Click **Run 4 safe reads**. Show the primary failure and the read-only Pulse Monitor substitution; keep mutation cards locked. | **“The primary health check fails. ToolBraid chooses another read-only provider with a different schema, without changing the planner. That provider can gather evidence, but it can never change state.”** | `4 READS IN PARALLEL`<br>`Read-only provider selected`<br>`No mutation failover` |
-| **01:25–01:43** | Show the prepared recovery and notice while both actions remain locked. | **“The exact arguments, current versions, and concrete effects become visible. Both actions remain locked. The agent can collect evidence, build the plan, and explain what will happen. It cannot approve anything by itself.”** | `EVIDENCE FIRST`<br>`Arguments finalized after safe reads`<br>`Agent prepares · Human authorizes` |
-| **01:43–02:02** | Show the authority diagram once, then open **Review exact effects** on the live public deployment. Hover to read both effects. Cut to the synchronized local fixture at source time `00:44.00` and show the first trusted recovery approval; never replay the review. | **“Recovery and publication each receive a separate exact-effect approval: plan revision, live origin and tool, bound arguments, risk, expiry, and a one-use token. I read and approve them one at a time. One click cannot authorize both.”** | `APPROVAL 1 · PRODUCTION`<br>`APPROVAL 2 · COMMUNICATION`<br>`Exact scope · Single use` |
-| **02:02–02:20** | After the short execution diagram, continue the local fixture at source time `00:50.45`: approve publication separately, click **Execute approved**, then show recovery first, publication second, and the audit view opening. The genuine pointer remains at 1:1. | **“Before execution, ToolBraid refreshes discovery, revalidates bindings, and claims both approvals in one indivisible step. Any drift stops the run. Recovery completes before the customer update publishes.”** | `REFRESH · REVALIDATE · ATOMIC CLAIM`<br>`1. Apply recovery`<br>`2. Publish update` |
-| **02:20–02:36** | Continue the local fixture at source time `01:04.45` until the audit seal appears at `02:25.75`, then hold the outcome diagram. Show `release-1841`, `notice-r9`, both receipts, and the verified local chain without rewinding. | **“Release eighteen forty one is active, notice revision nine is published, with two receipts and fifty four cryptographically chained audit events. This fixture changes no real system or status page.”** | `release-1841 active`<br>`notice-r9 published`<br>`54 events · sha256-chain-v1`<br>`Deterministic fixture demo` |
-| **02:36–02:42** | Cut to the only brand card in the film. Keep it restrained and end cleanly on the mark. | **“That is ToolBraid: one plan, with the human in control.”** | `TOOLBRAID`<br>`Explainable cross-site execution. Human authority.`<br>`WebMCP Challenge 2026` |
+**Product evidence:** one continuous public-deployment capture at exactly 1×
+
+**Disclosure:** native WebMCP executes in ToolBraid's deterministic browser sandbox; no external system is changed
+
+## Picture lock
+
+| Final time | Continuous picture action | Evidence visible |
+|---|---|---|
+| **00:00–00:05** | Begin on the loaded public deployment, then click **Start mission** with the recorded pointer. | Public URL surface, Native WebMCP badge, human objective, six origins and nine tools. |
+| **00:05–00:17** | Let discovery complete, inspect the hostile Mirage tool, then open mappings. | One tool quarantined before scoring; origin identity remains visible. |
+| **00:17–00:27** | Read the normalized capability mappings, return to Evidence, and run four safe checks. | Heterogeneous schemas mapped into one canonical graph; mutations remain locked. |
+| **00:27–00:35** | Inspect the compatible non-mutating fallback and open exact-effect review. | Read-only fallback is explicit; evidence-derived arguments are ready before approval. |
+| **00:35–00:44** | Read both effect cards, approve recovery, then approve publication separately. | Each approval shows its own origin, tool, arguments, risk, expiry, and single-use scope. |
+| **00:44–00:50** | Let the browser verify both scopes, then execute the two approved effects once. | Execution remains disabled through verification; atomic approval claim, `release-1841`, `notice-r9`, and both receipts follow. |
+| **00:50–01:06.800** | Open Audit, inspect the ordered receipts, verify the 54-entry SHA-256 chain head, then hold long enough to read it. | Ordered audit phases and final seal remain on screen. |
+| **01:06.800–01:09.700** | Hard cut to the only generated brand card, then fade cleanly to black. | ToolBraid mark and “The agent prepares. The human remains final.” |
+
+There is no diagram cutaway, repeated still, browser-frame reuse, scanline, replay,
+zoom, retiming, synthetic click pulse, or cursor wobble. Captions are timed from
+the mastered voice rather than distributed across visual scenes.
 
 ## Exact narration master
 
-The original English Resemble AI Chatterbox model generates ten short semantic
-blocks. Each stays below 300 characters and receives at least two seeded,
-emotion-controlled candidates. The checked-in generator is the single source of
-truth for the exact text, timing, inference controls, phrase gates, and cache
-provenance.
+Three long passages form one causal performance at the start of the
+master. Passage joins use 120 ms
+equal-power crossfades; there are no fixed waits or post-generation time
+stretching.
 
-| Block | Window | Exact narration |
+| Passage | Audio placement | Exact narration |
 |---|---|---|
-| 1 | 00:00–00:18 | Let me show you how ToolBraid handles a real cross-site run. I start the mission, and it discovers nine tools across six separate WebMCP origins. |
-| 2 | 00:18–00:34 | One tool hides an instruction-like override in its metadata, so ToolBraid quarantines it before scoring. The remaining contracts use different names, schemas, and result shapes. |
-| 3 | 00:34–00:50 | ToolBraid maps them to seven canonical capabilities and builds a visible dependency graph with nine nodes. I can see which provider supports each step, the mapping confidence, and why a tool was included or rejected. |
-| 4 | 00:50–01:09 | Now it runs four safe reads in parallel. The primary health check fails. ToolBraid chooses another read-only provider with a different schema, without changing the planner. That provider can gather evidence, but it can never change state. |
-| 5 | 01:09–01:27 | When the reads converge, ToolBraid finalizes the prepared recovery and the customer notice. The exact arguments, current versions, and concrete effects become visible. |
-| 6 | 01:27–01:43 | Both actions remain locked. The agent can collect evidence, build the plan, and explain what will happen. It cannot approve anything by itself. |
-| 7 | 01:43–02:03 | I open the review. Recovery and publication each receive a separate exact-effect approval: plan revision, live origin and tool, bound arguments, risk, expiry, and a one-use token. I read and approve them one at a time. One click cannot authorize both. |
-| 8 | 02:03–02:20 | Before execution, ToolBraid refreshes discovery, revalidates bindings, and claims both approvals in one indivisible step. Any drift stops the run. Recovery completes before the customer update publishes. |
-| 9 | 02:20–02:36 | Release eighteen forty one is active, notice revision nine is published, with two receipts and fifty four cryptographically chained audit events. This fixture changes no real system or status page. |
-| 10 | 02:36–02:42 | That is ToolBraid: one plan, with the human in control. |
+| **1** | 00:00.000–00:20.701 | I start one real mission on ToolBraid's public deployment. Six independent origins return nine native tools, and one suspicious tool is immediately quarantined. Its metadata tries to bypass approval, so ToolBraid excludes it before scoring or planning. The remaining contracts use different names and schemas, but map into one canonical capability graph without hiding their origins. |
+| **2** | 00:20.581–00:40.805 | Now four safe checks run in parallel without changing state. When a primary health query fails, only a compatible non-mutating fallback may continue. With evidence assembled, ToolBraid pauses at an exact-effect review that shows each origin, tool, argument, risk, and expiry. I approve recovery first; publication stays locked under its own single-use scope. |
+| **3** | 00:40.685–01:06.436 | Then I approve publication separately. ToolBraid keeps execution disabled while the browser verifies both single-use scopes. Once the confirmation clears, I execute. The browser claims the approved scopes atomically, restores release eighteen forty-one, publishes revision nine, and records both receipts. Finally, a verified audit chain records fifty-four events and seals them with S H A two fifty-six. The agent prepared everything; the human remained final. That is the boundary ToolBraid enforces. |
 
 ## Judge-criterion coverage
 
-| Official criterion | Where the video proves it |
+| Official criterion | What the video proves |
 |---|---|
-| **WebMCP Leverage** | 00:00–00:21 shows the live public Native WebMCP run and discovery; 00:21–00:36 explains cross-origin registration, discovery, and opaque-handle execution. |
-| **Execution** | 01:08–02:36 shows concurrent evidence, bounded fallback, finalized arguments, two exact human approvals, ordered mutations, receipts, and a sealed audit chain. The agent discovers, prepares, and explains; only trusted human actions create mutation authority. |
-| **Potential Impact** | 00:08–00:21 establishes the high-consequence cross-site problem; 02:36–02:42 states the value without claiming unmeasured outcomes. |
-| **Creativity & Ambition** | 00:51–01:08 demonstrates semantic normalization of incompatible site contracts into one explainable graph. |
+| **WebMCP Leverage** | 00:00–00:27 visibly shows native discovery across six deployed provider origins, quarantine, semantic normalization, and execution through the live WebMCP surface. |
+| **Execution** | 00:27–01:06.800 shows bounded fallback, evidence-derived arguments, two exact human approvals, browser-side scope verification, atomic scope claiming, ordered effects, receipts, and the verified audit seal. |
+| **Potential Impact** | The single recovery mission demonstrates how one objective can coordinate incompatible sites without giving an agent unbounded mutation authority. |
+| **Creativity & Ambition** | ToolBraid converts nine heterogeneous native tools into one explainable capability graph while preserving provider identity and human authority. |
 
-## Non-negotiable edit checks
+## Non-negotiable QC gates
 
-1. Final encoded duration is between **2:35 and 2:45**, and always below the official three-minute ceiling.
-2. The native sequence visibly reads **Native WebMCP**. If a harness shot is used for deterministic close-ups, its **Verified local harness** badge must remain visible.
-3. Every claimed count must match the validated run: **6 origins, 9 tools, 1 quarantined, 7 canonical capabilities, 9 graph nodes, 2 approvals, 54 audit entries**.
-4. The outcome must match the validated fixture: **release-1841**, **notice-r9**, `sha256-chain-v1`.
-5. Do not call the local hash chain signed, external, durable, immutable, or tamper-proof. It is a verified local integrity chain.
-6. Do not imply live credentials, real production access, real customer publication, arbitrary page automation, or scraping.
-7. Captions must remain inside title-safe margins and must not cover the runtime badge, approval details, receipts, or audit seal.
+1. Final duration is exactly **69.700 seconds / 2,091 frames**, below the official three-minute ceiling.
+2. The product interval is exactly one continuous 66.800-second `public-full` segment at 1×, followed by one 2.900-second generated outro.
+3. Every count matches the validated run: **6 origins, 9 tools, 1 quarantined, 2 approvals, 54 audit entries**.
+4. The outcome is **release-1841**, **notice-r9**, and `sha256-chain-v1`.
+5. Do not call the chain signed, external, durable, immutable, or tamper-proof; it is a verified integrity chain inside the deployed browser sandbox.
+6. Do not imply live credentials, external production access, a real customer publication, arbitrary page automation, or scraping.
+7. Captions must not cover approval buttons, receipts, the audit seal, or the Native WebMCP badge.
+8. The validator must report H.264/yuv420p, AAC 48 kHz stereo, true peak no higher than −1.0 dBTP, zero sampled blank frames, and PASS for the matching 69.700-second configuration. Never reuse loudness values from an earlier master.

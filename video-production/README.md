@@ -1,135 +1,153 @@
 # ToolBraid video production
 
-This folder reproduces the 162-second English WebMCP Challenge master from a real public native-WebMCP capture plus a separately labelled local deterministic fixture sequence. Private voice material, model weights, intermediate audio, and rendered outputs remain Git-ignored.
+This folder builds the 69.700-second English WebMCP Challenge master from owner-supplied private voice material and the pinned local toolchain. The edit is one uninterrupted 66.800-second recording of the public deployment at 1×, followed by a 2.900-second generated ToolBraid outro. It contains no diagrams, stock footage, replay, zoom, retiming, scanline, or reused browser frame.
+
+The deployed mutation flow runs only inside ToolBraid's deterministic browser sandbox. No external production system or public status page is changed. Private voice material, model weights, intermediate audio, and rendered outputs remain Git-ignored.
+
+## Locked deliverable
+
+- 1920 × 1080, 30 fps, 2,091 decoded frames;
+- H.264/yuv420p video and AAC 48 kHz stereo audio;
+- 69.700 seconds, including a 2.900-second outro;
+- English owner-authorized cloned voice with burned-in English captions;
+- one public-full source interval: source frames 37–2,040, presented once at 1×;
+- native WebMCP disclosure visible throughout the product capture.
+
+The final validation report must pass every check in `validate-final-video.py`.
 
 ## Tested environment
 
-- Windows 11, Python 3.12.10, Node.js 22+
-- Ubuntu/WSL2 with Python 3.11 for the isolated Chatterbox voice environment
-- NVIDIA CUDA runtime with PyTorch `2.8.0+cu129` and torchaudio `2.8.0+cu129` for RTX 5090
-- Chrome 149+ with native WebMCP enabled for the product capture
-- Python packages pinned in `requirements.txt`
+- Windows 11, Python 3.12.10, Node.js 22+, Chrome 149+ with native WebMCP;
+- NVIDIA RTX 5090 with CUDA and BF16 IndexTTS 2.5 inference;
+- Python media packages pinned in `requirements.txt`;
+- local licensed VST3 cleanup/mastering chain, with deterministic fallbacks.
 
-Install the Windows media dependencies with:
+Install the project media dependencies:
 
-```powershell
+~~~powershell
 python -m pip install -r requirements-e2e.txt
 python -m pip install -r video-production/requirements.txt
-```
+~~~
 
-The public/local recorder controls the installed Chrome build and does not download another browser. The public target is locked to `https://toolbraid-webmcp.vercel.app`, verifies the exact six provider origins and seven safe result IDs, and stops before either approval. The local target is the only capture allowed to complete deterministic fixture mutations. Both captures bake in a visible recording cursor driven by trusted Playwright mouse events.
+## Public capture
 
-## Local Chatterbox voice environment
+The recorder is locked to `https://toolbraid-webmcp.vercel.app`. The
+`public-full` target verifies six deployed provider origins, nine native tools,
+one quarantined tool, seven safe results, two separately approved mutations,
+the exact execution order, `release-1841`, `notice-r9`, and a verified
+54-entry `sha256-chain-v1` seal.
 
-Final narration uses the original English
-[`ResembleAI/chatterbox`](https://github.com/resemble-ai/chatterbox) model, not
-the Turbo variant. The original model exposes both `exaggeration` and
-`cfg_weight`; the official tuning guide recommends lower CFG and higher
-exaggeration for more expressive speech. The official source and model card are
-MIT licensed, and generated audio includes Chatterbox's built-in PerTh neural
-watermark.
+~~~powershell
+python video-production/record-public-demo.py public-full
+~~~
 
-The pipeline pins every mutable upstream used by synthesis and ASR verification:
+The recorder fails closed on an alternate URL, unexpected origin, result,
+approval, mutation order, audit entry, seal, or browser error. The visible
+cursor is driven by trusted Playwright mouse events with one smooth,
+pace-independent path per action—no wobble, overshoot, micro-correction, or
+synthetic click pulse.
 
-```text
-code:    resemble-ai/chatterbox@5de7a54aa4e5e2baadb0182dde554908b48b85c2
-weights: ResembleAI/chatterbox@5bb1f6ee58e50c3b8d408bc82a6d3740c2db6e18
+## Local IndexTTS 2.5 voice
+
+Final narration uses IndexTTS 2.5 locally:
+
+~~~text
+code:    index-tts/index-tts@ee40fa7d6c6b8a2c7f06105f9f1e65775b74868c
+weights: IndexTeam/IndexTTS-2.5@c39ce5ba981572cb187443877ff559dfb246ce63
 ASR:     Systran/faster-whisper-medium.en@a29b04bd15381511a9af671baec01072039215e3
-```
+license: video-production/INDEXTTS-LICENSE.txt
+~~~
 
-Create the isolated environment from a fresh WSL shell. PyTorch is installed
-first at the RTX-5090-compatible build; Chatterbox is then installed with
-`--no-deps` so its older `torch==2.6.0` package pin cannot downgrade CUDA support.
-The checkout is detached at ToolBraid's reviewed commit:
+The private reference never leaves this machine. The final 180-word narration
+is generated as three long causal passages and joined with two 120 ms
+equal-power crossfades. There are no scene windows, fixed waits, or
+post-generation time stretching.
 
-```bash
-sudo apt-get update
-sudo apt-get install -y git python3.11 python3.11-venv ffmpeg
-python3.11 -m venv "$HOME/.venvs/toolbraid-chatterbox"
-source "$HOME/.venvs/toolbraid-chatterbox/bin/activate"
-python -m pip install --upgrade pip
-python -m pip install torch==2.8.0 torchaudio==2.8.0 \
-  --index-url https://download.pytorch.org/whl/cu129
-mkdir -p "$HOME/src"
-git clone https://github.com/resemble-ai/chatterbox.git "$HOME/src/toolbraid-chatterbox"
-git -C "$HOME/src/toolbraid-chatterbox" checkout --detach 5de7a54aa4e5e2baadb0182dde554908b48b85c2
-python -m pip install -r "/mnt/d/local ai/ToolBraid/video-production/requirements-chatterbox.txt"
-python -m pip install --no-deps -e "$HOME/src/toolbraid-chatterbox"
-```
+Prepare an isolated checkout of `index-tts/index-tts` at the code revision
+above, create its `.venv`, install its reviewed dependencies, and download the
+four checkpoint files from the pinned Hugging Face revision into
+`video-production/models/index-tts-src/checkpoints/`. Accept and retain
+`INDEXTTS-LICENSE.txt` before using the model. These ignored prerequisites are
+not redistributed by this repository. The generator fails closed unless the
+checkout revision and checkpoint revision evidence match.
 
-Prepare only the public model assets at their exact revisions. This is the only
-voice-pipeline step that needs network access:
+From PowerShell with Git, `uv`, and the Hugging Face CLI available:
 
-```bash
-cd "/mnt/d/local ai/ToolBraid"
-python video-production/generate-chatterbox-narration.py --prepare-models
-```
+~~~powershell
+git clone https://github.com/index-tts/index-tts `
+  video-production\models\index-tts-src
+git -C video-production\models\index-tts-src checkout --detach `
+  ee40fa7d6c6b8a2c7f06105f9f1e65775b74868c
 
-Normal generation loads the model and ASR exclusively from ignored local
-directories. It has no server URL and no hosted inference path, so the private
-reference audio is never transmitted:
+Push-Location video-production\models\index-tts-src
+uv sync --frozen --python 3.11
+hf download IndexTeam/IndexTTS-2.5 `
+  --revision c39ce5ba981572cb187443877ff559dfb246ce63 `
+  --local-dir checkpoints
+Pop-Location
+~~~
 
-```bash
-cd "/mnt/d/local ai/ToolBraid"
-HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
-  python video-production/generate-chatterbox-narration.py --candidates 2
-```
+Generation, mastering, and offline transcription then run with:
+
+~~~powershell
+& "video-production\models\index-tts-src\.venv\Scripts\python.exe" `
+  video-production\generate-indextts-narration.py
+python video-production/master-narration.py --seal-config video-production/render-config.json
+python video-production/transcribe-continuous-narration.py
+~~~
+
+The accepted narration gate is:
+
+- 66.436 seconds, 48 kHz stereo PCM24, placed at the master start;
+- ASR WER 0.010363 across all 180 timestamped words;
+- zero pauses of 750 ms or longer and zero pauses of 1.5 seconds or longer;
+- no caption overlaps, maximum nine words and 2.8 seconds per cue;
+- −16.041 LUFS and −1.020 dBTP before the final video mix.
 
 ## Private input contract
 
-Only use a voice recording you own or have explicit permission to clone. Provide:
+Only use a voice recording you own or have explicit permission to clone:
 
-```text
-.private/voice/reference-11s-mono-24k.wav # selected owner-authorized prompt
-.private/voice/reference.txt                # exact prompt transcript
-```
+~~~text
+.private/voice/reference-11s-mono-24k.wav
+.private/voice/reference.txt
+~~~
 
-`generate-chatterbox-narration.py` creates ten short semantic blocks, each under
-300 characters, so emotional delivery can vary naturally without risking model
-truncation. It renders at least two seeded candidates per block. Selection fails
-closed above `0.06` WER, when any critical phrase is not recognized as an exact
-contiguous token sequence, or when more than `1.02x` time compression would be
-needed. No semantic ASR correction is allowed: a spoken "note" cannot be
-silently normalized to "node".
+The project owner supplied and authorized the reference voice. Neither the
+reference nor model weights are committed.
 
-The generator refuses a dirty Chatterbox checkout and verifies every TTS and
-ASR file against the committed per-file SHA-256 manifest before loading either
-model. Each cached WAV is tied to a SHA-256 request digest containing those
-exact weight hashes, the pinned source revision, narration text, all Chatterbox
-inference controls, device, reference audio and transcript hashes, and
-post-processing settings. The cache is reused only when that digest and the
-rendered-audio hash both match.
+## Mastering and render
 
-## Build sequence
+`master-narration.py` uses the installed iZotope RX 12 De-clip, FabFilter
+Pro-Q 4, oeksound soothe2, FabFilter Pro-DS, and FabFilter Pro-L 2 VST3 chain
+when available. The report records every active plugin and parameter; a missing
+plugin is disclosed rather than silently claimed.
 
-Capture and final rendering run in the Windows media environment:
-
-```powershell
-python video-production/record-public-demo.py public
-python video-production/record-public-demo.py local
-```
-
-Generate narration in the isolated WSL environment using the offline command
-above, then return to the Windows media environment:
-
-```powershell
-python video-production/master-narration.py --seal-config video-production/render-config.json
+~~~powershell
 python video-production/generate-ambient-bed.py
+python video-production/render-final-video.py --validate-only
 python video-production/render-final-video.py
 python video-production/validate-final-video.py
-```
+~~~
 
-The public recorder refuses alternate URLs and records discovery through the exact-effect human checkpoint without creating approvals or mutation audit events. The compositor labels every public plate `LIVE PUBLIC DEPLOYMENT` and every approving/executing plate `LOCAL DETERMINISTIC FIXTURE` so the final edit cannot imply public mutation access.
+The renderer rejects diagrams, motion fields, replay, reverse, zoom, retiming,
+multiple product segments, a non-public source, or an outro longer than three
+seconds. The validator decodes all 2,091 frames and checks the configured
+duration, streams, codecs, resolution, frame rate, audio format, loudness,
+true peak, sampled blank frames, and visual QC sheet.
 
-`master-narration.py` uses FabFilter Pro-L 2 through Pedalboard when the licensed local VST3 is present at its standard Windows path. If it is unavailable, the script records the reason and uses its deterministic true-peak-safe fallback. The original ambient bed is synthesized locally by `generate-ambient-bed.py`; it contains no stock music or third-party recording.
+## Deliverables
 
-The final deliverables are:
-
-```text
+~~~text
 video-production/output/ToolBraid-WebMCP-Challenge-1080p.mp4
+video-production/output/ToolBraid-WebMCP-Challenge-1080p.render-report.json
 video-production/work/ToolBraid-WebMCP-Challenge.en.srt
+video-production/work/narration-word-timestamps.json
+video-production/work/narration-transcription-report.json
 video-production/work/final-video-validation.json
 video-production/work/final-video-contact-sheet.jpg
-```
+~~~
 
-The validator decodes all 4,860 video frames, measures the final AAC stream, checks the 1920×1080/30 fps/162-second contract, rejects sampled blank frames, and produces a 12-frame visual contact sheet.
+The locked master contract is 69.700 seconds / 2,091 frames. Final integrated
+loudness and true peak are taken only from the validation report produced after
+the matching 69.700-second render; values from earlier masters are not reused.

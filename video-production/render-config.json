@@ -1,10 +1,10 @@
 {
-  "format": "toolbraid-final-render-config-v1",
+  "format": "toolbraid-final-render-config-v2",
   "master": {
     "width": 1920,
     "height": 1080,
     "fps": 30,
-    "durationSeconds": 162,
+    "durationSeconds": 69.7,
     "sampleRate": 48000,
     "channels": 2,
     "videoBitrate": 4400000
@@ -13,7 +13,6 @@
     "interactivePlayback": "linear-1x",
     "allowInteractiveReplay": false,
     "allowInteractiveZoom": false,
-    "crossSourceTimeline": "synchronized-semantic-clock",
     "defaultSceneTransition": "cut",
     "repetitivePulse": false
   },
@@ -30,187 +29,72 @@
     "muted": "#91A8BB"
   },
   "inputs": {
-    "productVideo": "work/toolbraid-product-demo-1080p30.webm",
     "productVideos": {
-      "public": "work/toolbraid-public-demo-1080p30.webm",
-      "local": "work/toolbraid-local-fixture-1080p30.webm"
+      "public-full": "work/toolbraid-public-full-demo-1080p30.webm"
     },
-    "defaultProductVideo": "public",
+    "defaultProductVideo": "public-full",
     "narrationFinal": "work/narration-master-final.wav",
     "narration": "work/narration-master.wav",
+    "narrationOffsetSeconds": 0.0,
     "narrationProvenance": {
-      "sourceSha256": "b68ad2499abc58855f7e03712db308388c9df5abfb50bfa81501f148c03dbcff",
-      "masteredSha256": "5bd3940d3a3cf01d745f97fd17cd42a19c0d832db51fb9ceb7ac82ffa8d1663d"
+      "sourceSha256": "5f9430c8140940bf80891382b791b9f37a826c560e79d544272edc6fd4c20429",
+      "masteredSha256": "c8aa847aacd868b1b5f183867542aed8bb887585c8792f599c487b85b937fb87",
+      "generationReport": "work/indextts25-generation-report.json",
+      "generationReportSha256": "397739c836068457198db756d58c673c855919b02b0f2d288c2ab40a52b55a63",
+      "masteringReport": "work/audio-mastering-report.json",
+      "masteringReportSha256": "c7e275d50d93fcc3bf23ca53a0d2af7047cc28705564df689d704a5876487fa7"
     },
-    "captions": "work/narration-captions.json",
+    "captions": "work/narration-word-timestamps.json",
+    "cursorTrace": "work/toolbraid-public-full-demo-1080p30.timeline.json",
+    "productProvenance": {
+      "public-full": {
+        "videoSha256": "9aef0f6371a6d040932ae5953c50660fe02e7c4ba279a4220153e927fa16e2b5",
+        "report": "work/toolbraid-public-full-demo-1080p30.report.json",
+        "reportSha256": "8e32fe319bd08161e5cedc90245152b2fa069b1831d1ce1157b369640d0024a4",
+        "timeline": "work/toolbraid-public-full-demo-1080p30.timeline.json",
+        "timelineSha256": "a9bc7e8e688ecfeb882ac84f5e27f7540102a6aa819f9cf517afc9e099d241c7"
+      }
+    },
     "ambientBed": "work/ambient-bed.wav",
     "logo": "../assets/favicon.svg"
   },
   "scenes": [
     {
-      "id": "01-intro",
+      "id": "01-public-demo",
       "start": 0,
-      "end": 8,
-      "captionPosition": "bottom",
-      "segments": [
-        {"start": 0, "end": 8, "kind": "product", "source": "public", "sourceStart": 2.50, "sourceEnd": 10.50, "playback": "linear-1x", "provenance": "public", "publicUrl": "https://toolbraid-webmcp.vercel.app"}
-      ],
-      "kicker": "WEBMCP CHALLENGE 2026",
-      "headline": "One objective. Human authority.",
-      "subhead": "SIX ORIGINS  ·  NINE TOOLS  ·  TWO EXACT APPROVALS"
-    },
-    {
-      "id": "02-objective",
-      "start": 8,
-      "end": 21,
-      "captionPosition": "bottom",
-      "segments": [
-        {"start": 8, "end": 11.25, "kind": "product", "source": "public", "sourceStart": 10.50, "sourceEnd": 13.75, "playback": "linear-1x", "provenance": "public"},
-        {"start": 11.25, "end": 21, "kind": "diagram", "asset": "../docs/diagrams/toolbraid-how-it-works.svg", "motion": "scan"}
-      ],
-      "kicker": "THE OBJECTIVE",
-      "headline": "Restore checkout safely",
-      "subhead": "READ FIRST  ·  EXACT APPROVAL",
-      "highlights": [
-        {"start": 8.5, "end": 11.1, "rect": [0.044, 0.132, 0.193, 0.385], "color": "cyan"}
-      ]
-    },
-    {
-      "id": "03-native-cross-origin",
-      "start": 21,
-      "end": 36,
-      "captionPosition": "bottom",
-      "segments": [
-        {"start": 21, "end": 36, "kind": "diagram", "asset": "../docs/diagrams/toolbraid-cross-origin-architecture.svg", "motion": "radial"}
-      ],
-      "kicker": "NATIVE WEBMCP",
-      "headline": "Six isolated provider origins",
-      "subhead": "registerTool  →  getTools  →  executeTool",
-      "highlights": []
-    },
-    {
-      "id": "04-discovery-quarantine",
-      "start": 36,
-      "end": 51,
-      "captionPosition": "bottom",
-      "segments": [
-        {"start": 36, "end": 41.73, "kind": "product", "source": "public", "sourceStart": 13.75, "sourceEnd": 19.48, "playback": "linear-1x", "provenance": "public"},
-        {"start": 41.73, "end": 51, "kind": "diagram", "asset": "../docs/diagrams/toolbraid-how-it-works.svg", "motion": "scan"}
-      ],
-      "kicker": "UNTRUSTED METADATA",
-      "headline": "Quarantine before scoring",
-      "subhead": "9 DISCOVERED  ·  1 EXCLUDED",
-      "highlights": [
-        {"start": 36.8, "end": 41.5, "rect": [0.326, 0.290, 0.382, 0.430], "color": "red"}
-      ]
-    },
-    {
-      "id": "05-semantic-graph",
-      "start": 51,
-      "end": 68,
-      "captionPosition": "bottom",
-      "segments": [
-        {"start": 51, "end": 56.46, "kind": "product", "source": "public", "sourceStart": 19.48, "sourceEnd": 24.94, "playback": "linear-1x", "provenance": "public"},
-        {"start": 56.46, "end": 68, "kind": "diagram", "asset": "../docs/diagrams/toolbraid-how-it-works.svg", "motion": "flow"}
-      ],
-      "kicker": "SEMANTIC INTEROPERABILITY",
-      "headline": "Seven canonical capabilities",
-      "subhead": "HETEROGENEOUS CONTRACTS  →  9-NODE GRAPH",
-      "highlights": [
-        {"start": 52.0, "end": 56.2, "rect": [0.770, 0.123, 0.995, 0.935], "color": "cyan"}
-      ]
-    },
-    {
-      "id": "06-safe-reads-fallback",
-      "start": 68,
-      "end": 85,
-      "captionPosition": "bottom",
-      "segments": [
-        {"start": 68, "end": 79.51, "kind": "product", "source": "public", "sourceStart": 24.94, "sourceEnd": 36.45, "playback": "linear-1x", "provenance": "public"},
-        {"start": 79.51, "end": 85, "kind": "diagram", "asset": "../docs/diagrams/toolbraid-how-it-works.svg", "motion": "scan"}
-      ],
-      "kicker": "BOUNDED AUTONOMY",
-      "headline": "Four reads in parallel",
-      "subhead": "READ-ONLY FALLBACK  ·  NO MUTATION FAILOVER",
-      "highlights": [
-        {"start": 72.5, "end": 79.3, "rect": [0.045, 0.390, 0.195, 0.795], "color": "green"},
-        {"start": 75.0, "end": 79.3, "rect": [0.270, 0.245, 0.570, 0.770], "color": "green"}
-      ]
-    },
-    {
-      "id": "07-evidence-first",
-      "start": 85,
-      "end": 103,
+      "end": 66.8,
+      "transition": "cut",
       "captionPosition": "top",
       "segments": [
-        {"start": 85, "end": 103, "kind": "diagram", "asset": "../docs/diagrams/toolbraid-how-it-works.svg", "motion": "flow"}
-      ],
-      "kicker": "EVIDENCE FIRST",
-      "headline": "Arguments finalize after reads",
-      "subhead": "AGENT PREPARES  ·  HUMAN AUTHORIZES",
-      "highlights": []
-    },
-    {
-      "id": "08-exact-approvals",
-      "start": 103,
-      "end": 122,
-      "captionPosition": "top",
-      "segments": [
-        {"start": 103, "end": 108, "kind": "diagram", "asset": "../docs/diagrams/toolbraid-human-authority.svg", "motion": "authority"},
-        {"start": 108, "end": 115.55, "kind": "product", "source": "public", "sourceStart": 36.45, "sourceEnd": 44.00, "playback": "linear-1x", "provenance": "public"},
-        {"start": 115.55, "end": 122, "kind": "product", "source": "local", "sourceStart": 44.00, "sourceEnd": 50.45, "playback": "linear-1x", "provenance": "local-fixture"}
-      ],
-      "kicker": "TWO SEPARATE PACKETS",
-      "headline": "Exact scope. Single use.",
-      "subhead": "PRODUCTION  ≠  COMMUNICATION",
-      "highlights": [
-        {"start": 109.0, "end": 121.7, "rect": [0.195, 0.120, 0.805, 0.835], "color": "amber"}
+        {
+          "start": 0,
+          "end": 66.8,
+          "kind": "product",
+          "source": "public-full",
+          "sourceStart": 1.2333333333333334,
+          "sourceEnd": 68.03333333333333,
+          "playback": "linear-1x",
+          "provenance": "public-sandbox",
+          "publicUrl": "https://toolbraid-webmcp.vercel.app"
+        }
       ]
     },
     {
-      "id": "09-ordered-execution",
-      "start": 122,
-      "end": 140,
-      "captionPosition": "top",
-      "segments": [
-        {"start": 122, "end": 126, "kind": "diagram", "asset": "../docs/diagrams/toolbraid-human-authority.svg", "motion": "execute"},
-        {"start": 126, "end": 140, "kind": "product", "source": "local", "sourceStart": 50.45, "sourceEnd": 64.45, "playback": "linear-1x", "provenance": "local-fixture"}
-      ],
-      "kicker": "FAIL-CLOSED EXECUTION",
-      "headline": "Refresh. Revalidate. Claim.",
-      "subhead": "1  APPLY RECOVERY   ·   2  PUBLISH UPDATE",
-      "highlights": [
-        {"start": 126.1, "end": 139.8, "rect": [0.260, 0.660, 0.690, 0.800], "color": "green"}
-      ]
-    },
-    {
-      "id": "10-sealed-outcome",
-      "start": 140,
-      "end": 156,
-      "captionPosition": "top",
-      "segments": [
-        {"start": 140, "end": 145.75, "kind": "product", "source": "local", "sourceStart": 64.45, "sourceEnd": 70.20, "playback": "linear-1x", "provenance": "local-fixture"},
-        {"start": 145.75, "end": 156, "kind": "diagram", "asset": "../docs/diagrams/toolbraid-how-it-works.svg", "motion": "flow"}
-      ],
-      "kicker": "VERIFIED LOCAL OUTCOME",
-      "headline": "54 events. Audit sealed.",
-      "subhead": "release-1841  ·  notice-r9  ·  sha256-chain-v1",
-      "highlights": [
-        {"start": 140.2, "end": 145.6, "rect": [0.045, 0.125, 0.194, 0.382], "color": "green"},
-        {"start": 140.4, "end": 145.6, "rect": [0.050, 0.825, 0.760, 0.967], "color": "mint"}
-      ]
-    },
-    {
-      "id": "11-outro",
-      "start": 156,
-      "end": 162,
+      "id": "02-outro",
+      "start": 66.8,
+      "end": 69.7,
+      "transition": "cut",
       "captionPosition": "bottom",
       "segments": [
-        {"start": 156, "end": 162, "kind": "outro"}
+        {
+          "start": 66.8,
+          "end": 69.7,
+          "kind": "outro"
+        }
       ],
       "kicker": "TOOLBRAID",
-      "headline": "Cross-site execution, explained.",
-      "subhead": "THE HUMAN STILL HOLDS THE FINAL SAY"
+      "headline": "The agent prepares. The human remains final.",
+      "subhead": "SAFE · EXPLAINABLE · HUMAN-APPROVED WEBMCP EXECUTION"
     }
   ]
 }

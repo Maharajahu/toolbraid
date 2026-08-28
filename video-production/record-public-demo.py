@@ -3,12 +3,12 @@
 
 The public target is deliberately read-only: it discovers, normalises, runs
 safe evidence reads, opens the exact-effect review, and stops before either
-approval.  The local target starts the existing six-provider native fixture
-and completes the two human-approved mutations for deterministic fixture QA.
+approval. The public-full target completes the same flow against the deployed,
+browser-isolated WebMCP sandbox. The local target keeps deterministic fixture QA.
 
 Examples:
     python video-production/record-public-demo.py public
-    python video-production/record-public-demo.py public --headed --pace 0.8
+    python video-production/record-public-demo.py public-full --headed
     python video-production/record-public-demo.py local --pace 0.05
 """
 from __future__ import annotations
@@ -46,6 +46,7 @@ SOURCE_RECORDER = ROOT / "scripts" / "record-demo-video.py"
 PUBLIC_URL = "https://toolbraid-webmcp.vercel.app"
 LOCAL_URL = "http://127.0.0.1:4173"
 LOCAL_PORTS = tuple(range(4173, 4180))
+PUBLIC_TARGETS = frozenset(("public", "public-full"))
 DEFAULT_CHROME = Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe")
 EXPECTED_PROVIDER_ERROR = "Primary health window is temporarily unavailable."
 WIDTH = 1920
@@ -54,6 +55,10 @@ FPS = 30
 PUBLIC_PROVIDER_ORIGINS = sorted(
     f"https://toolbraid-{provider_id}-webmcp.vercel.app"
     for provider_id in ("signals", "pulse", "source", "deploy", "status", "mirage")
+)
+LOCAL_PROVIDER_ORIGINS = sorted(
+    f"http://127.0.0.1:{port}"
+    for port in range(4174, 4180)
 )
 SAFE_RESULT_IDS = sorted(
     (
@@ -74,9 +79,19 @@ MUTATION_AUDIT_EVENTS = {
     "tool.execution_started",
     "tool.execution_failed",
 }
+EXPECTED_MUTATION_AUDIT_ORDER = [
+    ("node.started", "apply-recovery-option"),
+    ("tool.execution_started", "apply-recovery-option"),
+    ("node.completed", "apply-recovery-option"),
+    ("node.started", "publish-status-update"),
+    ("tool.execution_started", "publish-status-update"),
+    ("node.completed", "publish-status-update"),
+]
+EXPECTED_AUDIT_ENTRY_COUNT = 54
 
 DEFAULT_OUTPUTS = {
     "public": WORK_DIR / "toolbraid-public-demo-1080p30.webm",
+    "public-full": WORK_DIR / "toolbraid-public-full-demo-1080p30.webm",
     "local": WORK_DIR / "toolbraid-local-fixture-1080p30.webm",
 }
 
@@ -167,6 +182,16 @@ class CaptureTimeline:
     pace: float
     started: float = field(default_factory=time.monotonic)
     entries: list[dict[str, Any]] = field(default_factory=list)
+    pointer_trace: list[dict[str, float]] = field(default_factory=list)
+
+    def trace_pointer(self, x: float, y: float) -> None:
+        self.pointer_trace.append(
+            {
+                "timeSeconds": round(time.monotonic() - self.started, 4),
+                "x": round(x, 2),
+                "y": round(y, 2),
+            }
+        )
 
     def mark(
         self,
@@ -195,46 +220,6 @@ class CaptureTimeline:
         self.entries.append(entry)
 
 
-def install_capture_cursor(page: Page, pointer: tuple[float, float]) -> None:
-    """Install a restrained system-style cursor for Playwright video capture."""
-    page.evaluate(
-        """({ x, y }) => {
-          const prior = document.getElementById('__toolbraid_capture_cursor__');
-          if (prior) prior.remove();
-
-          const cursor = document.createElement('div');
-          cursor.id = '__toolbraid_capture_cursor__';
-          cursor.setAttribute('aria-hidden', 'true');
-          cursor.style.cssText = [
-            'position:fixed',
-            'left:0',
-            'top:0',
-            'width:26px',
-            'height:32px',
-            'pointer-events:none',
-            'z-index:2147483647',
-            `transform:translate3d(${x}px,${y}px,0)`,
-            'transform-origin:2px 2px',
-            'filter:drop-shadow(0 2px 3px rgba(0,0,0,.62))',
-            'will-change:transform',
-          ].join(';');
-          cursor.innerHTML = `
-            <svg width="26" height="32" viewBox="0 0 26 32" fill="none"
-                 xmlns="http://www.w3.org/2000/svg">
-              <path d="M2 1.5L2.2 24.2L8.1 19.3L12.5 29.4L17.2 27.3L12.8 17.4L20.5 17L2 1.5Z"
-                    fill="#F7FBFF" stroke="#07101C" stroke-width="1.8"
-                    stroke-linejoin="round"/>
-            </svg>`;
-          document.documentElement.appendChild(cursor);
-
-          document.addEventListener('mousemove', (event) => {
-            cursor.style.transform = `translate3d(${event.clientX}px,${event.clientY}px,0)`;
-          }, true);
-        }""",
-        {"x": pointer[0], "y": pointer[1]},
-    )
-
-
 class DemoDirector:
     def __init__(
         self,
@@ -247,7 +232,11 @@ class DemoDirector:
         self.timeline = timeline
         self.pace = pace
         self.target = target
-        self.motion_seed = 20_260_828_01 + (1 if target == "local" else 0)
+        self.motion_seed = {
+            "public": 20_260_828_01,
+            "public-full": 20_260_828_02,
+            "local": 20_260_828_03,
+        }[target]
         self.rng = random.Random(self.motion_seed)
         self.pointer = (WIDTH * 0.86, HEIGHT * 0.82)
 
@@ -296,8 +285,6 @@ class DemoDirector:
         self,
         destination: tuple[float, float],
         duration: float,
-        *,
-        bend_scale: float = 1.0,
     ) -> None:
         start_x, start_y = self.pointer
         target_x, target_y = destination
@@ -309,26 +296,22 @@ class DemoDirector:
         direction_y = (target_y - start_y) / distance
         normal_x, normal_y = -direction_y, direction_x
         side = -1.0 if self.rng.random() < 0.5 else 1.0
-        bend = side * min(48.0, max(3.0, distance * self.rng.uniform(0.018, 0.044)))
-        bend *= bend_scale
-        first_anchor = self.rng.uniform(0.24, 0.34)
-        second_anchor = self.rng.uniform(0.68, 0.80)
+        bend = side * min(20.0, max(2.0, distance * self.rng.uniform(0.012, 0.022)))
+        first_anchor = self.rng.uniform(0.27, 0.34)
+        second_anchor = self.rng.uniform(0.66, 0.74)
         control_a = (
             start_x + (target_x - start_x) * first_anchor + normal_x * bend,
             start_y + (target_y - start_y) * first_anchor + normal_y * bend,
         )
         control_b = (
-            start_x + (target_x - start_x) * second_anchor + normal_x * bend * self.rng.uniform(0.28, 0.62),
-            start_y + (target_y - start_y) * second_anchor + normal_y * bend * self.rng.uniform(0.28, 0.62),
+            start_x + (target_x - start_x) * second_anchor + normal_x * bend * self.rng.uniform(0.62, 0.82),
+            start_y + (target_y - start_y) * second_anchor + normal_y * bend * self.rng.uniform(0.62, 0.82),
         )
-        scaled_duration = max(0.065, duration * self.pace)
-        steps = max(5, min(80, round(scaled_duration * 78)))
-        per_step_ms = max(4, round(scaled_duration * 1000 / steps))
-        wobble = min(2.2, max(0.35, distance / 360.0)) * self.rng.uniform(0.55, 1.0)
-        wobble_phase = self.rng.uniform(0.0, math.tau)
+        movement_duration = max(0.065, duration)
+        steps = max(6, min(42, round(movement_duration * 60)))
+        per_step_ms = max(5, round(movement_duration * 1000 / steps))
         for index in range(1, steps + 1):
-            linear_progress = index / steps
-            progress = self.minimum_jerk(linear_progress)
+            progress = self.minimum_jerk(index / steps)
             x, y = self.cubic_bezier(
                 (start_x, start_y),
                 control_a,
@@ -336,14 +319,8 @@ class DemoDirector:
                 destination,
                 progress,
             )
-            lateral = (
-                math.sin(math.pi * progress)
-                * math.sin(3.0 * math.pi * progress + wobble_phase)
-                * wobble
-            )
-            x += normal_x * lateral
-            y += normal_y * lateral
             self.page.mouse.move(x, y)
+            self.timeline.trace_pointer(x, y)
             self.page.wait_for_timeout(per_step_ms)
         self.pointer = destination
 
@@ -352,44 +329,16 @@ class DemoDirector:
         destination: tuple[float, float],
         *,
         target_width: float = 72.0,
-        allow_overshoot: bool = True,
     ) -> None:
         start_x, start_y = self.pointer
         distance = math.hypot(destination[0] - start_x, destination[1] - start_y)
         width = max(20.0, min(260.0, target_width))
         difficulty = math.log2(distance / width + 1.0)
         duration = max(
-            0.22,
-            min(0.88, 0.17 + 0.105 * difficulty + self.rng.uniform(-0.025, 0.055)),
+            0.18,
+            min(0.65, 0.14 + 0.09 * difficulty + self.rng.uniform(-0.018, 0.035)),
         )
-        should_overshoot = (
-            allow_overshoot
-            and distance > 280.0
-            and self.rng.random() < 0.27
-        )
-        if not should_overshoot:
-            self._curve_pointer(destination, duration)
-            return
-
-        direction_x = (destination[0] - start_x) / distance
-        direction_y = (destination[1] - start_y) / distance
-        normal_x, normal_y = -direction_y, direction_x
-        overshoot_distance = self.rng.uniform(4.0, min(12.0, width * 0.12))
-        overshoot = (
-            destination[0]
-            + direction_x * overshoot_distance
-            + normal_x * self.rng.uniform(-2.2, 2.2),
-            destination[1]
-            + direction_y * overshoot_distance
-            + normal_y * self.rng.uniform(-2.2, 2.2),
-        )
-        self._curve_pointer(overshoot, duration * self.rng.uniform(0.78, 0.88))
-        self.pause(0.045, 0.09, floor_ms=28)
-        self._curve_pointer(
-            destination,
-            self.rng.uniform(0.075, 0.135),
-            bend_scale=0.32,
-        )
+        self._curve_pointer(destination, duration)
 
     def _scroll_target_into_view(self, locator: Locator, event: str) -> None:
         margin = 72.0
@@ -423,7 +372,7 @@ class DemoDirector:
                     max(margin, min(rect["viewportWidth"] - margin, (rect["left"] + rect["right"]) * 0.5)),
                     max(margin, min(rect["viewportHeight"] - margin, (rect["top"] + rect["bottom"]) * 0.5)),
                 )
-                self.move_pointer(approach, target_width=max(40.0, rect["width"]), allow_overshoot=False)
+                self.move_pointer(approach, target_width=max(40.0, rect["width"]))
 
             if rect["top"] < margin:
                 delta = rect["top"] - margin - self.rng.uniform(18.0, 42.0)
@@ -539,14 +488,7 @@ class DemoDirector:
             {"x": destination[0], "y": destination[1]},
         )
         if not hit:
-            target = self.clickable_target(locator, event)
-            destination = (target["x"], target["y"])
-            self.move_pointer(
-                destination,
-                target_width=max(24.0, min(target["width"], target["height"])),
-                allow_overshoot=False,
-            )
-            self.pause(0.10, 0.20, floor_ms=35)
+            raise AssertionError(f"Pointer target for {event!r} moved before the click.")
         self.timeline.mark(event, note, self.page, destination)
         self.page.mouse.down(button="left")
         self.pause(0.065, 0.118, floor_ms=42)
@@ -567,6 +509,49 @@ class DemoDirector:
             raise AssertionError(f"Expected native runtime, got {snapshot['mode']!r}.")
         return counts
 
+    def expected_provider_origins(self) -> list[str]:
+        return (
+            PUBLIC_PROVIDER_ORIGINS
+            if self.target in PUBLIC_TARGETS
+            else LOCAL_PROVIDER_ORIGINS
+        )
+
+    @staticmethod
+    def mutation_audit_entries(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+        return [
+            entry
+            for entry in snapshot["audit"]
+            if entry["event"] in MUTATION_AUDIT_EVENTS
+            and entry.get("details", {}).get("nodeId") in MUTATION_NODE_IDS
+        ]
+
+    @staticmethod
+    def assert_valid_final_seal(snapshot: dict[str, Any]) -> dict[str, Any]:
+        seal = snapshot.get("seal")
+        audit = snapshot.get("audit")
+        if not isinstance(seal, dict):
+            raise AssertionError("Completed execution is missing its audit seal.")
+        if not isinstance(audit, list) or len(audit) != EXPECTED_AUDIT_ENTRY_COUNT:
+            raise AssertionError(
+                f"Expected {EXPECTED_AUDIT_ENTRY_COUNT} audit entries, got "
+                f"{len(audit) if isinstance(audit, list) else 'invalid audit data'}."
+            )
+        if seal.get("algorithm") != "sha256-chain-v1":
+            raise AssertionError(f"Unexpected audit seal algorithm: {seal.get('algorithm')!r}.")
+        if seal.get("entries") != EXPECTED_AUDIT_ENTRY_COUNT:
+            raise AssertionError(f"Unexpected sealed entry count: {seal.get('entries')!r}.")
+        head = seal.get("head")
+        lowercase_hex = set("0123456789abcdef")
+        if (
+            not isinstance(head, str)
+            or len(head) != 64
+            or any(character not in lowercase_hex for character in head)
+        ):
+            raise AssertionError(f"Audit head is not a lowercase SHA-256 digest: {head!r}.")
+        if audit[-1].get("hash") != head:
+            raise AssertionError("Audit seal head does not match the final audit entry.")
+        return seal
+
     def run(self) -> dict[str, Any]:
         page = self.page
         page.wait_for_function("() => Boolean(window.__TOOLBRAID_V2__)", timeout=30_000)
@@ -574,7 +559,7 @@ class DemoDirector:
         if state["phase"] != "idle":
             raise AssertionError(f"Expected idle phase, got {state['phase']!r}.")
 
-        install_capture_cursor(page, self.pointer)
+        self.timeline.trace_pointer(*self.pointer)
         page.mouse.move(*self.pointer)
         self.timeline.mark(
             "objective",
@@ -687,54 +672,52 @@ class DemoDirector:
             page.locator("[data-review-apply-arguments]"),
             "read-recovery-effect",
             "Read the exact recovery arguments before any approval.",
-            dwell=(1.05, 1.55),
+            dwell=(0.24, 0.38),
         )
         self.hover(
             page.locator("[data-review-publish-body]"),
             "read-publication-effect",
             "Read the evidence-derived publication body as a separate scope.",
-            dwell=(1.15, 1.75),
+            dwell=(0.26, 0.42),
         )
-        self.pause(0.85, 1.35)
+        self.pause(0.06, 0.12)
+
+        checkpoint_state = page.evaluate("window.__TOOLBRAID_V2__.getState()")
+        checkpoint = page.evaluate("window.__TOOLBRAID_V2__.getEngineSnapshot()")
+        if checkpoint_state["phase"] != "review":
+            raise AssertionError(
+                f"Capture moved beyond the review checkpoint: {checkpoint_state['phase']!r}."
+            )
+        if len(checkpoint["approvals"]) != 0:
+            raise AssertionError("Capture unexpectedly created an approval before review.")
+        provider_origins = sorted(
+            provider["origin"] for provider in checkpoint["providerDescriptors"]
+        )
+        result_ids = sorted(checkpoint["results"])
+        mutation_result_ids = sorted(MUTATION_NODE_IDS.intersection(result_ids))
+        mutation_audit = self.mutation_audit_entries(checkpoint)
+        mutation_execution = bool(mutation_result_ids or mutation_audit)
+        if provider_origins != self.expected_provider_origins():
+            raise AssertionError(
+                "Capture resolved unexpected provider origins: "
+                f"{provider_origins}"
+            )
+        if result_ids != SAFE_RESULT_IDS:
+            raise AssertionError(f"Capture produced unexpected safe-stage results: {result_ids}")
+        if mutation_result_ids:
+            raise AssertionError(
+                f"Capture unexpectedly produced mutation results: {mutation_result_ids}"
+            )
+        if mutation_audit:
+            raise AssertionError(
+                f"Capture unexpectedly recorded mutation execution: {mutation_audit}"
+            )
+        if mutation_execution:
+            raise AssertionError("Capture unexpectedly executed a mutation before approval.")
+        if not checkpoint["auditVerified"]:
+            raise AssertionError("Review-checkpoint audit integrity failed.")
 
         if self.target == "public":
-            checkpoint_state = page.evaluate("window.__TOOLBRAID_V2__.getState()")
-            checkpoint = page.evaluate("window.__TOOLBRAID_V2__.getEngineSnapshot()")
-            if checkpoint_state["phase"] != "review":
-                raise AssertionError("Public capture moved beyond the review checkpoint.")
-            if len(checkpoint["approvals"]) != 0:
-                raise AssertionError("Public capture unexpectedly created an approval.")
-            provider_origins = sorted(
-                provider["origin"] for provider in checkpoint["providerDescriptors"]
-            )
-            result_ids = sorted(checkpoint["results"])
-            mutation_result_ids = sorted(MUTATION_NODE_IDS.intersection(result_ids))
-            mutation_audit = [
-                entry
-                for entry in checkpoint["audit"]
-                if entry["event"] in MUTATION_AUDIT_EVENTS
-                and entry.get("details", {}).get("nodeId") in MUTATION_NODE_IDS
-            ]
-            mutation_execution = bool(mutation_result_ids or mutation_audit)
-            if provider_origins != PUBLIC_PROVIDER_ORIGINS:
-                raise AssertionError(
-                    "Public capture resolved unexpected provider origins: "
-                    f"{provider_origins}"
-                )
-            if result_ids != SAFE_RESULT_IDS:
-                raise AssertionError(
-                    f"Public capture produced unexpected safe-stage results: {result_ids}"
-                )
-            if mutation_result_ids:
-                raise AssertionError(
-                    f"Public capture unexpectedly produced mutation results: {mutation_result_ids}"
-                )
-            if mutation_audit:
-                raise AssertionError(
-                    f"Public capture unexpectedly recorded mutation execution: {mutation_audit}"
-                )
-            if mutation_execution:
-                raise AssertionError("Public capture unexpectedly executed a mutation.")
             self.timeline.mark(
                 "public-read-only-stop",
                 "Capture stops with both external mutations unapproved and unexecuted.",
@@ -751,7 +734,8 @@ class DemoDirector:
                 "mutationResultIds": mutation_result_ids,
                 "mutationAuditEvents": mutation_audit,
                 "auditVerified": checkpoint["auditVerified"],
-                "finalFixture": None,
+                "executionSurface": "deployed-browser-read-only",
+                "finalOutcome": None,
             }
 
         self.click(
@@ -762,13 +746,25 @@ class DemoDirector:
         page.wait_for_function(
             "() => window.__TOOLBRAID_V2__.getState().approvals.apply.granted"
         )
+        recovery_approved_state = page.evaluate("window.__TOOLBRAID_V2__.getState()")
+        recovery_approved = page.evaluate("window.__TOOLBRAID_V2__.getEngineSnapshot()")
+        if (
+            recovery_approved_state["phase"] != "review"
+            or not recovery_approved_state["approvals"]["apply"]["granted"]
+            or recovery_approved_state["approvals"]["publish"]["granted"]
+        ):
+            raise AssertionError(
+                "Recovery approval did not leave publication independently locked."
+            )
+        if sorted(recovery_approved["approvals"]) != ["apply-recovery-option"]:
+            raise AssertionError("Recovery approval created an unexpected approval envelope set.")
         self.timeline.mark(
             "recovery-scope-approved",
             "Recovery is fingerprint-bound while publication remains locked.",
             page,
             self.pointer,
         )
-        self.pause(2.25, 3.15)
+        self.pause(1.45, 1.95)
 
         self.click(
             page.locator('[data-action="approve-publish"]'),
@@ -776,80 +772,131 @@ class DemoDirector:
             "Grant the separate evidence-derived publication scope.",
         )
         self.wait_for_phase("approved")
+        approved_state = page.evaluate("window.__TOOLBRAID_V2__.getState()")
         approved = page.evaluate("window.__TOOLBRAID_V2__.getEngineSnapshot()")
-        if len(approved["approvals"]) != 2:
+        if (
+            approved_state["phase"] != "approved"
+            or not approved_state["approvals"]["apply"]["granted"]
+            or not approved_state["approvals"]["publish"]["granted"]
+        ):
+            raise AssertionError("Both exact approval scopes were not granted independently.")
+        if sorted(approved["approvals"]) != sorted(MUTATION_NODE_IDS):
             raise AssertionError("Expected two exact, separate approval envelopes.")
         self.timeline.mark(
-            "local-authority-complete",
-            "Both exact scopes are ready for ordered fixture execution.",
+            "authority-complete",
+            "Both exact scopes are ready for ordered execution.",
             page,
             self.pointer,
         )
-        self.pause(2.35, 3.25)
+        self.pause(0.28, 0.48)
 
         self.click(
             page.locator('[data-action="execute-approved"]'),
             "execute-approved",
-            "Execute only the two reviewed fixture mutations.",
+            "Execute only the two reviewed mutations.",
         )
         self.wait_for_phase("complete")
         page.wait_for_function(
             "() => Boolean(window.__TOOLBRAID_V2__.getEngineSnapshot().seal)",
             timeout=30_000,
         )
+        final_state = page.evaluate("window.__TOOLBRAID_V2__.getState()")
         final = page.evaluate("window.__TOOLBRAID_V2__.getEngineSnapshot()")
         self.assert_native_counts(final)
+        if final_state["phase"] != "complete":
+            raise AssertionError(f"Mission ended in unexpected phase: {final_state['phase']!r}.")
         if final["plan"]["status"] != "completed" or not final["auditVerified"]:
-            raise AssertionError("Local mission did not complete with a verified audit chain.")
+            raise AssertionError("Mission did not complete with a verified audit chain.")
+        expected_result_ids = sorted((*SAFE_RESULT_IDS, *MUTATION_NODE_IDS))
+        final_result_ids = sorted(final["results"])
+        if final_result_ids != expected_result_ids:
+            raise AssertionError(f"Mission produced unexpected final results: {final_result_ids}")
         recovery = final["results"]["apply-recovery-option"]
         publication = final["results"]["publish-status-update"]
         if recovery["activeReleaseId"] != "release-1841":
-            raise AssertionError("The local recovery fixture result is missing.")
+            raise AssertionError("The verified recovery result is missing.")
         if publication["noticeRevision"] != "notice-r9":
-            raise AssertionError("The local publication fixture result is missing.")
+            raise AssertionError("The verified publication result is missing.")
+        final_origins = sorted(
+            provider["origin"] for provider in final["providerDescriptors"]
+        )
+        if final_origins != self.expected_provider_origins():
+            raise AssertionError(
+                "Full capture resolved unexpected provider origins: "
+                f"{final_origins}"
+            )
+        mutation_audit = self.mutation_audit_entries(final)
+        mutation_failures = [
+            entry
+            for entry in mutation_audit
+            if entry["event"] in {"node.failed", "tool.execution_failed"}
+        ]
+        if mutation_failures:
+            raise AssertionError(f"Mutation execution recorded failures: {mutation_failures}")
+        mutation_audit_order = [
+            (entry["event"], entry["details"]["nodeId"])
+            for entry in mutation_audit
+        ]
+        if mutation_audit_order != EXPECTED_MUTATION_AUDIT_ORDER:
+            raise AssertionError(
+                "Mutation execution audit order drifted: "
+                f"{mutation_audit_order}"
+            )
+        seal = self.assert_valid_final_seal(final)
+        execution_surface = (
+            "deployed-browser-sandbox"
+            if self.target == "public-full"
+            else "local-deterministic-fixture"
+        )
         self.timeline.mark(
-            "verified-local-outcome",
+            "verified-outcome",
             "Checkout is restored, the update is published, and the audit is sealed.",
             page,
             self.pointer,
         )
-        self.pause(4.65, 5.65)
+        self.pause(4.35, 4.85)
 
         self.click(
             page.locator('[data-panel-tab="audit"]'),
             "open-audit",
-            "Open the sealed local integrity trail.",
+            "Open the sealed integrity trail.",
         )
         panel_hash = page.locator("[data-audit-panel-hash]").inner_text().strip()
         if panel_hash in {"", "Unsealed"}:
-            raise AssertionError("The local audit panel is not sealed.")
+            raise AssertionError("The audit panel is not sealed.")
         self.timeline.mark(
-            "local-audit-seal",
+            "audit-seal",
             "Ordered receipts and the verified SHA-256 chain close the capture.",
             page,
             self.pointer,
         )
-        self.pause(5.15, 6.15)
+        self.hover(
+            page.locator("[data-audit-list]"),
+            "inspect-audit-events",
+            "Follow the ordered mutation receipts in the integrity trail.",
+            dwell=(3.0, 3.5),
+        )
+        self.hover(
+            page.locator("[data-audit-panel-hash]"),
+            "verify-audit-hash",
+            "Verify the final SHA-256 chain head.",
+            dwell=(2.5, 3.0),
+        )
+        self.pause(3.35, 3.65)
         return {
             "checkpoint": "complete",
             "mutationExecution": True,
             "counts": {**counts, "safeResults": safe_results, "approvals": 2},
-            "providerOrigins": sorted(
-                provider["origin"] for provider in final["providerDescriptors"]
-            ),
+            "providerOrigins": final_origins,
             "safeResultIds": SAFE_RESULT_IDS,
-            "mutationResultIds": sorted(MUTATION_NODE_IDS.intersection(final["results"])),
-            "mutationAuditEvents": [
-                entry
-                for entry in final["audit"]
-                if entry["event"] in MUTATION_AUDIT_EVENTS
-                and entry.get("details", {}).get("nodeId") in MUTATION_NODE_IDS
-            ],
+            "mutationResultIds": sorted(MUTATION_NODE_IDS),
+            "mutationAuditEvents": mutation_audit,
             "auditVerified": final["auditVerified"],
-            "finalFixture": {
+            "executionSurface": execution_surface,
+            "finalOutcome": {
                 "activeReleaseId": recovery["activeReleaseId"],
                 "noticeRevision": publication["noticeRevision"],
-                "auditSeal": final["seal"],
+                "auditSeal": seal,
             },
         }
 
@@ -921,10 +968,13 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "target",
-        choices=("public", "local"),
+        choices=("public", "public-full", "local"),
         nargs="?",
         default="public",
-        help="Record the read-only public flow (default) or complete the local fixture.",
+        help=(
+            "Record the read-only public flow (default), the complete deployed "
+            "browser sandbox, or the local deterministic fixture."
+        ),
     )
     parser.add_argument(
         "--url",
@@ -944,7 +994,7 @@ def parse_args() -> argparse.Namespace:
         "--pace",
         type=float,
         default=1.0,
-        help="Scale deliberate holds and pointer motion; use a small value for local smoke tests.",
+        help="Scale deliberate holds; pointer travel keeps its natural duration.",
     )
     parser.add_argument(
         "--headed",
@@ -982,12 +1032,22 @@ def main() -> int:
         label="report path",
     )
 
-    if args.target == "local":
+    if args.target in PUBLIC_TARGETS:
+        target_url = validate_public_url(args.url or PUBLIC_URL)
+    elif args.target == "local":
         if args.url and validate_http_url(args.url) != LOCAL_URL:
             raise SystemExit("The local target owns its fixture URL; omit --url.")
         target_url = LOCAL_URL
     else:
-        target_url = validate_public_url(args.url or PUBLIC_URL)
+        raise SystemExit(f"Unsupported capture target: {args.target!r}.")
+
+    execution_mode = {
+        "public": "public-read-only",
+        "public-full": "public-sandbox-full",
+        "local": "local-fixture-full",
+    }[args.target]
+    remote_deployment = args.target in PUBLIC_TARGETS
+    sandbox_execution = args.target in {"public-full", "local"}
 
     WORK_DIR.mkdir(parents=True, exist_ok=True)
     (ROOT / ".tmp").mkdir(parents=True, exist_ok=True)
@@ -1036,8 +1096,7 @@ def main() -> int:
                     reduced_motion="no-preference",
                     locale="en-GB",
                     timezone_id="Europe/London",
-                    # This is used only for the capture cursor overlay installed above.
-                    bypass_csp=True,
+                    bypass_csp=False,
                 )
                 page = context.new_page()
                 video = page.video
@@ -1100,11 +1159,14 @@ def main() -> int:
 
         generated_at = datetime.now(UTC).isoformat()
         timeline_payload = {
-            "format": "toolbraid-public-capture-timeline-v1",
+            "format": "toolbraid-public-capture-timeline-v2",
             "generatedAt": generated_at,
             "target": args.target,
             "url": target_url,
             "runtime": "native",
+            "executionMode": execution_mode,
+            "remoteDeployment": remote_deployment,
+            "sandboxExecution": sandbox_execution,
             "resolution": f"{WIDTH}x{HEIGHT}",
             "fps": FPS,
             "pace": args.pace,
@@ -1112,17 +1174,22 @@ def main() -> int:
             "output": str(output.relative_to(ROOT)),
             "report": str(report_path.relative_to(ROOT)),
             "entries": timeline.entries,
+            "pointerTrace": timeline.pointer_trace,
         }
         report_payload = {
-            "format": "toolbraid-public-capture-report-v1",
+            "format": "toolbraid-public-capture-report-v2",
             "status": "PASS",
             "generatedAt": generated_at,
             "target": args.target,
             "url": target_url,
             "runtime": "native",
+            "executionMode": execution_mode,
+            "remoteDeployment": remote_deployment,
+            "sandboxExecution": sandbox_execution,
             "browser": surface["userAgent"],
             "checkpoint": flow["checkpoint"],
             "publicReadOnly": args.target == "public",
+            "publicSandboxExecution": args.target == "public-full",
             "mutationExecution": flow["mutationExecution"],
             "counts": flow["counts"],
             "providerOrigins": flow["providerOrigins"],
@@ -1130,18 +1197,24 @@ def main() -> int:
             "mutationResultIds": flow["mutationResultIds"],
             "mutationAuditEvents": flow["mutationAuditEvents"],
             "auditVerified": flow["auditVerified"],
-            "finalFixture": flow["finalFixture"],
+            "executionSurface": flow.get("executionSurface"),
+            "finalOutcome": flow.get("finalOutcome"),
             "expectedProviderFailures": len(expected_provider_errors),
             "unexpectedBrowserErrors": len(browser_errors),
-            "cursorOverlay": {
-                "present": True,
+            "cursorTrace": {
+                "rawCaptureOverlay": False,
+                "compositedAfterCapture": True,
                 "style": "system-arrow-26px",
                 "clickPulse": False,
                 "pointerEvents": "trusted Playwright mouse",
-                "trajectory": "seeded-minimum-jerk-bezier",
-                "durationModel": "fitts-law",
+                "trajectory": "seeded-smooth-cubic-bezier",
+                "durationModel": "pace-independent-fitts-law",
+                "periodicWobble": False,
+                "overshoot": False,
+                "microCorrection": False,
                 "motionSeed": director.motion_seed,
-                "bypassCspPurpose": "capture cursor overlay only",
+                "sampleCount": len(timeline.pointer_trace),
+                "cspBypassed": False,
             },
             "video": video_report,
             "paths": {

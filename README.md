@@ -142,7 +142,7 @@ Approval creation is accepted only from a trusted human DOM activation. A synthe
 
 ## Current scope
 
-The engineering build is a native-validated release candidate. The public seven-origin Vercel deployment is live and has passed native Chrome 151 read-only validation. Public repository visibility, the public YouTube upload, and the final Devpost entry remain release gates tracked in [Challenge Requirements](docs/challenge-requirements.md).
+The engineering build is a native-validated release candidate. The public seven-origin Vercel deployment has passed an independent native Chrome 151 read-only gate. The judge video separately records the full approved mutation path on that public URL inside ToolBraid's deterministic deployed-browser sandbox; it uses no production credentials and changes no external system. Public repository visibility, the public YouTube upload, and the final Devpost entry remain release gates tracked in [Challenge Requirements](docs/challenge-requirements.md).
 
 See [Start Here](START-HERE.md), [Architecture](docs/architecture.md), [Threat Model](docs/threat-model.md), and [Testing](docs/testing.md).
 

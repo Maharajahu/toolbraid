@@ -41,6 +41,18 @@ DEFAULT_OUTPUT = VIDEO_DIR / "work" / "narration-master-final.wav"
 DEFAULT_REPORT = VIDEO_DIR / "work" / "audio-mastering-report.json"
 DEFAULT_RENDER_CONFIG = VIDEO_DIR / "render-config.json"
 
+PRO_Q_4 = Path(
+    r"C:\Program Files\Common Files\VST3\FabFilter\FabFilter Pro-Q 4.vst3"
+)
+PRO_DS = Path(
+    r"C:\Program Files\Common Files\VST3\FabFilter\FabFilter Pro-DS.vst3"
+)
+RX_DE_CLIP = Path(
+    r"C:\Program Files\Common Files\VST3\iZotope\RX 12 De-clip.vst3"
+)
+SOOTHE_2 = Path(
+    r"C:\Program Files\Common Files\VST3\oeksound\soothe2_x64.vst3"
+)
 PRO_L_2 = Path(
     r"C:\Program Files\Common Files\VST3\FabFilter\FabFilter Pro-L 2.vst3"
 )
@@ -157,13 +169,132 @@ def measure(audio: np.ndarray, sample_rate: int) -> dict[str, float]:
 
 def set_vst_parameter(plugin: Any, name: str, value: Any) -> dict[str, Any]:
     if name not in plugin.parameters:
-        raise KeyError(f"FabFilter Pro-L 2 parameter is unavailable: {name}")
+        raise KeyError(f"VST3 parameter is unavailable: {name}")
     setattr(plugin, name, value)
     parameter = plugin.parameters[name]
     return {
         "requested": value,
         "rawValue": round(float(parameter.raw_value), 8),
         "descriptor": repr(parameter),
+    }
+
+
+def process_voice_cleanup_vst(
+    audio: np.ndarray,
+    sample_rate: int,
+) -> tuple[np.ndarray, dict[str, Any]]:
+    """Apply a restrained, deterministic studio cleanup chain for narration."""
+    if load_plugin is None or Pedalboard is None:
+        raise RuntimeError("pedalboard is not installed")
+    for plugin_path in (RX_DE_CLIP, PRO_Q_4, SOOTHE_2, PRO_DS):
+        if not plugin_path.exists():
+            raise FileNotFoundError(plugin_path)
+
+    declipper = load_plugin(str(RX_DE_CLIP))
+    equalizer = load_plugin(str(PRO_Q_4))
+    resonance = load_plugin(str(SOOTHE_2))
+    deesser = load_plugin(str(PRO_DS))
+
+    declipper_settings = {
+        "clipping_threshold": -0.75,
+        "positive_threshold": -0.75,
+        "negative_threshold": -0.75,
+        "quality": "High",
+        "post_limiter": False,
+        "input_gain_db": 6.0,
+        "output_gain_db": -6.0,
+        "makeup_gain": 0.0,
+        "global_bypass": False,
+        "enable_asymmetric": False,
+    }
+    equalizer_settings = {
+        "band_1_used": "Used",
+        "band_1_enabled": True,
+        "band_1_frequency": 72.0,
+        "band_1_gain": 0.0,
+        "band_1_q": 0.707,
+        "band_1_shape": "Low Cut",
+        "band_1_slope": "24 dB/oct",
+        "processing_mode": "Zero Latency",
+        "auto_gain": False,
+        "output_level": 0.0,
+    }
+    soothe_settings = {
+        "mode": "soft",
+        "depth": 1.35,
+        "sharpness": 3.2,
+        "selectivity": 3.0,
+        "low_cut_freq_hz": "1k8",
+        "high_cut_freq_hz": "10k",
+        "stereo_link": 100.0,
+        "mix": 60.0,
+    }
+    deesser_settings = {
+        "mode": "Single Vocal",
+        "threshold": -30.0,
+        "range": 3.0,
+        "lookahead": 8.0,
+        "lookahead_enabled": True,
+        "high_pass_frequency": 4500.0,
+        "low_pass_frequency": 13000.0,
+        "oversampling": "2x",
+        "output_level": 0.0,
+    }
+    configured = {
+        "iZotope RX 12 De-clip": {
+            name: set_vst_parameter(declipper, name, value)
+            for name, value in declipper_settings.items()
+        },
+        "FabFilter Pro-Q 4": {
+            name: set_vst_parameter(equalizer, name, value)
+            for name, value in equalizer_settings.items()
+        },
+        "oeksound soothe2": {
+            name: set_vst_parameter(resonance, name, value)
+            for name, value in soothe_settings.items()
+        },
+        "FabFilter Pro-DS": {
+            name: set_vst_parameter(deesser, name, value)
+            for name, value in deesser_settings.items()
+        },
+    }
+    board = Pedalboard([declipper, equalizer, resonance, deesser])
+    processed = board(
+        audio.T,
+        sample_rate=sample_rate,
+        buffer_size=8192,
+        reset=True,
+    )
+    output = np.asarray(processed, dtype=np.float32).T
+    if output.shape != audio.shape:
+        raise RuntimeError(
+            f"Voice cleanup changed the audio shape from {audio.shape} to {output.shape}."
+        )
+    return output, {
+        "mode": "premium-vst3",
+        "purpose": "subsonic cleanup, restrained resonance control, and de-essing",
+        "plugins": [
+            {
+                "name": "iZotope RX 12 De-clip",
+                "path": str(RX_DE_CLIP),
+                "parameters": configured["iZotope RX 12 De-clip"],
+            },
+            {
+                "name": "FabFilter Pro-Q 4",
+                "path": str(PRO_Q_4),
+                "parameters": configured["FabFilter Pro-Q 4"],
+            },
+            {
+                "name": "oeksound soothe2",
+                "path": str(SOOTHE_2),
+                "parameters": configured["oeksound soothe2"],
+            },
+            {
+                "name": "FabFilter Pro-DS",
+                "path": str(PRO_DS),
+                "parameters": configured["FabFilter Pro-DS"],
+            },
+        ],
     }
 
 
@@ -346,16 +477,33 @@ def master_file(
     before = measure(audio, sample_rate)
     warnings: list[str] = []
 
+    cleaned = audio
     try:
-        processed, processing = process_with_pro_l_2(
-            audio, sample_rate, target_lufs, ceiling_dbfs
+        cleaned, cleanup_processing = process_voice_cleanup_vst(audio, sample_rate)
+    except Exception as exc:
+        reason = f"{type(exc).__name__}: {exc}"
+        warnings.append(f"Premium voice cleanup unavailable; source passed unchanged. {reason}")
+        cleanup_processing = {
+            "mode": "bypassed",
+            "bypassReason": reason,
+            "plugins": [],
+        }
+
+    try:
+        processed, limiter_processing = process_with_pro_l_2(
+            cleaned, sample_rate, target_lufs, ceiling_dbfs
         )
     except Exception as exc:
         reason = f"{type(exc).__name__}: {exc}"
-        warnings.append(f"Premium VST3 unavailable; used safe fallback. {reason}")
-        processed, processing = process_with_fallback(
-            audio, sample_rate, target_lufs, ceiling_dbfs, reason
+        warnings.append(f"Premium limiter unavailable; used safe fallback. {reason}")
+        processed, limiter_processing = process_with_fallback(
+            cleaned, sample_rate, target_lufs, ceiling_dbfs, reason
         )
+
+    processing = {
+        "voiceCleanup": cleanup_processing,
+        "finalLimiter": limiter_processing,
+    }
 
     processed, safety_attenuation_db = enforce_true_peak_ceiling(processed, ceiling_dbfs)
     processing["digitalSafetyAttenuationDb"] = round(safety_attenuation_db, 3)

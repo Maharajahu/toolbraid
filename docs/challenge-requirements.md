@@ -7,7 +7,7 @@ Verified on **27 August 2026** against the [official rules](https://webmcp.devpo
 - browser application built around native WebMCP discovery and execution;
 - literal `document.modelContext.registerTool({ ... })` implementations in six independent provider documents;
 - Chrome 151 native run using `document.modelContext.getTools()` and `executeTool()` across seven local origins;
-- native Chrome 151 read-only validation against the anonymous public seven-origin Vercel deployment;
+- native Chrome 151 read-only validation and a fail-closed full browser-sandbox capture against the anonymous public seven-origin Vercel deployment;
 - nine heterogeneous tools normalized into seven canonical capabilities;
 - hostile metadata quarantined before scoring;
 - read-only failover with no mutation failover;
@@ -27,9 +27,9 @@ Native evidence is recorded in [native-e2e-validation.json](native-e2e-validatio
 | Public source repository with all source/assets/instructions | Complete private development branch is synchronized; public visibility and default-branch promotion remain pending |
 | Open-source license detectable on the repository page and visible in About | GitHub detects the MIT license while private; recheck after public release |
 | English description covering WebMCP fit, UX improvement, human-agent collaboration, and implementation | Repository description and judge documentation are complete; final Devpost copy remains pending |
-| Public YouTube demonstration under three minutes, with audio | English 1080p local master and captions are complete; public YouTube upload remains pending |
+| Public YouTube demonstration under three minutes, with audio | English 1080p master is locked at 69.700 seconds / 2,091 frames with continuous voice and burned-in captions; final render validation and public YouTube upload remain pending |
 | English video/text/testing instructions | Repository, video materials, and live-URL testing instructions are complete |
-| No unlicensed trademarks, copyrighted music, or third-party media in the demonstration | Local master uses first-party ToolBraid UI/assets, the owner's authorized voice cloned locally with MIT-licensed Resemble AI Chatterbox, and an original deterministic ambient bed; exact revisions and attribution are recorded in `THIRD_PARTY_NOTICES.md` |
+| No unlicensed trademarks, copyrighted music, or third-party media in the demonstration | The master uses first-party ToolBraid UI/assets, the owner's authorized voice cloned locally with IndexTTS 2.5, and an original deterministic ambient bed. The pinned bilibili Model Use License Agreement is included verbatim; its distribution obligations and required disclaimer are documented in `THIRD_PARTY_NOTICES.md`. Confirm that the final YouTube distribution package satisfies those obligations before marking this gate complete |
 | Free judge access through the end of judging | Live deployment is anonymously accessible; availability through the end of judging remains an operational monitoring gate |
 | Completed Devpost fields and submitted entry | Pending |
 

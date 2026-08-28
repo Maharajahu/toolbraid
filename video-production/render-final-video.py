@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Render the locked 162-second ToolBraid WebMCP Challenge master.
+"""Render the ToolBraid WebMCP Challenge master from its locked config.
 
 The compositor is deliberately self-contained: PyAV handles decoding/encoding,
-Pillow/numpy handle motion graphics, and CairoSVG rasterizes the project SVGs.
+Pillow/numpy handle the deterministic outro, and CairoSVG rasterizes the logo.
 No external ffmpeg executable or non-project stock media is used.
 """
 
@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import atexit
+import bisect
 import hashlib
 import io
 import json
@@ -89,37 +90,8 @@ def svg_to_image(path: Path, width: int, height: int) -> Image.Image:
         output_height=height,
     )
     with Image.open(io.BytesIO(png)) as image:
-        # Preserve transparency for the ToolBraid mark; the diagram assets have
-        # their own full-frame backgrounds and are converted to RGB at output.
+        # Preserve transparency for the ToolBraid mark.
         return image.convert("RGBA")
-
-
-def fitted_zoom(
-    image: Image.Image,
-    width: int,
-    height: int,
-    zoom: float,
-    focus: tuple[float, float] = (0.5, 0.5),
-) -> tuple[Image.Image, tuple[float, float, float, float]]:
-    """Crop and resize while retaining a normalized focal point.
-
-    Returns the rendered frame and the source crop in source-pixel units so
-    normalized highlight rectangles can be transformed consistently.
-    """
-
-    source_width, source_height = image.size
-    zoom = max(1.0, zoom)
-    crop_width = min(source_width, width / zoom * source_width / width)
-    crop_height = min(source_height, height / zoom * source_height / height)
-    focus_x = clamp(focus[0]) * source_width
-    focus_y = clamp(focus[1]) * source_height
-    left = clamp(focus_x - focus[0] * crop_width, 0.0, source_width - crop_width)
-    top = clamp(focus_y - focus[1] * crop_height, 0.0, source_height - crop_height)
-    crop = (left, top, left + crop_width, top + crop_height)
-    rendered = image.crop(tuple(int(round(part)) for part in crop)).resize(
-        (width, height), Image.Resampling.BICUBIC
-    )
-    return rendered, crop
 
 
 @dataclass(frozen=True)
@@ -130,11 +102,18 @@ class Caption:
 
 
 class CaptionTrack:
-    def __init__(self, path: Path | None) -> None:
+    def __init__(self, path: Path | None, offset_seconds: float = 0.0) -> None:
         self.path = path
         self.captions: list[Caption] = []
         if path is not None and path.exists():
-            self.captions = self._load(path)
+            self.captions = [
+                Caption(
+                    caption.start + offset_seconds,
+                    caption.end + offset_seconds,
+                    caption.text,
+                )
+                for caption in self._load(path)
+            ]
 
     @staticmethod
     def _first(entry: dict[str, Any], keys: Iterable[str]) -> Any:
@@ -213,6 +192,35 @@ class CaptionTrack:
             if caption.start > timestamp:
                 break
         return None
+
+
+class CursorTrace:
+    def __init__(self, path: Path) -> None:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        entries = payload.get("pointerTrace")
+        if not isinstance(entries, list) or not entries:
+            raise ValueError(f"Cursor trace is missing or empty: {path}")
+        self.samples = [
+            (float(entry["timeSeconds"]), float(entry["x"]), float(entry["y"]))
+            for entry in entries
+        ]
+        if any(current[0] < previous[0] for previous, current in zip(self.samples, self.samples[1:])):
+            raise ValueError(f"Cursor trace timestamps are not monotonic: {path}")
+        self.times = [sample[0] for sample in self.samples]
+
+    def position(self, timestamp: float) -> tuple[float, float]:
+        index = bisect.bisect_right(self.times, timestamp)
+        if index <= 0:
+            return self.samples[0][1], self.samples[0][2]
+        if index >= len(self.samples):
+            return self.samples[-1][1], self.samples[-1][2]
+        previous = self.samples[index - 1]
+        following = self.samples[index]
+        gap = following[0] - previous[0]
+        if gap > 0.12 or gap <= 0.0:
+            return previous[1], previous[2]
+        amount = clamp((timestamp - previous[0]) / gap)
+        return lerp(previous[1], following[1], amount), lerp(previous[2], following[2], amount)
 
 
 class FontBook:
@@ -308,11 +316,12 @@ class ToolBraidCompositor:
         self.width = int(master["width"])
         self.height = int(master["height"])
         self.fps = int(master["fps"])
-        self.duration = float(master["durationSeconds"])
         self.colors = {key: hex_rgb(value) for key, value in config["palette"].items()}
         self.fonts = FontBook()
         self.captions = captions
         self.scenes: list[dict[str, Any]] = config["scenes"]
+        cursor_trace_path = resolve_from_config(config_path, str(config["inputs"]["cursorTrace"]))
+        self.cursor_trace = CursorTrace(cursor_trace_path)
         configured_products = config["inputs"].get("productVideos")
         if isinstance(configured_products, dict) and configured_products:
             self.products = {
@@ -331,10 +340,7 @@ class ToolBraidCompositor:
             product_path = resolve_from_config(config_path, config["inputs"]["productVideo"])
             self.default_product_key = "default"
             self.products = {self.default_product_key: ProductVideoReader(product_path)}
-        self.last_product_image: Image.Image | None = None
-        self.diagram_cache: dict[Path, Image.Image] = {}
         self.background = self._build_background()
-        self.vignette = self._build_vignette()
         logo_path = resolve_from_config(config_path, config["inputs"]["logo"])
         self.logo = svg_to_image(logo_path, 180, 180).convert("RGBA")
         rng = random.Random(24958)
@@ -363,16 +369,6 @@ class ToolBraidCompositor:
         for y in range(0, self.height, 64):
             grid.line((0, y, self.width, y), fill=grid_color, width=1)
         return Image.alpha_composite(image.convert("RGBA"), overlay).convert("RGB")
-
-    def _build_vignette(self) -> Image.Image:
-        yy, xx = np.mgrid[0 : self.height, 0 : self.width]
-        nx = (xx - self.width / 2) / (self.width / 2)
-        ny = (yy - self.height / 2) / (self.height / 2)
-        radius = np.sqrt(nx * nx + ny * ny)
-        alpha = np.clip((radius - 0.55) / 0.65, 0.0, 1.0) ** 1.7 * 122
-        rgba = np.zeros((self.height, self.width, 4), dtype=np.uint8)
-        rgba[..., 3] = alpha.astype(np.uint8)
-        return Image.fromarray(rgba, mode="RGBA")
 
     def _scene_at(self, timestamp: float) -> tuple[int, dict[str, Any]]:
         for index, scene in enumerate(self.scenes):
@@ -406,10 +402,13 @@ class ToolBraidCompositor:
         glow = Image.new("RGBA", image.size, (0, 0, 0, 0))
         draw = ImageDraw.Draw(overlay)
         glow_draw = ImageDraw.Draw(glow)
-        center = self.height * (0.52 if not outro else 0.48)
+        center = self.height * (0.52 if not outro else 0.70)
         span_left, span_right = 80, self.width - 80
         samples = 220
-        visible = max(2, int(samples * clamp(reveal)))
+        reveal_alpha = smoothstep(clamp(reveal))
+        if reveal_alpha <= 0.001:
+            return
+        visible = samples
         colors = (self.colors["mint"], self.colors["blue"], self.colors["amber"])
         for path_index, color in enumerate(colors):
             points: list[tuple[float, float]] = []
@@ -422,41 +421,30 @@ class ToolBraidCompositor:
                 y = center + math.sin(amount * math.tau * 2.05 + phase + timestamp * 0.45) * amplitude
                 points.append((x, y))
             if len(points) > 1:
-                glow_draw.line(points, fill=(*color, 90), width=18, joint="curve")
-                draw.line(points, fill=(*color, 225), width=4, joint="curve")
+                glow_draw.line(
+                    points,
+                    fill=(*color, int(90 * reveal_alpha)),
+                    width=18,
+                    joint="curve",
+                )
+                draw.line(
+                    points,
+                    fill=(*color, int(225 * reveal_alpha)),
+                    width=4,
+                    joint="curve",
+                )
         image.alpha_composite(glow.filter(ImageFilter.GaussianBlur(14)))
         image.alpha_composite(overlay)
-
-    def _render_intro(self, timestamp: float, segment: dict[str, Any]) -> tuple[Image.Image, dict[str, Any]]:
-        local = timestamp - float(segment["start"])
-        duration = float(segment["end"]) - float(segment["start"])
-        image = self.background.copy().convert("RGBA")
-        self._animated_particles(image, timestamp, opacity=70)
-        self._braid(image, timestamp, ease_out_cubic(local / 2.8))
-        logo_scale = 0.72 + 0.28 * ease_out_cubic(local / 1.6)
-        logo_size = int(150 * logo_scale)
-        logo = self.logo.resize((logo_size, logo_size), Image.Resampling.LANCZOS)
-        glow = Image.new("RGBA", image.size, (0, 0, 0, 0))
-        glow.alpha_composite(logo, ((self.width - logo_size) // 2, 170))
-        image.alpha_composite(glow.filter(ImageFilter.GaussianBlur(24)))
-        image.alpha_composite(logo, ((self.width - logo_size) // 2, 170))
-        fade = smoothstep((duration - local) / 0.75)
-        if fade < 1.0:
-            image.putalpha(int(255 * fade))
-        return image.convert("RGB"), {"kind": "intro"}
 
     def _render_outro(self, timestamp: float, segment: dict[str, Any]) -> tuple[Image.Image, dict[str, Any]]:
         local = timestamp - float(segment["start"])
         duration = float(segment["end"]) - float(segment["start"])
-        if self.last_product_image is not None:
-            backdrop = self.last_product_image.resize((self.width, self.height), Image.Resampling.BICUBIC)
-            backdrop = backdrop.filter(ImageFilter.GaussianBlur(12)).convert("RGBA")
-            shade = Image.new("RGBA", backdrop.size, (*self.colors["background"], 218))
-            image = Image.alpha_composite(backdrop, shade)
-        else:
-            image = self.background.copy().convert("RGBA")
+        # The outro is generated independently. Reusing the last browser frame
+        # would make the capture appear to freeze and repeat at the cut.
+        image = self.background.copy().convert("RGBA")
         self._animated_particles(image, timestamp, opacity=48)
-        self._braid(image, timestamp, smoothstep(local / 1.4), outro=True)
+        if local >= 0.14:
+            self._braid(image, timestamp, smoothstep((local - 0.14) / 1.26), outro=True)
         logo_size = 132
         logo = self.logo.resize((logo_size, logo_size), Image.Resampling.LANCZOS)
         image.alpha_composite(logo, ((self.width - logo_size) // 2, 178))
@@ -466,75 +454,28 @@ class ToolBraidCompositor:
             image = Image.alpha_composite(image, black)
         return image.convert("RGB"), {"kind": "outro"}
 
-    def _diagram(self, asset_value: str) -> Image.Image:
-        path = resolve_from_config(self.config_path, asset_value)
-        if path not in self.diagram_cache:
-            self.diagram_cache[path] = svg_to_image(path, self.width, self.height)
-        return self.diagram_cache[path]
-
-    def _render_diagram(self, timestamp: float, segment: dict[str, Any]) -> tuple[Image.Image, dict[str, Any]]:
-        start, end = float(segment["start"]), float(segment["end"])
-        progress = clamp((timestamp - start) / max(0.001, end - start))
-        source = self._diagram(segment["asset"])
-        motion = str(segment.get("motion", "scan"))
-        focus = {
-            "radial": (0.57, 0.52),
-            "scan": (0.52, 0.52),
-            "flow": (0.62, 0.52),
-            "authority": (0.50, 0.48),
-            "execute": (0.67, 0.58),
-        }.get(motion, (0.5, 0.5))
-        zoom = 1.0 + 0.055 * smoothstep(progress)
-        image, crop = fitted_zoom(source, self.width, self.height, zoom, focus)
-        image = image.convert("RGBA")
+    def _draw_cursor(self, image: Image.Image, source_time: float) -> None:
+        x, y = self.cursor_trace.position(source_time)
+        points = [
+            (2.0, 1.5),
+            (2.2, 24.2),
+            (8.1, 19.3),
+            (12.5, 29.4),
+            (17.2, 27.3),
+            (12.8, 17.4),
+            (20.5, 17.0),
+        ]
+        translated = [(x + px, y + py) for px, py in points]
+        shadow = Image.new("RGBA", image.size, (0, 0, 0, 0))
+        shadow_draw = ImageDraw.Draw(shadow)
+        shadow_draw.polygon([(px + 2.5, py + 3.0) for px, py in translated], fill=(0, 0, 0, 188))
+        shadow = shadow.filter(ImageFilter.GaussianBlur(2.1))
+        image.alpha_composite(shadow)
         overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
         draw = ImageDraw.Draw(overlay)
-        if motion == "radial":
-            center = (int(self.width * 0.50), int(self.height * 0.49))
-            destinations = [
-                (0.25, 0.27), (0.25, 0.50), (0.25, 0.72),
-                (0.75, 0.27), (0.75, 0.50), (0.75, 0.72),
-            ]
-            for index, (dx, dy) in enumerate(destinations):
-                # Each packet travels once and settles. Modulo motion replayed
-                # the same journey inside a single shot.
-                phase = smoothstep((progress - index * 0.035) / 0.74)
-                x = lerp(center[0], dx * self.width, phase)
-                y = lerp(center[1], dy * self.height, phase)
-                radius = 8
-                draw.ellipse((x - radius, y - radius, x + radius, y + radius), fill=(*self.colors["cyan"], 210))
-            # The architecture includes Mission Control plus six provider
-            # documents. The locked judge-facing count is the provider count,
-            # so replace the SVG's total-origin chip with an explicit label.
-            chip = (1450, 55, 1842, 110)
-            draw.rounded_rectangle(
-                chip,
-                radius=28,
-                fill=(*self.colors["background"], 246),
-                outline=(*self.colors["cyan"], 105),
-                width=2,
-            )
-            draw.text(
-                ((chip[0] + chip[2]) // 2, chip[1] + 17),
-                "6 PROVIDER ORIGINS  ·  PORTS 4174–4179",
-                anchor="ma",
-                font=self.fonts.get("mono", 15),
-                fill=(*self.colors["muted"], 240),
-            )
-        elif motion in {"scan", "flow"}:
-            scan_x = int(lerp(100, self.width - 100, progress))
-            draw.rounded_rectangle((scan_x - 3, 92, scan_x + 3, self.height - 92), radius=3, fill=(*self.colors["cyan"], 130))
-            glow = overlay.filter(ImageFilter.GaussianBlur(18))
-            image.alpha_composite(glow)
-        else:
-            path_y = int(self.height * (0.58 if motion == "execute" else 0.49))
-            x = int(lerp(self.width * 0.20, self.width * 0.82, smoothstep(progress)))
-            draw.ellipse((x - 13, path_y - 13, x + 13, path_y + 13), outline=(*self.colors["mint"], 235), width=4)
-            draw.ellipse((x - 31, path_y - 31, x + 31, path_y + 31), outline=(*self.colors["cyan"], 110), width=3)
-
+        draw.polygon(translated, fill=(247, 251, 255, 255), outline=(7, 16, 28, 255))
+        draw.line((*translated, translated[0]), fill=(7, 16, 28, 255), width=2, joint="curve")
         image.alpha_composite(overlay)
-        image.alpha_composite(self.vignette)
-        return image.convert("RGB"), {"kind": "diagram", "crop": crop}
 
     def _render_product(self, timestamp: float, segment: dict[str, Any]) -> tuple[Image.Image, dict[str, Any]]:
         start, end = float(segment["start"]), float(segment["end"])
@@ -549,18 +490,12 @@ class ToolBraidCompositor:
                 f"Unknown product source {source_key!r}; available sources are {sorted(self.products)}"
             )
         source = self.products[source_key].get(source_time)
-        self.last_product_image = source.copy()
-        source_width, source_height = source.size
-        crop = (0.0, 0.0, float(source_width), float(source_height))
-        image = source.resize((self.width, self.height), Image.Resampling.BICUBIC)
-        image = image.convert("RGBA")
-        # The UI remains legible while the edges receive a restrained cinematic
-        # falloff. This is deliberately lighter than a stylized mockup treatment.
-        image.alpha_composite(self.vignette)
+        # Full-frame documentary capture: no crop, spatial transform, vignette,
+        # or speed change is applied to the deployed product recording.
+        image = source.resize((self.width, self.height), Image.Resampling.BICUBIC).convert("RGBA")
+        self._draw_cursor(image, source_time)
         return image.convert("RGB"), {
             "kind": "product",
-            "crop": crop,
-            "sourceSize": source.size,
             "sourceTime": source_time,
             "sourceKey": source_key,
             "playback": "linear-1x",
@@ -570,130 +505,11 @@ class ToolBraidCompositor:
 
     def _render_base(self, timestamp: float, segment: dict[str, Any]) -> tuple[Image.Image, dict[str, Any]]:
         kind = segment["kind"]
-        if kind == "intro":
-            return self._render_intro(timestamp, segment)
         if kind == "outro":
             return self._render_outro(timestamp, segment)
-        if kind == "diagram":
-            return self._render_diagram(timestamp, segment)
         if kind == "product":
             return self._render_product(timestamp, segment)
         raise ValueError(f"Unsupported segment kind: {kind}")
-
-    def _transform_source_rect(
-        self,
-        rect: list[float],
-        crop: tuple[float, float, float, float],
-        source_size: tuple[int, int],
-    ) -> tuple[int, int, int, int]:
-        left, top, right, bottom = crop
-        crop_width, crop_height = right - left, bottom - top
-        source_width, source_height = source_size
-        x1 = (rect[0] * source_width - left) / crop_width * self.width
-        y1 = (rect[1] * source_height - top) / crop_height * self.height
-        x2 = (rect[2] * source_width - left) / crop_width * self.width
-        y2 = (rect[3] * source_height - top) / crop_height * self.height
-        return tuple(int(round(value)) for value in (x1, y1, x2, y2))  # type: ignore[return-value]
-
-    def _draw_highlights(self, image: Image.Image, timestamp: float, scene: dict[str, Any], metadata: dict[str, Any]) -> None:
-        if metadata.get("kind") != "product":
-            return
-        active = [
-            item for item in scene.get("highlights", [])
-            if float(item["start"]) <= timestamp < float(item["end"])
-        ]
-        if not active:
-            return
-        overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
-        glow = Image.new("RGBA", image.size, (0, 0, 0, 0))
-        draw = ImageDraw.Draw(overlay)
-        glow_draw = ImageDraw.Draw(glow)
-        for item in active:
-            rect = self._transform_source_rect(item["rect"], metadata["crop"], metadata["sourceSize"])
-            color = self.colors.get(item.get("color", "cyan"), self.colors["cyan"])
-            width = 4
-            radius = 16
-            glow_draw.rounded_rectangle(rect, radius=radius, outline=(*color, 160), width=14)
-            draw.rounded_rectangle(rect, radius=radius, outline=(*color, 225), width=width)
-            corner = 22
-            x1, y1, x2, y2 = rect
-            for x, y, sx, sy in (
-                (x1, y1, 1, 1), (x2, y1, -1, 1), (x1, y2, 1, -1), (x2, y2, -1, -1)
-            ):
-                draw.line((x, y, x + sx * corner, y), fill=(*color, 255), width=5)
-                draw.line((x, y, x, y + sy * corner), fill=(*color, 255), width=5)
-        image.alpha_composite(glow.filter(ImageFilter.GaussianBlur(18)))
-        image.alpha_composite(overlay)
-
-    def _draw_scene_label(self, image: Image.Image, timestamp: float, index: int, scene: dict[str, Any]) -> None:
-        if scene["id"] in {"01-intro", "11-outro"}:
-            return
-        local = timestamp - float(scene["start"])
-        duration = float(scene["end"]) - float(scene["start"])
-        enter = ease_out_cubic(local / 0.65)
-        leave = smoothstep((duration - local) / 0.55)
-        opacity = int(220 * min(enter, leave))
-        if opacity <= 0:
-            return
-        expanded = local < 3.8
-        expansion = smoothstep(min(local / 0.65, (4.0 - local) / 0.65)) if expanded else 0.0
-        panel_width = int(290 + 450 * max(0.0, expansion))
-        panel_height = 104 if expanded else 48
-        # Offset from the application's left rail so the real mission card and
-        # its exact objective remain unobscured during the opening product shot.
-        x = int(340 - (1.0 - enter) * 90)
-        y = 82
-        overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
-        draw = ImageDraw.Draw(overlay)
-        draw.rounded_rectangle(
-            (x, y, x + panel_width, y + panel_height),
-            radius=16,
-            fill=(*self.colors["surface"], int(opacity * 0.92)),
-            outline=(*self.colors["cyan"], int(opacity * 0.45)),
-            width=2,
-        )
-        draw.rounded_rectangle((x, y, x + 6, y + panel_height), radius=3, fill=(*self.colors["cyan"], opacity))
-        index_text = f"{index + 1:02d} / {len(self.scenes):02d}"
-        draw.text((x + 22, y + 14), index_text, font=self.fonts.get("mono", 14), fill=(*self.colors["muted"], opacity))
-        draw.text((x + 108, y + 13), str(scene["kicker"]), font=self.fonts.get("bold", 15), fill=(*self.colors["cyan"], opacity))
-        if expanded:
-            draw.text((x + 22, y + 47), str(scene["headline"]), font=self.fonts.get("semibold", 30), fill=(*self.colors["text"], opacity))
-            draw.text((x + 24, y + 83), str(scene["subhead"]), font=self.fonts.get("mono", 13), fill=(*self.colors["muted"], opacity))
-        image.alpha_composite(overlay)
-
-    def _draw_intro_titles(self, image: Image.Image, timestamp: float, scene: dict[str, Any]) -> None:
-        local = timestamp - float(scene["start"])
-        enter = ease_out_cubic((local - 0.65) / 1.25)
-        leave = smoothstep((float(scene["end"]) - timestamp) / 0.85)
-        opacity = int(255 * min(enter, leave))
-        if opacity <= 0:
-            return
-        overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
-        draw = ImageDraw.Draw(overlay)
-        center_x = self.width // 2
-        kicker = str(scene["kicker"])
-        headline = str(scene["headline"])
-        subhead = str(scene["subhead"])
-        draw.text((center_x, 358), "TOOLBRAID", anchor="ma", font=self.fonts.get("bold", 76), fill=(*self.colors["text"], opacity))
-        draw.rounded_rectangle(
-            (475, 434, 1445, 565),
-            radius=28,
-            fill=(*self.colors["background"], int(opacity * 0.70)),
-        )
-        draw.text(
-            (center_x, 455),
-            headline,
-            anchor="ma",
-            font=self.fonts.get("semibold", 42),
-            fill=(*self.colors["text"], opacity),
-            stroke_width=2,
-            stroke_fill=(*self.colors["background"], opacity),
-        )
-        draw.text((center_x, 526), subhead, anchor="ma", font=self.fonts.get("mono", 20), fill=(*self.colors["cyan"], opacity))
-        line_width = int(500 * smoothstep((local - 1.0) / 1.2))
-        draw.line((center_x - line_width, 571, center_x + line_width, 571), fill=(*self.colors["cyan"], int(opacity * 0.50)), width=2)
-        draw.text((center_x, 608), kicker, anchor="ma", font=self.fonts.get("bold", 15), fill=(*self.colors["muted"], opacity))
-        image.alpha_composite(overlay)
 
     def _draw_outro_titles(self, image: Image.Image, timestamp: float, scene: dict[str, Any]) -> None:
         local = timestamp - float(scene["start"])
@@ -731,14 +547,16 @@ class ToolBraidCompositor:
         caption = self.captions.at(timestamp)
         if caption is None:
             return
-        font = self.fonts.get("semibold", 38)
-        lines = self._wrap_text(caption.text, font, 1450)
-        line_height = 49
-        box_height = 34 + line_height * len(lines)
-        box_width = 1560
+        font = self.fonts.get("semibold", 31)
+        lines = self._wrap_text(caption.text, font, 1280)
+        line_height = 40
+        box_height = 24 + line_height * len(lines)
+        measure = ImageDraw.Draw(Image.new("RGB", (1, 1)))
+        text_width = max(measure.textbbox((0, 0), line, font=font)[2] for line in lines)
+        box_width = min(1400, max(620, text_width + 84))
         x1 = (self.width - box_width) // 2
         position = scene.get("captionPosition", "bottom")
-        y1 = 118 if position == "top" else self.height - 78 - box_height
+        y1 = 92 if position == "top" else self.height - 78 - box_height
         opacity = min(
             smoothstep((timestamp - caption.start) / 0.12),
             smoothstep((caption.end - timestamp) / 0.12),
@@ -755,7 +573,7 @@ class ToolBraidCompositor:
         )
         for index, line in enumerate(lines):
             draw.text(
-                (self.width // 2, y1 + 17 + index * line_height),
+                (self.width // 2, y1 + 12 + index * line_height),
                 line,
                 anchor="ma",
                 font=font,
@@ -765,21 +583,6 @@ class ToolBraidCompositor:
             )
         image.alpha_composite(overlay)
 
-    def _draw_disclosure(self, image: Image.Image, timestamp: float, scene: dict[str, Any]) -> None:
-        if scene["id"] != "10-sealed-outcome" or timestamp < 147.0:
-            return
-        overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
-        draw = ImageDraw.Draw(overlay)
-        text = "DETERMINISTIC FIXTURE DEMO  ·  NO PRODUCTION SYSTEM OR PUBLIC STATUS PAGE CHANGED"
-        font = self.fonts.get("mono", 15)
-        bbox = draw.textbbox((0, 0), text, font=font)
-        width = bbox[2] - bbox[0] + 42
-        x = self.width - width - 42
-        y = self.height - 46
-        draw.rounded_rectangle((x, y, x + width, y + 30), radius=10, fill=(1, 8, 15, 224), outline=(*self.colors["amber"], 105), width=1)
-        draw.text((x + 21, y + 7), text, font=font, fill=(*self.colors["amber"], 230))
-        image.alpha_composite(overlay)
-
     def _draw_product_provenance(
         self,
         image: Image.Image,
@@ -787,18 +590,13 @@ class ToolBraidCompositor:
         metadata: dict[str, Any],
     ) -> None:
         provenance = metadata.get("provenance")
-        if metadata.get("kind") != "product" or provenance not in {"public", "local-fixture"}:
+        if metadata.get("kind") != "product" or provenance != "public-sandbox":
             return
-        if provenance == "local-fixture" and timestamp >= 147.0:
-            # Scene 10 already carries the longer deterministic-fixture
-            # disclosure at this point; avoid two competing footer chips.
-            return
-        if provenance == "public":
-            text = "LIVE PUBLIC DEPLOYMENT  ·  NATIVE WEBMCP  ·  READ-ONLY UNTIL HUMAN CHECKPOINT"
-            color = self.colors["green"]
-        else:
-            text = "LOCAL DETERMINISTIC FIXTURE  ·  APPROVAL & EXECUTION  ·  NO EXTERNAL SYSTEM CHANGED"
-            color = self.colors["amber"]
+        text = (
+            "PUBLIC DEPLOYMENT  ·  NATIVE WEBMCP  ·  DETERMINISTIC BROWSER SANDBOX  ·  "
+            "NO EXTERNAL SYSTEM CHANGED"
+        )
+        color = self.colors["green"]
         overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
         draw = ImageDraw.Draw(overlay)
         font = self.fonts.get("mono", 14)
@@ -814,68 +612,6 @@ class ToolBraidCompositor:
             width=1,
         )
         draw.text((x + 19, y + 6), text, font=font, fill=(*color, 236))
-        image.alpha_composite(overlay)
-
-    def _draw_public_url_hook(self, image: Image.Image, timestamp: float, metadata: dict[str, Any]) -> None:
-        url = str(metadata.get("publicUrl") or "https://toolbraid-webmcp.vercel.app")
-        overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
-        draw = ImageDraw.Draw(overlay)
-        local = timestamp - float(self.scenes[0]["start"])
-        visibility = smoothstep(local / 0.45) * smoothstep((8.0 - local) / 0.45)
-        alpha = int(238 * visibility)
-        if alpha <= 0:
-            return
-
-        bar_width = 980
-        bar_height = 58
-        x = (self.width - bar_width) // 2
-        y = 28
-        draw.rounded_rectangle(
-            (x, y, x + bar_width, y + bar_height),
-            radius=21,
-            fill=(2, 10, 18, alpha),
-            outline=(*self.colors["cyan"], int(150 * visibility)),
-            width=2,
-        )
-        dot_x = x + 34
-        dot_y = y + bar_height // 2
-        draw.ellipse(
-            (dot_x - 7, dot_y - 7, dot_x + 7, dot_y + 7),
-            fill=(*self.colors["green"], alpha),
-        )
-        draw.text(
-            (x + 58, y + 17),
-            url,
-            font=self.fonts.get("mono", 19),
-            fill=(*self.colors["text"], alpha),
-        )
-        chip = "LIVE PRODUCT"
-        chip_font = self.fonts.get("semibold", 14)
-        chip_bbox = draw.textbbox((0, 0), chip, font=chip_font)
-        chip_width = chip_bbox[2] - chip_bbox[0] + 30
-        chip_x = x + bar_width - chip_width - 14
-        draw.rounded_rectangle(
-            (chip_x, y + 12, chip_x + chip_width, y + 46),
-            radius=15,
-            fill=(*self.colors["green"], int(35 * visibility)),
-            outline=(*self.colors["green"], int(130 * visibility)),
-            width=1,
-        )
-        draw.text(
-            (chip_x + chip_width // 2, y + 20),
-            chip,
-            anchor="ma",
-            font=chip_font,
-            fill=(*self.colors["green"], alpha),
-        )
-        image.alpha_composite(overlay)
-
-    def _draw_master_chrome(self, image: Image.Image, timestamp: float, scene_index: int) -> None:
-        overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
-        draw = ImageDraw.Draw(overlay)
-        progress = clamp(timestamp / self.duration)
-        draw.rectangle((0, 0, self.width, 4), fill=(7, 21, 34, 230))
-        draw.rectangle((0, 0, int(self.width * progress), 4), fill=(*self.colors["cyan"], 235))
         image.alpha_composite(overlay)
 
     def _apply_scene_transition(self, image: Image.Image, timestamp: float, scene: dict[str, Any]) -> None:
@@ -901,28 +637,14 @@ class ToolBraidCompositor:
         image.alpha_composite(shade)
 
     def render(self, timestamp: float) -> Image.Image:
-        scene_index, scene = self._scene_at(timestamp)
+        _, scene = self._scene_at(timestamp)
         segment = self._segment_at(scene, timestamp)
         base, metadata = self._render_base(timestamp, segment)
         image = base.convert("RGBA")
-        self._draw_highlights(image, timestamp, scene, metadata)
-        if scene["id"] == "01-intro":
-            if metadata.get("kind") == "intro":
-                self._draw_intro_titles(image, timestamp, scene)
-            else:
-                self._draw_public_url_hook(image, timestamp, metadata)
-        elif scene["id"] == "11-outro":
+        if metadata.get("kind") == "outro":
             self._draw_outro_titles(image, timestamp, scene)
-        elif metadata.get("kind") != "diagram" and scene.get("captionPosition") != "top":
-            # Top-caption scenes deliberately move subtitles away from exact
-            # approvals, receipts, and the audit seal clear. Their diagram/UI
-            # already carries the chapter context, so a second top label would
-            # create competing typography and can physically overlap captions.
-            self._draw_scene_label(image, timestamp, scene_index, scene)
-        self._draw_disclosure(image, timestamp, scene)
         self._draw_caption(image, timestamp, scene)
         self._draw_product_provenance(image, timestamp, metadata)
-        self._draw_master_chrome(image, timestamp, scene_index)
         self._apply_scene_transition(image, timestamp, scene)
         return image.convert("RGB")
 
@@ -1005,11 +727,21 @@ def build_audio_mix(
     sample_rate: int,
     start: float,
     duration: float,
+    narration_offset_seconds: float = 0.0,
 ) -> tuple[np.ndarray, dict[str, Any]]:
     sample_count = int(round(duration * sample_rate))
     start_sample = int(round(start * sample_rate))
     if narration_path is not None and narration_path.exists():
-        narration = fit_audio(resampled_audio(narration_path, sample_rate), sample_count, start_sample)
+        source = resampled_audio(narration_path, sample_rate)
+        narration = np.zeros((2, sample_count), dtype=np.float32)
+        offset_sample = int(round(narration_offset_seconds * sample_rate))
+        source_start = max(0, start_sample - offset_sample)
+        destination_start = max(0, offset_sample - start_sample)
+        copy_count = min(source.shape[1] - source_start, sample_count - destination_start)
+        if copy_count > 0:
+            narration[:, destination_start : destination_start + copy_count] = source[
+                :, source_start : source_start + copy_count
+            ]
         narration_present = True
     else:
         narration = np.zeros((2, sample_count), dtype=np.float32)
@@ -1069,6 +801,7 @@ def build_audio_mix(
         "sampleRate": sample_rate,
         "channels": 2,
         "sampleCount": sample_count,
+        "narrationOffsetSeconds": narration_offset_seconds,
         "peakBeforeLimiter": round(peak_before, 7),
         "limiterGain": round(limiter_gain, 7),
         "peak": round(peak_after, 7),
@@ -1266,12 +999,125 @@ def validate_narration_provenance(
             "narration-master-final.wav does not match its locked mastering provenance; "
             "refusing to render. Rerun master-narration.py and update narrationProvenance."
         )
+
+    generation_report = resolve_from_config(config_path, str(provenance["generationReport"]))
+    mastering_report = resolve_from_config(config_path, str(provenance["masteringReport"]))
+    for label, path, hash_field in (
+        ("generationReport", generation_report, "generationReportSha256"),
+        ("masteringReport", mastering_report, "masteringReportSha256"),
+    ):
+        expected_hash = str(provenance.get(hash_field, "")).lower()
+        if len(expected_hash) != 64 or any(character not in "0123456789abcdef" for character in expected_hash):
+            raise ValueError(f"inputs.narrationProvenance.{hash_field} must be a lowercase SHA-256 digest")
+        if not path.is_file() or sha256_file(path) != expected_hash:
+            raise RuntimeError(f"Narration provenance {label} does not match its sealed hash")
+
+    generation_payload = json.loads(generation_report.read_text(encoding="utf-8"))
+    mastering_payload = json.loads(mastering_report.read_text(encoding="utf-8"))
+    if generation_payload.get("status") not in {"PASS", "PASS_REQUIRES_DECLIP"}:
+        raise RuntimeError("IndexTTS generation report is not accepted")
+    if mastering_payload.get("status") != "PASS":
+        raise RuntimeError("Narration mastering report is not PASS")
+    if mastering_payload.get("input", {}).get("sha256") != actual_source:
+        raise RuntimeError("Mastering report input hash does not match narration-master.wav")
+    if mastering_payload.get("output", {}).get("sha256") != actual_mastered:
+        raise RuntimeError("Mastering report output hash does not match narration-master-final.wav")
+    if generation_payload.get("qualityGates", {}).get("premiumDeclipRequired"):
+        plugins = mastering_payload.get("processing", {}).get("voiceCleanup", {}).get("plugins", [])
+        names = {str(plugin.get("name")) for plugin in plugins if isinstance(plugin, dict)}
+        if "iZotope RX 12 De-clip" not in names:
+            raise RuntimeError("Raw IndexTTS clipping requires the sealed premium de-clip stage")
     return {
         "source": str(source),
         "sourceSha256": actual_source,
         "mastered": str(mastered),
         "masteredSha256": actual_mastered,
+        "generationReport": str(generation_report),
+        "generationReportSha256": sha256_file(generation_report),
+        "masteringReport": str(mastering_report),
+        "masteringReportSha256": sha256_file(mastering_report),
         "verified": True,
+    }
+
+
+def validate_capture_provenance(
+    config: dict[str, Any],
+    config_path: Path,
+    product_paths: dict[str, Path],
+) -> dict[str, Any]:
+    inputs = config["inputs"]
+    provenance_root = inputs.get("productProvenance")
+    if not isinstance(provenance_root, dict):
+        raise ValueError("inputs.productProvenance is required")
+    provenance = provenance_root.get("public-full")
+    if not isinstance(provenance, dict):
+        raise ValueError("inputs.productProvenance.public-full is required")
+    video = product_paths["public-full"]
+    report = resolve_from_config(config_path, str(provenance["report"]))
+    timeline = resolve_from_config(config_path, str(provenance["timeline"]))
+    cursor_trace = resolve_from_config(config_path, str(inputs["cursorTrace"]))
+    if cursor_trace != timeline:
+        raise ValueError("inputs.cursorTrace must be the sealed public-full capture timeline")
+
+    actual_hashes = {
+        "videoSha256": sha256_file(video),
+        "reportSha256": sha256_file(report),
+        "timelineSha256": sha256_file(timeline),
+    }
+    for field, actual in actual_hashes.items():
+        expected = str(provenance.get(field, "")).lower()
+        if len(expected) != 64 or any(character not in "0123456789abcdef" for character in expected):
+            raise ValueError(f"inputs.productProvenance.public-full.{field} must be a SHA-256 digest")
+        if expected != actual:
+            raise RuntimeError(f"Public capture provenance mismatch for {field}: {actual} != {expected}")
+
+    report_payload = json.loads(report.read_text(encoding="utf-8"))
+    timeline_payload = json.loads(timeline.read_text(encoding="utf-8"))
+    expected_fields = {
+        "status": "PASS",
+        "target": "public-full",
+        "url": "https://toolbraid-webmcp.vercel.app",
+        "runtime": "native",
+        "executionMode": "public-sandbox-full",
+        "publicSandboxExecution": True,
+        "mutationExecution": True,
+        "auditVerified": True,
+        "unexpectedBrowserErrors": 0,
+    }
+    mismatches = {
+        field: {"expected": expected, "actual": report_payload.get(field)}
+        for field, expected in expected_fields.items()
+        if report_payload.get(field) != expected
+    }
+    if mismatches:
+        raise RuntimeError(f"Public capture report failed provenance checks: {mismatches}")
+    if report_payload.get("video", {}).get("sha256") != actual_hashes["videoSha256"]:
+        raise RuntimeError("Public capture report video hash does not match the source file")
+    cursor = report_payload.get("cursorTrace", {})
+    if cursor.get("cspBypassed") is not False or cursor.get("rawCaptureOverlay") is not False:
+        raise RuntimeError("Public capture must preserve production CSP and composite its cursor afterward")
+    expected_counts = {
+        "providers": 6,
+        "discoveredTools": 9,
+        "quarantined": 1,
+        "safeResults": 7,
+        "approvals": 2,
+    }
+    if report_payload.get("counts") != expected_counts:
+        raise RuntimeError("Public capture report counts drifted from the judge scenario")
+    if timeline_payload.get("target") != "public-full" or timeline_payload.get("url") != expected_fields["url"]:
+        raise RuntimeError("Public capture timeline target or URL is invalid")
+    pointer_trace = timeline_payload.get("pointerTrace")
+    if not isinstance(pointer_trace, list) or len(pointer_trace) < 100:
+        raise RuntimeError("Public capture pointer trace is missing or implausibly short")
+    return {
+        "video": str(video),
+        "report": str(report),
+        "timeline": str(timeline),
+        **actual_hashes,
+        "verified": True,
+        "cspBypassed": False,
+        "pointerTraceSamples": len(pointer_trace),
     }
 
 
@@ -1281,22 +1127,45 @@ def validate_config(
     *,
     allow_missing_audio: bool = False,
 ) -> dict[str, Any]:
+    if config.get("format") != "toolbraid-final-render-config-v2":
+        raise ValueError("Render config must use toolbraid-final-render-config-v2")
+
     master = config["master"]
-    if (int(master["width"]), int(master["height"]), int(master["fps"])) != (1920, 1080, 30):
-        raise ValueError("The challenge master is locked to 1920x1080 at 30 fps")
-    if float(master["durationSeconds"]) != 162.0:
-        raise ValueError("The challenge master duration is locked to exactly 162 seconds")
-    editing_policy = config.get("editingPolicy")
-    expected_policy = {
+    width = int(master["width"])
+    height = int(master["height"])
+    fps = int(master["fps"])
+    master_duration = float(master["durationSeconds"])
+    sample_rate = int(master["sampleRate"])
+    channels = int(master["channels"])
+    if width <= 0 or height <= 0 or width % 2 or height % 2:
+        raise ValueError("Master dimensions must be positive even integers")
+    if fps <= 0 or sample_rate <= 0 or channels != 2:
+        raise ValueError("Master fps/sample rate must be positive and channels must equal 2")
+    if master_duration <= 3.0:
+        raise ValueError("Master duration must leave room for product capture plus outro")
+    expected_frames = master_duration * fps
+    if abs(expected_frames - round(expected_frames)) > 1e-6:
+        raise ValueError("master.durationSeconds * master.fps must produce an integer frame count")
+
+    narration_offset = float(config["inputs"].get("narrationOffsetSeconds", 0.0))
+    if narration_offset < 0.0 or narration_offset > 2.0:
+        raise ValueError("inputs.narrationOffsetSeconds must be between 0 and 2 seconds")
+
+    editing_policy = config.get("editingPolicy") or {}
+    required_policy = {
         "interactivePlayback": "linear-1x",
         "allowInteractiveReplay": False,
         "allowInteractiveZoom": False,
-        "crossSourceTimeline": "synchronized-semantic-clock",
         "defaultSceneTransition": "cut",
         "repetitivePulse": False,
     }
-    if editing_policy != expected_policy:
-        raise ValueError(f"editingPolicy must be the locked natural-edit policy: {expected_policy}")
+    policy_mismatches = {
+        key: {"expected": expected, "actual": editing_policy.get(key)}
+        for key, expected in required_policy.items()
+        if editing_policy.get(key) != expected
+    }
+    if policy_mismatches:
+        raise ValueError(f"editingPolicy violates the locked natural-edit policy: {policy_mismatches}")
 
     configured_products = config["inputs"].get("productVideos")
     if isinstance(configured_products, dict) and configured_products:
@@ -1304,15 +1173,14 @@ def validate_config(
             str(key): resolve_from_config(config_path, str(value))
             for key, value in configured_products.items()
         }
-        default_key = str(config["inputs"].get("defaultProductVideo", next(iter(product_paths))))
-        if default_key not in product_paths:
-            raise ValueError(
-                f"Unknown defaultProductVideo {default_key!r}; available sources are {sorted(product_paths)}"
-            )
+        default_key = str(config["inputs"].get("defaultProductVideo", "public-full"))
     else:
-        product_paths = {
-            "default": resolve_from_config(config_path, config["inputs"]["productVideo"])
-        }
+        product_paths = {}
+        default_key = "public-full"
+    if "public-full" not in product_paths:
+        raise ValueError("inputs.productVideos must declare the public-full deployed capture")
+    if default_key != "public-full":
+        raise ValueError("inputs.defaultProductVideo must be public-full")
     logo = resolve_from_config(config_path, config["inputs"]["logo"])
     for required in (*product_paths.values(), logo):
         if not required.exists():
@@ -1322,105 +1190,132 @@ def validate_config(
     for source_key, product_path in product_paths.items():
         with av.open(str(product_path)) as container:
             source_durations[source_key] = float(container.duration or 0) / AV_TIME_BASE
+            if not container.streams.video:
+                raise ValueError(f"Product source has no video stream: {product_path}")
+            stream = container.streams.video[0]
+            source_width = int(stream.codec_context.width)
+            source_height = int(stream.codec_context.height)
+            source_fps = float(stream.average_rate or 0.0)
+            if (source_width, source_height) != (width, height):
+                raise ValueError(
+                    f"Product source {source_key!r} must match master dimensions exactly: "
+                    f"{source_width}x{source_height} != {width}x{height}"
+                )
+            if abs(source_fps - fps) > 1e-6:
+                raise ValueError(
+                    f"Product source {source_key!r} must match master fps exactly: "
+                    f"{source_fps:g} != {fps}"
+                )
 
     scenes = config["scenes"]
-    if len(scenes) != 11:
-        raise ValueError(f"Expected exactly 11 scenes, got {len(scenes)}")
-    source_cursors: dict[str, float] = {}
-    synchronized_product_cursor: float | None = None
+    if len(scenes) != 2:
+        raise ValueError(f"Expected exactly two scenes (public capture + outro), got {len(scenes)}")
+    flattened_segments: list[tuple[dict[str, Any], dict[str, Any]]] = []
     cursor = 0.0
     for scene in scenes:
         start, end = float(scene["start"]), float(scene["end"])
         if abs(start - cursor) > 1e-6 or end <= start:
             raise ValueError(f"Scene timeline is not contiguous at {scene['id']}")
         transition = str(scene.get("transition", editing_policy["defaultSceneTransition"]))
-        if transition not in {"cut", "fade-from-black", "fade-to-black"}:
-            raise ValueError(f"Unsupported scene transition {transition!r} in {scene['id']}")
+        if transition != "cut":
+            raise ValueError(f"Scene {scene['id']} must use a hard cut; got {transition!r}")
+        if scene.get("highlights"):
+            raise ValueError(f"Scene {scene['id']} cannot overlay synthetic highlight animation")
 
         segment_cursor = start
-        for segment in scene["segments"]:
+        segments = scene["segments"]
+        if len(segments) != 1:
+            raise ValueError(f"Scene {scene['id']} must contain exactly one continuous segment")
+        for segment in segments:
             segment_start, segment_end = float(segment["start"]), float(segment["end"])
             if abs(segment_start - segment_cursor) > 1e-6 or segment_end <= segment_start:
                 raise ValueError(f"Segment timeline is not contiguous in {scene['id']} at {segment_start}")
             segment_cursor = segment_end
-            kind = segment["kind"]
-            if kind == "diagram":
-                asset = resolve_from_config(config_path, segment["asset"])
-                if not asset.exists():
-                    raise FileNotFoundError(asset)
-                continue
-            if kind in {"intro", "outro"}:
-                continue
-            if kind != "product":
-                raise ValueError(f"Unsupported segment kind {kind!r} in {scene['id']}")
-
-            source_key = str(segment.get("source", default_key))
-            if source_key not in product_paths:
-                raise ValueError(f"Scene {scene['id']} references unknown product source {source_key!r}")
-            if segment.get("playback") != "linear-1x":
-                raise ValueError(f"Interactive segment in {scene['id']} must declare playback='linear-1x'")
-            forbidden_retime = {"speed", "rate", "timeScale", "retime", "reverse"}.intersection(segment)
-            if forbidden_retime:
-                raise ValueError(
-                    f"Interactive segment in {scene['id']} declares forbidden retiming fields: "
-                    f"{sorted(forbidden_retime)}"
-                )
-            if "zoom" in segment:
-                raise ValueError(
-                    f"Interactive segment in {scene['id']} declares zoom; cursor footage must remain full-frame"
-                )
-
-            source_start = float(segment["sourceStart"])
-            source_end = float(segment["sourceEnd"])
-            timeline_duration = segment_end - segment_start
-            source_duration = source_end - source_start
-            if source_start < 0.0 or source_end <= source_start:
-                raise ValueError(f"Invalid source interval in {scene['id']}: {source_start}..{source_end}")
-            if abs(timeline_duration - source_duration) > 1e-6:
-                raise ValueError(
-                    f"Interactive retiming is forbidden in {scene['id']}: timeline={timeline_duration:.6f}s, "
-                    f"source={source_duration:.6f}s"
-                )
-            previous_end = source_cursors.get(source_key)
-            if previous_end is not None and source_start < previous_end - 1e-6:
-                raise ValueError(
-                    f"Interactive replay/backtracking is forbidden for {source_key!r} in {scene['id']}: "
-                    f"sourceStart={source_start:.6f} precedes prior sourceEnd={previous_end:.6f}"
-                )
-            source_cursors[source_key] = source_end
-            if (
-                synchronized_product_cursor is not None
-                and source_start < synchronized_product_cursor - 1e-6
-            ):
-                raise ValueError(
-                    "Interactive replay/backtracking is forbidden across synchronized product "
-                    f"sources in {scene['id']}: {source_key!r} sourceStart={source_start:.6f} "
-                    f"precedes global prior sourceEnd={synchronized_product_cursor:.6f}"
-                )
-            synchronized_product_cursor = source_end
-            if source_end > source_durations[source_key] + (1.0 / int(master["fps"])):
-                raise ValueError(
-                    f"Interactive segment in {scene['id']} exceeds {source_key!r} duration "
-                    f"({source_end:.3f}s > {source_durations[source_key]:.3f}s)"
-                )
+            flattened_segments.append((scene, segment))
         if abs(segment_cursor - end) > 1e-6:
             raise ValueError(f"Segment timeline in {scene['id']} ends at {segment_cursor}, expected {end}")
         cursor = end
-    if abs(cursor - 162.0) > 1e-6:
-        raise ValueError(f"Scene timeline ends at {cursor}, expected 162")
 
-    return validate_narration_provenance(
-        config,
-        config_path,
-        allow_absent=allow_missing_audio,
-    )
+    if abs(cursor - master_duration) > 1e-6:
+        raise ValueError(f"Scene timeline ends at {cursor}, expected master duration {master_duration}")
+
+    product_scene, product = flattened_segments[0]
+    outro_scene, outro = flattened_segments[1]
+    if product.get("kind") != "product" or outro.get("kind") != "outro":
+        raise ValueError("Timeline must be exactly one product segment followed by one generated outro")
+    if float(product["start"]) != 0.0 or float(product["end"]) != float(outro["start"]):
+        raise ValueError("The public product capture must be one uninterrupted segment from 0s to the outro")
+    if float(outro["end"]) != master_duration:
+        raise ValueError("The outro must end exactly at master.durationSeconds")
+    outro_duration = float(outro["end"]) - float(outro["start"])
+    if outro_duration <= 0.0 or outro_duration > 3.0:
+        raise ValueError(f"Generated outro duration must be >0 and <=3 seconds; got {outro_duration}")
+    for field in ("kicker", "headline", "subhead"):
+        if not str(outro_scene.get(field, "")).strip():
+            raise ValueError(f"Outro scene requires non-empty {field}")
+
+    forbidden_fields = {
+        "asset",
+        "effect",
+        "loop",
+        "motion",
+        "rate",
+        "replay",
+        "retime",
+        "reverse",
+        "speed",
+        "timeScale",
+        "zoom",
+    }
+    forbidden = forbidden_fields.intersection(product)
+    if forbidden:
+        raise ValueError(f"Public capture declares forbidden transforms: {sorted(forbidden)}")
+    outro_forbidden = forbidden_fields.intersection(outro)
+    if outro_forbidden:
+        raise ValueError(f"Outro declares forbidden source/motion fields: {sorted(outro_forbidden)}")
+    source_key = str(product.get("source", default_key))
+    if source_key != "public-full":
+        raise ValueError("The continuous product segment must use source='public-full'")
+    if product.get("playback") != "linear-1x":
+        raise ValueError("The continuous product segment must declare playback='linear-1x'")
+    if product.get("provenance") != "public-sandbox":
+        raise ValueError("The deployed capture must declare provenance='public-sandbox'")
+    expected_public_url = "https://toolbraid-webmcp.vercel.app"
+    if product.get("publicUrl") != expected_public_url:
+        raise ValueError(f"The deployed capture must declare publicUrl={expected_public_url!r}")
+
+    source_start = float(product["sourceStart"])
+    source_end = float(product["sourceEnd"])
+    timeline_duration = float(product["end"]) - float(product["start"])
+    source_duration = source_end - source_start
+    if source_start < 0.0 or source_end <= source_start:
+        raise ValueError(f"Invalid public-full source interval: {source_start}..{source_end}")
+    if abs(timeline_duration - source_duration) > 1e-6:
+        raise ValueError(
+            "Public capture must remain strictly 1x: "
+            f"timeline={timeline_duration:.6f}s, source={source_duration:.6f}s"
+        )
+    if source_end > source_durations[source_key] + (1.0 / fps):
+        raise ValueError(
+            f"Public capture exceeds its source duration ({source_end:.3f}s > "
+            f"{source_durations[source_key]:.3f}s)"
+        )
+
+    return {
+        "narration": validate_narration_provenance(
+            config,
+            config_path,
+            allow_absent=allow_missing_audio,
+        ),
+        "capture": validate_capture_provenance(config, config_path, product_paths),
+    }
 
 
 def render_master(args: argparse.Namespace) -> dict[str, Any]:
     config_path = Path(args.config).resolve()
     config = json.loads(config_path.read_text(encoding="utf-8"))
     allow_missing_audio = bool(args.smoke or args.allow_missing_audio)
-    narration_provenance = validate_config(
+    provenance = validate_config(
         config,
         config_path,
         allow_missing_audio=allow_missing_audio,
@@ -1432,8 +1327,8 @@ def render_master(args: argparse.Namespace) -> dict[str, Any]:
     video_bit_rate = int(master.get("videoBitrate", 16_000_000))
 
     smoke = bool(args.smoke)
-    start = float(args.start if args.start is not None else (21.0 if smoke else 0.0))
-    duration = float(args.duration if args.duration is not None else (4.0 if smoke else full_duration))
+    start = float(args.start if args.start is not None else 0.0)
+    duration = float(args.duration if args.duration is not None else (min(4.0, full_duration) if smoke else full_duration))
     if start < 0.0 or duration <= 0.0 or start + duration > full_duration + 1e-6:
         raise ValueError(f"Invalid render window start={start}, duration={duration}, master={full_duration}")
 
@@ -1453,13 +1348,18 @@ def render_master(args: argparse.Namespace) -> dict[str, Any]:
     if not smoke and not captions_path.exists():
         raise FileNotFoundError(f"Caption timings are required for a full render: {captions_path}")
 
-    captions = CaptionTrack(captions_path if captions_path.exists() else None)
+    narration_offset = float(config["inputs"].get("narrationOffsetSeconds", 0.0))
+    captions = CaptionTrack(
+        captions_path if captions_path.exists() else None,
+        offset_seconds=narration_offset,
+    )
     audio, audio_report = build_audio_mix(
         narration if narration.exists() else None,
         None if args.no_ambient else (ambient if ambient.exists() else None),
         sample_rate,
         start,
         duration,
+        narration_offset,
     )
 
     codec, codec_checks = choose_codec(
@@ -1572,7 +1472,7 @@ def render_master(args: argparse.Namespace) -> dict[str, Any]:
         },
     }
     report = {
-        "format": "toolbraid-final-render-report-v1",
+        "format": "toolbraid-final-render-report-v2",
         "generatedAt": finished_at.isoformat(),
         "output": str(output),
         "smokeRender": smoke,
@@ -1583,6 +1483,20 @@ def render_master(args: argparse.Namespace) -> dict[str, Any]:
             "fps": fps,
             "durationSeconds": full_duration,
             "sceneCount": len(config["scenes"]),
+        },
+        "contentModel": {
+            "productSegments": 1,
+            "outroSegments": 1,
+            "productSource": "public-full",
+            "productPlayback": "linear-1x",
+            "productProvenance": "public-sandbox",
+            "publicUrl": "https://toolbraid-webmcp.vercel.app",
+            "disclosure": (
+                "Public deployment; native WebMCP executes in a deterministic browser sandbox; "
+                "no external system is changed."
+            ),
+            "generatedOutro": True,
+            "reusesBrowserFrameForOutro": False,
         },
         "encoded": {
             "videoCodec": codec,
@@ -1601,11 +1515,13 @@ def render_master(args: argparse.Namespace) -> dict[str, Any]:
             "narration": str(narration),
             "preferredFinalPresent": narration_final.exists(),
             "ambient": str(ambient) if ambient.exists() and not args.no_ambient else None,
-            "narrationProvenance": narration_provenance,
+            "narrationProvenance": provenance["narration"],
+            "narrationOffsetSeconds": narration_offset,
         },
         "videoSources": {
             key: str(path) for key, path in video_source_paths.items()
         },
+        "captureProvenance": provenance["capture"],
         "captions": {
             "path": str(captions_path),
             "present": captions_path.exists(),
@@ -1652,7 +1568,12 @@ def main(argv: list[str] | None = None) -> int:
         allow_missing_audio=bool(args.smoke or args.allow_missing_audio),
     )
     if args.validate_only:
-        print("ToolBraid compositor validation passed: 11 scenes, 1920x1080/30, 162 seconds.")
+        master = config["master"]
+        print(
+            "ToolBraid compositor validation passed: "
+            f"2 scenes, {int(master['width'])}x{int(master['height'])}/"
+            f"{int(master['fps'])}, {float(master['durationSeconds']):.3f} seconds."
+        )
         return 0
     render_master(args)
     return 0
