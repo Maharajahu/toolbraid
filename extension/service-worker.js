@@ -8,6 +8,22 @@ import {
 } from './protocol.js';
 import { createUniversalBridge } from './bridge.js';
 import { TabLifecycleRegistry, sessionBinding } from './lifecycle.js';
+import { createChromeStorageAdapter } from '../src/persistence/index.js';
+import {
+  createGitHubAdapter,
+  createSiteAdapterRegistry,
+  createVercelAdapter,
+} from '../src/site-adapters/index.js';
+import { HANDOFF_STATES, syntheticUiIntent } from '../src/runtime/handoff-broker.js';
+import {
+  HANDOFF_UI_MESSAGE_TYPES,
+  createExtensionHandoffRuntime,
+  isHandoffUiMessageType,
+} from './handoff-runtime.js';
+import {
+  createExtensionMissionRuntime,
+  isMissionUiMessageType,
+} from './mission-runtime.js';
 import {
   asExtensionRuntimeError,
   createExtensionUniversalRuntime,
@@ -15,6 +31,13 @@ import {
 } from './universal-runtime.js';
 
 const PAGE_LIFECYCLE_PORT = 'toolbraid:page-lifecycle';
+const HANDOFF_KEY_STORAGE_KEY = 'toolbraid.extension.handoff.key.v1';
+const HANDOFF_SURFACE_KIND = 'toolbraid.sidepanel-created-handoff-surface';
+const HANDOFF_SURFACE_CREATOR = 'sidepanel';
+const SAFE_ERROR_CODE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/;
+const POSTCONDITION_ADAPTERS = createSiteAdapterRegistry({
+  adapters: [createGitHubAdapter(), createVercelAdapter()],
+});
 
 function fail(code, message, details = {}) {
   return { ok: false, error: { code, message, details }, provenance: PROVENANCE };
@@ -26,6 +49,67 @@ function validTabId(tabId) {
 
 function validFrameId(frameId) {
   return Number.isInteger(frameId) && frameId >= 0;
+}
+
+function safeFailure(error, fallbackCode = 'EXTENSION_RUNTIME_FAILED', fallbackMessage = 'ToolBraid rejected the request safely.') {
+  const code = typeof error?.code === 'string' && SAFE_ERROR_CODE.test(error.code)
+    ? error.code
+    : fallbackCode;
+  const message = typeof error?.message === 'string' && error.message.length <= 320
+    ? error.message
+    : fallbackMessage;
+  return fail(code, message, {});
+}
+
+function exactOrigin(value) {
+  try {
+    const url = new URL(value);
+    return ['http:', 'https:'].includes(url.protocol) ? url.origin : null;
+  } catch {
+    return null;
+  }
+}
+
+function handoffSecret(cryptoRef) {
+  if (!cryptoRef || typeof cryptoRef.getRandomValues !== 'function') {
+    throw new ProtocolError('CRYPTO_UNAVAILABLE', 'Secure handoff key generation is unavailable.');
+  }
+  const bytes = new Uint8Array(32);
+  cryptoRef.getRandomValues(bytes);
+  return [...bytes].map((value) => value.toString(16).padStart(2, '0')).join('');
+}
+
+function handoffIntent(state, intent) {
+  return syntheticUiIntent({
+    handoffId: state.handoffId,
+    type: state.type,
+    missionId: state.missionId,
+    memberId: state.memberId,
+    sessionId: state.sessionId,
+    pageFingerprint: state.pageFingerprint,
+    targetFingerprint: state.targetFingerprint,
+    purpose: state.purpose,
+    safeOrigin: state.safeOrigin,
+    intent,
+  });
+}
+
+function handoffProof(state) {
+  return {
+    kind: 'toolbraid.completion-proof',
+    fresh: true,
+    handoffId: state.handoffId,
+    type: state.type,
+    binding: {
+      missionId: state.missionId,
+      memberId: state.memberId,
+      sessionId: state.sessionId,
+      pageFingerprint: state.pageFingerprint,
+      targetFingerprint: state.targetFingerprint,
+      purpose: state.purpose,
+      safeOrigin: state.safeOrigin,
+    },
+  };
 }
 
 function extensionPageSender(chromeApi, sender, expectedPath = null) {
@@ -84,6 +168,7 @@ export function createServiceWorkerController({
   registry = new TabLifecycleRegistry(),
   sendToContentScript = null,
   executeHandler = null,
+  cryptoRef = globalThis.crypto,
 } = {}) {
   if (!chromeApi) throw new TypeError('chromeApi is required.');
   const send = sendToContentScript ?? (async (tabId, message, { frameId = 0 } = {}) => {
@@ -92,6 +177,15 @@ export function createServiceWorkerController({
   });
   const bridge = createUniversalBridge({ registry, sendToContentScript: send, executeHandler });
   let universalPromise = null;
+  let missionPromise = null;
+  let handoffPromise = null;
+  const surfaceLifecycle = new Map();
+  const handoffSurfaces = new Map();
+  const lifecycleForHandoff = Object.freeze({
+    get(tabId, frameId = 0) {
+      return surfaceLifecycle.get(`${tabId}:${frameId}`) ?? registry.get(tabId, frameId);
+    },
+  });
 
   function ensureUniversalRuntime() {
     if (!universalPromise) {
@@ -100,6 +194,7 @@ export function createServiceWorkerController({
         registry,
         bridge,
         sendToContentScript: send,
+        postconditionAdapterRegistry: POSTCONDITION_ADAPTERS,
       }).catch((error) => {
         universalPromise = null;
         throw error;
@@ -108,11 +203,208 @@ export function createServiceWorkerController({
     return universalPromise;
   }
 
+  function ensureMissionRuntime() {
+    if (!missionPromise) {
+      missionPromise = ensureUniversalRuntime()
+        .then((universal) => createExtensionMissionRuntime({
+          lifecycleRegistry: registry,
+          universalRuntime: universal.runtime,
+          store: createChromeStorageAdapter(chromeApi.storage.local),
+        }))
+        .catch((error) => {
+          missionPromise = null;
+          throw error;
+        });
+    }
+    return missionPromise;
+  }
+
+  function ensureHandoffRuntime() {
+    if (!handoffPromise) {
+      handoffPromise = ensureMissionRuntime()
+        .then(async (mission) => {
+          const storageArea = chromeApi.storage.session ?? chromeApi.storage.local;
+          const keyStore = createChromeStorageAdapter(storageArea);
+          let persistenceKey = await keyStore.get(HANDOFF_KEY_STORAGE_KEY);
+          if (persistenceKey === undefined) {
+            persistenceKey = handoffSecret(cryptoRef);
+            await keyStore.set(HANDOFF_KEY_STORAGE_KEY, persistenceKey);
+          }
+          if (typeof persistenceKey !== 'string' || !/^[a-f0-9]{64}$/.test(persistenceKey)) {
+            throw new ProtocolError('HANDOFF_KEY_INVALID', 'The extension handoff key is invalid.');
+          }
+          return createExtensionHandoffRuntime({
+            storageArea,
+            persistenceKey,
+            mission,
+            lifecycle: lifecycleForHandoff,
+            validateMissionBinding: (binding) => mission.validateBinding(binding),
+            validateUiIntent: (token, expected) => token?.kind === 'toolbraid.synthetic-ui-intent'
+              && token?.handoffId === expected.handoffId
+              && token?.type === expected.type
+              && token?.intent === expected.intent
+              && token?.missionId === expected.missionId
+              && token?.memberId === expected.memberId
+              && token?.sessionId === expected.sessionId
+              && token?.pageFingerprint === expected.pageFingerprint
+              && token?.targetFingerprint === expected.targetFingerprint
+              && token?.purpose === expected.purpose
+              && token?.safeOrigin === expected.safeOrigin,
+            validateCompletionProof: (proof, expected) => proof?.kind === 'toolbraid.completion-proof'
+              && proof?.fresh === true
+              && proof?.handoffId === expected.handoffId
+              && proof?.type === expected.type
+              && proof?.binding?.missionId === expected.missionId
+              && proof?.binding?.memberId === expected.memberId
+              && proof?.binding?.sessionId === expected.sessionId
+              && proof?.binding?.pageFingerprint === expected.pageFingerprint
+              && proof?.binding?.targetFingerprint === expected.targetFingerprint
+              && proof?.binding?.purpose === expected.purpose
+              && proof?.binding?.safeOrigin === expected.safeOrigin,
+          });
+        })
+        .catch((error) => {
+          handoffPromise = null;
+          throw error;
+        });
+    }
+    return handoffPromise;
+  }
+
   function closeUniversalSessions(sessions, reason) {
     if (!universalPromise || !sessions?.length) return;
     void universalPromise.then((universal) => Promise.allSettled(
       sessions.map((session) => universal.closeSession(session, reason)),
     ));
+  }
+
+  async function browserTab(tabId) {
+    if (!validTabId(tabId) || typeof chromeApi.tabs?.get !== 'function') {
+      throw new ProtocolError('HANDOFF_SURFACE_UNAVAILABLE', 'The human handoff tab is unavailable.');
+    }
+    const tab = await chromeApi.tabs.get(tabId);
+    if (!validTabId(tab?.id) || !Number.isInteger(tab?.windowId)) {
+      throw new ProtocolError('HANDOFF_SURFACE_UNAVAILABLE', 'The human handoff tab is unavailable.');
+    }
+    return tab;
+  }
+
+  async function canonicalHandoffSurface(state, surfaceTabId) {
+    const mission = await ensureMissionRuntime();
+    const source = mission.getBinding(state.missionId, state.memberId);
+    const session = registry.get(source.tabId, source.frameId);
+    if (!session || session.sessionId !== state.sessionId) {
+      throw new ProtocolError('HANDOFF_SOURCE_DRIFT', 'The source page session is no longer current.');
+    }
+    const [sourceTab, surfaceTab] = await Promise.all([
+      browserTab(source.tabId),
+      browserTab(surfaceTabId),
+    ]);
+    const surfaceOrigin = exactOrigin(surfaceTab.url ?? surfaceTab.pendingUrl);
+    if (!surfaceOrigin || surfaceOrigin !== state.safeOrigin) {
+      throw new ProtocolError('HANDOFF_SURFACE_ORIGIN_MISMATCH', 'The human handoff tab is not on the exact approved origin.');
+    }
+    const binding = {
+      missionId: state.missionId,
+      memberId: state.memberId,
+      sessionId: state.sessionId,
+      pageFingerprint: state.pageFingerprint,
+      targetFingerprint: state.targetFingerprint,
+      purpose: state.purpose,
+      safeOrigin: state.safeOrigin,
+      tabId: source.tabId,
+      frameId: source.frameId,
+      windowId: sourceTab.windowId,
+      documentId: session.documentId ?? null,
+      pageInstanceId: session.pageInstanceId ?? null,
+      origin: source.origin,
+    };
+    const surface = Object.freeze({
+      kind: HANDOFF_SURFACE_KIND,
+      createdBy: HANDOFF_SURFACE_CREATOR,
+      surfaceId: `surface-${surfaceTab.id}-${state.handoffId.slice(0, 24)}`,
+      tabId: surfaceTab.id,
+      frameId: 0,
+      windowId: surfaceTab.windowId,
+      origin: surfaceOrigin,
+      binding: Object.freeze(binding),
+    });
+    surfaceLifecycle.set(`${surface.tabId}:${surface.frameId}`, Object.freeze({ ...surface, state: 'active' }));
+    handoffSurfaces.set(state.handoffId, surface);
+    return surface;
+  }
+
+  async function refreshHandoffSurface(handoffId) {
+    const surface = handoffSurfaces.get(handoffId);
+    if (!surface) throw new ProtocolError('HANDOFF_SURFACE_REQUIRED', 'Open the human handoff again from the side panel.');
+    const tab = await browserTab(surface.tabId);
+    const origin = exactOrigin(tab.url ?? tab.pendingUrl);
+    if (tab.windowId !== surface.windowId || origin !== surface.origin) {
+      surfaceLifecycle.delete(`${surface.tabId}:${surface.frameId}`);
+      handoffSurfaces.delete(handoffId);
+      throw new ProtocolError('HANDOFF_SURFACE_DRIFT', 'The human handoff tab changed or closed.');
+    }
+    surfaceLifecycle.set(`${surface.tabId}:${surface.frameId}`, Object.freeze({ ...surface, state: 'active' }));
+    return surface;
+  }
+
+  async function handleHandoffUiMessage(type, payload = {}) {
+    const handoff = await ensureHandoffRuntime();
+    if (type === HANDOFF_UI_MESSAGE_TYPES.GET_STATE) {
+      return { ok: true, state: { handoffs: handoff.list() }, provenance: PROVENANCE };
+    }
+    if (type === HANDOFF_UI_MESSAGE_TYPES.REQUEST) {
+      const mission = await ensureMissionRuntime();
+      const binding = mission.getBinding(payload.missionId, payload.memberId);
+      const sourceTab = await browserTab(binding.tabId);
+      const state = await handoff.request({
+        ...(typeof payload.handoffId === 'string' ? { handoffId: payload.handoffId } : {}),
+        ...(Number.isFinite(payload.ttlMs) ? { ttlMs: payload.ttlMs } : {}),
+        type: payload.type,
+        missionId: binding.missionId,
+        memberId: binding.memberId,
+        sessionId: binding.sessionId,
+        pageFingerprint: binding.pageFingerprint,
+        targetFingerprint: payload.targetFingerprint ?? binding.pageFingerprint,
+        purpose: payload.purpose,
+        tabId: binding.tabId,
+        frameId: binding.frameId,
+        windowId: sourceTab.windowId,
+        origin: binding.origin,
+        safeOrigin: binding.origin,
+      });
+      return { ok: true, result: state, provenance: PROVENANCE };
+    }
+    if (type === HANDOFF_UI_MESSAGE_TYPES.OPEN_SURFACE) {
+      const handoffId = payload.handoffId;
+      let state = handoff.state(handoffId);
+      const surface = await canonicalHandoffSurface(state, payload.surfaceTabId);
+      if (state.state === HANDOFF_STATES.AWAITING_UI_GESTURE) {
+        state = await handoff.open({ handoffId, uiIntent: handoffIntent(state, 'open') });
+      }
+      if (state.state === HANDOFF_STATES.OPENING) {
+        state = await handoff.commit({ handoffId, surface });
+      }
+      if (state.state !== HANDOFF_STATES.HUMAN_ACTIVE) {
+        throw new ProtocolError('HANDOFF_STATE_INVALID', 'The human handoff could not become active.');
+      }
+      return { ok: true, result: state, provenance: PROVENANCE };
+    }
+    if (type === HANDOFF_UI_MESSAGE_TYPES.COMPLETE) {
+      const handoffId = payload.handoffId;
+      const state = handoff.state(handoffId);
+      const surface = await refreshHandoffSurface(handoffId);
+      const completed = await handoff.return({
+        handoffId,
+        surface,
+        uiIntent: handoffIntent(state, 'complete'),
+        completionProof: handoffProof(state),
+      });
+      surfaceLifecycle.delete(`${surface.tabId}:${surface.frameId}`);
+      handoffSurfaces.delete(handoffId);
+      return { ok: true, result: completed, provenance: PROVENANCE };
+    }
+    throw new ProtocolError('HANDOFF_UI_MESSAGE_INVALID', 'Unsupported handoff side-panel message type.');
   }
 
   async function handlePageReady(message, sender) {
@@ -166,6 +458,11 @@ export function createServiceWorkerController({
     try {
       const universal = await ensureUniversalRuntime();
       const state = await universal.ingestPageSnapshot(message, sender);
+      if (missionPromise) {
+        await missionPromise
+          .then((mission) => mission.handlePageSnapshot({ tabId, frameId }, sender))
+          .catch(() => undefined);
+      }
       return { ok: true, state, provenance: PROVENANCE };
     } catch (error) {
       const normalized = asExtensionRuntimeError(error);
@@ -176,11 +473,32 @@ export function createServiceWorkerController({
   async function handleUiMessage(message, sender) {
     if (!runtimeUiSender(chromeApi, sender)) return fail('UI_SENDER_INVALID', 'Side-panel requests are accepted only from the canonical ToolBraid side-panel.');
     try {
+      if (isMissionUiMessageType(message.type)) {
+        const mission = await ensureMissionRuntime();
+        return await mission.handleUiMessage(message.type, message.payload ?? {});
+      }
+      if (isHandoffUiMessageType(message.type)) {
+        return await handleHandoffUiMessage(message.type, message.payload ?? {});
+      }
       const universal = await ensureUniversalRuntime();
-      return await universal.handleUiMessage(message.type, message.payload ?? {});
+      const response = await universal.handleUiMessage(message.type, message.payload ?? {});
+      if (message.type !== 'UI_GET_STATE' || response?.ok !== true) return response;
+      const [missionResult, handoffResult] = await Promise.allSettled([
+        ensureMissionRuntime().then((mission) => mission.list()),
+        ensureHandoffRuntime().then((handoff) => handoff.list()),
+      ]);
+      return {
+        ...response,
+        state: {
+          ...response.state,
+          missions: missionResult.status === 'fulfilled' ? missionResult.value : [],
+          handoffs: handoffResult.status === 'fulfilled' ? handoffResult.value : [],
+          ...(missionResult.status === 'rejected' ? { missionError: safeFailure(missionResult.reason).error } : {}),
+          ...(handoffResult.status === 'rejected' ? { handoffError: safeFailure(handoffResult.reason).error } : {}),
+        },
+      };
     } catch (error) {
-      const normalized = asExtensionRuntimeError(error);
-      return fail(normalized.code, normalized.message, normalized.details);
+      return safeFailure(error);
     }
   }
 
@@ -189,7 +507,9 @@ export function createServiceWorkerController({
       if (!message || typeof message !== 'object' || Array.isArray(message)) return fail('MESSAGE_INVALID', 'ToolBraid runtime message must be an object.');
       if (message.type === MESSAGE_TYPES.PAGE_READY) return handlePageReady(message, sender);
       if (message.type === MESSAGE_TYPES.PAGE_SNAPSHOT) return handlePageSnapshot(message, sender);
-      if (isUiMessageType(message.type)) return handleUiMessage(message, sender);
+      if (isUiMessageType(message.type)
+          || isMissionUiMessageType(message.type)
+          || isHandoffUiMessageType(message.type)) return handleUiMessage(message, sender);
       if (message.type === MESSAGE_TYPES.BRIDGE_REGISTER_TOOLS) return handleBridgeRegistration(message, sender);
       if (message.type === MESSAGE_TYPES.PAGE_EVENT) {
         if (!pageRuntimeSender(chromeApi, sender)) return fail('PAGE_SENDER_INVALID', 'Page events must originate from an extension content script in an HTTP(S) tab.');
@@ -220,7 +540,7 @@ export function createServiceWorkerController({
       });
       await chromeApi.scripting.executeScript({
         target,
-        files: ['protocol-runtime.js', 'page-extractor.js', 'action-executor.js', 'content-script.js'],
+        files: ['protocol-runtime.js', 'page-extractor.js', 'action-executor.js', 'rendered-media-capture.js', 'content-script.js'],
         world: 'ISOLATED',
         injectImmediately: true,
       });
@@ -232,6 +552,19 @@ export function createServiceWorkerController({
 
   function handleTabUpdated(tabId, changeInfo = {}, tab = {}) {
     if (!validTabId(tabId)) return [];
+    if (missionPromise) {
+      void missionPromise
+        .then((mission) => mission.handleTabUpdated(tabId, changeInfo, tab))
+        .catch(() => undefined);
+    }
+    for (const [handoffId, surface] of handoffSurfaces.entries()) {
+      if (surface.tabId !== tabId) continue;
+      const nextOrigin = exactOrigin(changeInfo.url ?? tab.pendingUrl ?? tab.url);
+      if (changeInfo.status === 'loading' && nextOrigin && nextOrigin !== surface.origin) {
+        surfaceLifecycle.delete(`${surface.tabId}:${surface.frameId}`);
+        handoffSurfaces.delete(handoffId);
+      }
+    }
     // Chromium reports History API transitions as `loading`, indistinguishable
     // from a same-origin document navigation in tabs.onUpdated. Cross-origin
     // changes can be closed immediately. Same-origin authority is replaced by
@@ -247,6 +580,16 @@ export function createServiceWorkerController({
 
   function handleTabRemoved(tabId) {
     if (!validTabId(tabId)) return [];
+    if (missionPromise) {
+      void missionPromise
+        .then((mission) => mission.handleTabRemoved(tabId))
+        .catch(() => undefined);
+    }
+    for (const [handoffId, surface] of handoffSurfaces.entries()) {
+      if (surface.tabId !== tabId) continue;
+      surfaceLifecycle.delete(`${surface.tabId}:${surface.frameId}`);
+      handoffSurfaces.delete(handoffId);
+    }
     const invalidated = registry.invalidate(tabId, 'tab-closed');
     closeUniversalSessions(invalidated, 'tab-closed');
     return invalidated;
@@ -261,6 +604,8 @@ export function createServiceWorkerController({
     handleTabRemoved,
     sessionBinding,
     ensureUniversalRuntime,
+    ensureMissionRuntime,
+    ensureHandoffRuntime,
   });
 }
 

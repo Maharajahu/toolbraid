@@ -50,6 +50,8 @@ test('side panel has extension CSP, no inline script, and renders through safe D
   assert.match(html, /id="evidence-list"/);
   assert.match(html, /id="receipts-list"/);
   assert.match(html, /id="audit-list"/);
+  assert.match(html, /id="missions-list"/);
+  assert.match(html, /id="handoffs-list"/);
   assert.doesNotMatch(js, /Execute approved action|Action executed\./);
   assert.match(js, /Dispatch approved action/);
   assert.match(js, /postcondition unverified/i);
@@ -76,6 +78,39 @@ test('normalizes multimodal evidence, execution receipts, and verified audit pro
   assert.equal(state.audit.verified, true);
   assert.equal(state.audit.entries[0].event, 'action.dispatched');
   assert.equal(state.quarantinedCount, 1);
+});
+
+test('normalizes mission and handoff state without exposing credentials, proofs, or raw URLs', () => {
+  const state = normalizeState({
+    connection: 'ready',
+    missions: [{
+      missionId: 'mission-1',
+      phase: 'running',
+      revision: 2,
+      members: [{ memberId: 'member-1', tabId: 4, frameId: 0, origin: 'https://example.test', status: 'attached' }],
+      credentials: { password: 'secret-password' },
+    }],
+    handoffs: [{
+      handoffId: 'handoff-1',
+      type: 'login',
+      state: 'awaiting-ui-gesture',
+      missionId: 'mission-1',
+      memberId: 'member-1',
+      purpose: '<img onerror=attack()>',
+      safeOrigin: 'https://example.test/login?token=secret#fragment',
+      credentials: { password: 'secret-password' },
+      uiIntent: { token: 'secret-token' },
+      completionProof: { token: 'secret-proof' },
+      surface: { url: 'https://example.test/login?token=secret' },
+    }],
+  });
+  assert.equal(state.missions[0].members[0].origin, 'https://example.test');
+  assert.equal(state.handoffs[0].safeOrigin, 'https://example.test');
+  assert.equal(state.handoffs[0].purpose, '<img onerror=attack()>');
+  const serialized = JSON.stringify({ missions: state.missions, handoffs: state.handoffs });
+  for (const secret of ['secret-password', 'secret-token', 'secret-proof', '/login', '?token=', '#fragment']) {
+    assert.equal(serialized.includes(secret), false);
+  }
 });
 
 test('UI client allows only declared messages and fails closed without the worker', async () => {
@@ -175,6 +210,79 @@ test('controller never marks a local approval executed after a fail-closed worke
   assert.equal(response.ok, false);
   assert.equal(response.error.code, 'EXECUTOR_UNAVAILABLE');
   assert.equal((await store.get(approval.id)).state, 'approved');
+});
+
+test('trusted handoff opens the exact-origin window in the sidepanel and sends only its tab id to the worker', async () => {
+  const calls = { permissions: [], windows: [], worker: [], removed: [] };
+  const runtime = {
+    sendMessage(message) {
+      calls.worker.push(structuredClone(message));
+      if (message.type === UI_MESSAGE_TYPES.UI_GET_STATE) {
+        return Promise.resolve({
+          ok: true,
+          state: {
+            connection: 'ready',
+            tab: { id: 4, url: 'https://example.test/page' },
+            handoffs: [{
+              handoffId: 'handoff-sidepanel',
+              type: 'login',
+              state: 'awaiting-ui-gesture',
+              missionId: 'mission-sidepanel',
+              memberId: 'member-sidepanel',
+              purpose: 'Sign in.',
+              safeOrigin: 'https://example.test',
+            }],
+          },
+        });
+      }
+      return Promise.resolve({ ok: true, result: { state: 'human-active' } });
+    },
+  };
+  const browser = {
+    runtime: {},
+    permissions: {
+      async request(value) { calls.permissions.push(structuredClone(value)); return true; },
+    },
+    windows: {
+      async create(value) { calls.windows.push(structuredClone(value)); return { id: 8, tabs: [{ id: 101 }] }; },
+      async remove(windowId) { calls.removed.push(windowId); },
+    },
+    tabs: { async query() { return [{ id: 101 }]; } },
+  };
+  const controller = createUiController({
+    runtime,
+    browser,
+    store: createApprovalStore({ storageArea: memoryStorage(), cryptoRef: fakeCrypto() }),
+  });
+  await controller.refresh();
+
+  const blocked = await controller.openHandoff('handoff-sidepanel', syntheticClick);
+  assert.equal(blocked.ok, false);
+  assert.equal(blocked.error.code, 'TRUSTED_ACTIVATION_REQUIRED');
+  assert.equal(calls.windows.length, 0);
+
+  const opened = await controller.openHandoff('handoff-sidepanel', trustedClick);
+  assert.equal(opened.ok, true);
+  assert.deepEqual(calls.permissions, [{ origins: ['https://example.test/*'] }]);
+  assert.deepEqual(calls.windows, [{
+    url: 'https://example.test',
+    type: 'popup',
+    focused: true,
+    width: 520,
+    height: 720,
+  }]);
+  assert.deepEqual(calls.worker.at(-1), {
+    type: UI_MESSAGE_TYPES.UI_HANDOFF_OPEN_SURFACE,
+    payload: { handoffId: 'handoff-sidepanel', surfaceTabId: 101 },
+  });
+  assert.deepEqual(calls.removed, []);
+
+  const completed = await controller.completeHandoff('handoff-sidepanel', trustedClick);
+  assert.equal(completed.ok, true);
+  assert.deepEqual(calls.worker.at(-1), {
+    type: UI_MESSAGE_TYPES.UI_HANDOFF_COMPLETE,
+    payload: { handoffId: 'handoff-sidepanel' },
+  });
 });
 
 test('SHA-256 helper returns the standard digest used for approval bindings', async () => {

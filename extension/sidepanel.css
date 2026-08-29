@@ -205,6 +205,9 @@ dd { overflow: hidden; margin: 0; font-size: 11px; text-overflow: ellipsis; whit
 .detail-value { overflow-wrap: anywhere; color: var(--text); }
 .detail-value code { color: var(--cyan); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 10px; }
 .approval-card { border-color: rgba(244, 189, 103, 0.35); background: linear-gradient(145deg, rgba(82, 58, 27, 0.26), rgba(7, 17, 26, 0.28)); }
+.mission-member { display: grid; gap: 7px; padding-top: 8px; border-top: 1px solid var(--line); }
+.mission-member:first-child { padding-top: 0; border-top: 0; }
+.mission-member .button { justify-self: end; }
 .approval-footer { justify-content: flex-end; flex-wrap: wrap; gap: 7px; margin-top: 12px; }
 .approval-expiry { color: var(--amber); font-size: 10px; }
 .policy-note { margin: 13px 0 0; color: var(--muted); font-size: 10px; line-height: 1.5; }
@@ -226,6 +229,8 @@ dd { overflow: hidden; margin: 0; font-size: 11px; text-overflow: ellipsis; whit
   main { max-width: 720px; margin: 0 auto; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
   .page-panel,
   .provider-panel,
+  .mission-panel,
+  .handoff-panel,
   .approval-panel,
   .proof-panel { grid-column: 1 / -1; }
   .topbar { padding-right: max(18px, calc((100% - 684px) / 2)); padding-left: max(18px, calc((100% - 684px) / 2)); }

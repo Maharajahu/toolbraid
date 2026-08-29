@@ -13,7 +13,7 @@ The existing recovery application remains a first-party native-WebMCP proof pack
 3. Reading may execute automatically within granted browser permissions.
 4. Every interaction on an unverified page requires a human-owned approval. This includes filling a field because page JavaScript may autosave or submit reactively.
 5. Approval binds the exact tab, top-level origin, page fingerprint, target fingerprint, action, normalized arguments, effect, expiry, and one-time nonce.
-6. Navigation, DOM drift, tool-registry drift, target drift, or argument drift invalidates approval.
+6. Navigation, DOM drift, target drift, argument drift, or a changed native WebMCP registry invalidates approval. Universal capability-pack state is re-resolved when the current page is ingested.
 7. The page cannot create approval. Approval originates only in extension-owned UI.
 8. Mutation execution is performed by the isolated extension world after revalidation, never by page-controlled code.
 9. Unknown effects fail closed as mutations. Ambiguous targets are never clicked automatically.
@@ -40,6 +40,8 @@ extension-owned side panel / approval surface
 ```
 
 The MAIN-world registrar is intentionally small. It advertises descriptors and forwards calls across a per-document channel. It does not hold approval authority, credentials, durable state, or mutation policy. The isolated content runtime and service worker treat every MAIN-world request as attacker-controlled.
+
+The service worker owns a statically trusted, lazily loaded capability-pack registry. It also coordinates bounded multi-page mission membership and the browser-independent human-handoff state machine; page or binding drift invalidates pending work and a restart requires rebind.
 
 ## Compatibility tiers
 
@@ -73,7 +75,7 @@ The generic surface is deterministic and target-specific rather than a set of br
 - a strict JSON schema derived from the exact target's current fields;
 - provenance containing the generator version, origin, page fingerprint, element reference, and target fingerprint.
 
-Verified adapters may add narrow names only when the exact supported page shape is present. The X adapter exposes `read_x_post`, approval-gated `like_x_post`, reversible `prepare_x_reply` when a reply editor is already open, and approval-gated `repost_x_post` only when the positive repost confirmation item is live. It anchors the target article to the exact status permalink and rejects quoted-post, lookalike, stale, already-completed, and ambiguous controls. Adapter targets suppress equivalent generic targets. The combined live registry is capped at 128 tools; overflow, duplicates, invalid descriptors, and policy failures are quarantined rather than registered.
+Built-in capability packs may add narrow names only when the exact supported page shape is present. X exposes `read_x_post`, approval-gated `like_x_post`, reversible `prepare_x_reply` when a matching reply editor is present, and approval-gated `repost_x_post` when a matching positive confirmation item is live. GitHub exposes repository star/unstar, issue or pull-request comment, and close/reopen actions. Vercel exposes deployment redeploy/cancel actions. These are browser UI dispatches, not direct provider API calls. GitHub and Vercel descriptors carry page-snapshot postconditions whose verifiers are wired in the MV3 service worker; generic and X actions remain dispatch-unverified. X scoping is strongest for status-permalink reads and likes; reply/repost matching remains heuristic, and known opposite or already-completed controls are suppressed. Adapter targets suppress equivalent generic targets. The core combined live registry is capped at 128 tools and the shipped MV3 runtime at 32; overflow, duplicates, invalid descriptors, and policy failures are quarantined rather than registered.
 
 ## Action lifecycle
 
@@ -84,7 +86,7 @@ observe current snapshot
   -> prepare normalized action and predicted effect
   -> show extension-owned approval UI when required
   -> bind approval to current fingerprints and arguments
-  -> refresh page, registry, and target
+  -> refresh page snapshot and bound target
   -> atomically claim nonce
   -> execute in isolated content runtime
   -> append a redacted dispatch receipt and audit entry
@@ -93,7 +95,7 @@ observe current snapshot
 
 Generic input is never written before approval. The action executor refreshes the snapshot, resolves exactly one live element, checks semantic binding and fingerprints, atomically claims the one-time approval nonce, and only then applies the approved value, click, or form submission.
 
-A generic receipt deliberately says that an action was dispatched; it does not claim that a remote service accepted or completed the operation. The current Universal runtime always leaves the postcondition unverified. A future verified adapter may upgrade that statement only after an observable postcondition matches; none of the current Universal adapters performs that upgrade.
+A generic receipt deliberately says that an action was dispatched; it does not claim that a remote service accepted or completed the operation. Generic and X actions remain postcondition-unverified. Built-in GitHub and Vercel mutations carry declared page-snapshot contracts, and the MV3 service worker wires their verifiers. A verified result means the declared browser-observable transition was seen; for Vercel redeploy, that can mean a new same-commit deployment in an accepted state, not necessarily a completed deployment.
 
 Dispatch is recorded as a two-step extension-owned transition: `dispatching` before the isolated-world call and `dispatched` after the browser accepts that call. Either state deliberately leaves the external outcome unknown unless a verified adapter subsequently observes its declared postcondition. A service-worker restart cannot turn an interrupted dispatch into a success claim or replay the approval nonce.
 
@@ -115,16 +117,16 @@ visible-tab screenshot + bounded DOM media inventory
   -> privacy/redaction hooks
   -> image OCR and visual description adapter
   -> audio transcription adapter
-  -> video metadata, keyframes, OCR, and transcript adapter
+  -> optional injected video composite adapter
   -> normalized evidence with provider/model provenance
   -> attach to PageSnapshot
 ```
 
-The browser capture layer stores bytes in extension-owned volatile handles with size, count, timeout, origin, and TTL limits. It captures the visible tab and may read same-origin caption tracks; raw bytes are zeroed when released. Adapters may be local or remote, but credentials remain outside page and MAIN-world contexts. Cache identity includes asset fingerprint, transformation settings, adapter identity, and model version. Failed modalities degrade independently and remain visible in the result.
+The browser capture layer stores bytes in extension-owned volatile handles with size, count, timeout, origin, and TTL limits. It captures the visible tab and may read same-origin caption tracks; explicit reanalysis can capture rendered audio. The shipped MV3 provider analyzes image and captured-audio bytes, while video remains metadata/caption-only and is not decoded or uploaded. Raw bytes are zeroed when released. Adapters may be local or remote, but credentials remain outside page and MAIN-world contexts. Cache identity includes asset fingerprint, context/transformation settings, and adapter identity/version; the shipped key does not include the configured model name. Failed modalities degrade independently and remain visible in the result. Capture and DOM/action traversal are bound to top-level frame 0; child iframe documents are not traversed, and rendered audio capture rejects encrypted media (`mediaKeys`) with `DRM_MEDIA_UNSUPPORTED`.
 
 ## Persistence
 
-Extension storage keeps bounded session metadata, approvals, receipts, adapter versions, and the audit chain. Raw page text and media are ephemeral by default. Durable retention requires an explicit user setting and must apply redaction before storage.
+Extension storage keeps bounded session metadata, approvals, receipts, adapter versions, and the audit chain. Raw page text, media, and capture handles are not durably retained by this implementation; any future durable raw retention would require an explicit user setting and redaction.
 
 ## Compatibility and release gates
 
@@ -132,8 +134,8 @@ The recovery validation suite must remain green at every integration point. Univ
 
 - unit tests for snapshot bounds, fingerprints, target uniqueness, tool schemas, risk upgrades, drift invalidation, and multimodal degradation;
 - extension protocol tests for navigation, replay, forged messages, disconnected frames, and service-worker restart;
-- browser tests for static pages, SPA navigation, open Shadow DOM, approved value changes, approved submission observed by the fixture server, and an explicit `postcondition-unverified` dispatch receipt;
+- browser tests for static pages, SPA navigation, open Shadow DOM, approved value changes, approved submission observed by the fixture server, built-in GitHub/Vercel postcondition verification, and an explicit `postcondition-unverified` receipt for unverified generic or X dispatch;
 - adversarial tests for prompt injection in content, accessible names, schemas, OCR, transcripts, and model output;
-- a live-site matrix with explicit results rather than a universal-coverage claim.
+- a live-site matrix with explicit results rather than a universal-coverage claim. Current checks include passed read-only real GitHub repository and issue reads plus real Chrome rendered-audio/caption capture; no live-site mutation is claimed.
 
 The executable browser gate is `node scripts/e2e-universal-extension.mjs --json`. It loads the real MV3 service worker, production MAIN/ISOLATED scripts, authentic side panel, and native Chrome WebMCP surface. A disposable copy of the built extension receives a local fixture-origin grant and temporary `debugger` permission only so automation can issue genuine trusted side-panel clicks. Before launch, the gate asserts that the production manifest contains neither permanent `host_permissions` nor `debugger`; the temporary authority is never written back to the source or production build and the copy is deleted after the run.

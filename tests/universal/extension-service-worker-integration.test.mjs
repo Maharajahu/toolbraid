@@ -141,3 +141,97 @@ test('runs PAGE_READY -> PAGE_SNAPSHOT -> registration -> WebMCP execute -> appr
   assert.ok(actionIndex > refreshIndex);
   assert.equal(calls[actionIndex].message.approved, true);
 });
+
+test('routes a live mission into a sidepanel-created human handoff without worker browser writes', async () => {
+  const local = makeStorage();
+  const session = makeStorage();
+  const calls = { create: 0, update: 0, inject: 0, message: 0 };
+  const snapshot = pageSnapshot();
+  const tabs = new Map([
+    [12, { id: 12, windowId: 4, url: PAGE, title: 'Checkout' }],
+    [101, { id: 101, windowId: 4, url: 'https://example.test/', title: 'Human handoff' }],
+  ]);
+  const api = {
+    runtime: { id: EXTENSION_ID },
+    storage: { local, session },
+    tabs: {
+      query: async () => [tabs.get(12)],
+      get: async (tabId) => structuredClone(tabs.get(tabId)),
+      create: async () => { calls.create += 1; throw new Error('worker must not create a handoff tab'); },
+      update: async () => { calls.update += 1; throw new Error('worker must not navigate a handoff tab'); },
+      sendMessage: async () => { calls.message += 1; throw new Error('worker must not message a handoff tab'); },
+    },
+    scripting: {
+      executeScript: async () => { calls.inject += 1; throw new Error('worker must not inject into a handoff tab'); },
+    },
+  };
+  const sent = [];
+  const sendToContentScript = async (tabId, message, options) => {
+    sent.push({ tabId, message, options });
+    if (message.type === MESSAGE_TYPES.REGISTER_TOOLS) return { ok: true };
+    return { ok: true, snapshot };
+  };
+  const controller = createServiceWorkerController({ chromeApi: api, sendToContentScript });
+  const ready = await controller.handleRuntimeMessage(
+    { type: MESSAGE_TYPES.PAGE_READY, pageInstanceId: 'page-0123456789abcdef' },
+    pageSender(),
+  );
+  assert.equal(ready.ok, true);
+  const ingested = await controller.handleRuntimeMessage({
+    type: MESSAGE_TYPES.PAGE_SNAPSHOT,
+    sessionId: ready.channel.sessionId,
+    nonce: ready.channel.nonce,
+    snapshot,
+  }, pageSender());
+  assert.equal(ingested.ok, true);
+
+  const created = await controller.handleRuntimeMessage({
+    type: 'UI_MISSION_CREATE',
+    payload: { missionId: 'mission-human', objective: 'Authenticate, then resume the exact mission.' },
+  }, panelSender());
+  assert.equal(created.ok, true);
+  const attached = await controller.handleRuntimeMessage({
+    type: 'UI_MISSION_ATTACH',
+    payload: { missionId: 'mission-human', memberId: 'member-source', tabId: 12, frameId: 0 },
+  }, panelSender());
+  assert.equal(attached.ok, true);
+  const missionRuntime = await controller.ensureMissionRuntime();
+  const liveBinding = missionRuntime.getBinding('mission-human', 'member-source');
+  assert.equal(missionRuntime.validateBinding(liveBinding), true);
+
+  const requested = await controller.handleRuntimeMessage({
+    type: 'UI_HANDOFF_REQUEST',
+    payload: {
+      handoffId: 'handoff-human',
+      type: 'login',
+      missionId: 'mission-human',
+      memberId: 'member-source',
+      targetFingerprint: 'target-login-exact',
+      purpose: 'Sign in on the exact approved origin.',
+      credentials: { password: 'must-never-cross' },
+    },
+  }, panelSender());
+  assert.equal(requested.ok, true, JSON.stringify(requested));
+  assert.equal(requested.result.state, 'awaiting-ui-gesture');
+
+  const opened = await controller.handleRuntimeMessage({
+    type: 'UI_HANDOFF_OPEN_SURFACE',
+    payload: {
+      handoffId: 'handoff-human',
+      surfaceTabId: 101,
+      binding: { sessionId: 'forged', password: 'must-never-cross' },
+    },
+  }, panelSender());
+  assert.equal(opened.ok, true);
+  assert.equal(opened.result.state, 'human-active');
+  assert.deepEqual(calls, { create: 0, update: 0, inject: 0, message: 0 });
+
+  const completed = await controller.handleRuntimeMessage({
+    type: 'UI_HANDOFF_COMPLETE',
+    payload: { handoffId: 'handoff-human', proof: { password: 'must-never-cross' } },
+  }, panelSender());
+  assert.equal(completed.ok, true);
+  assert.equal(completed.result.state, 'completed');
+  assert.equal(JSON.stringify(session.values).includes('must-never-cross'), false);
+  assert.deepEqual(calls, { create: 0, update: 0, inject: 0, message: 0 });
+});

@@ -38,16 +38,26 @@ generated page tools
 
 The MAIN-world registrar contains no credentials, approvals, durable state, or
 mutation policy. Page callbacks are treated as attacker-controlled input. A
-navigation, registry drift, page drift, target drift, argument drift, expiry,
-or replay invalidates execution. A service-worker disconnect invalidates an
-in-flight action, but the isolated runtime may establish a fresh binding for a
-later call.
+navigation, page drift, target drift, argument drift, expiry, or replay
+invalidates execution. Native WebMCP registry drift invalidates approvals;
+Universal capability-pack state is rebuilt when the current page is ingested. A
+service-worker disconnect invalidates an in-flight action, but the isolated
+runtime may establish a fresh binding for a later call.
 
 Generic page interaction is conservative: reads may run automatically, while
 field changes, clicks, navigation, and form submission all require a fresh
 approval created by a trusted click in the extension side panel. A receipt
 proves exact browser dispatch; it is not described as remote success unless a
-verified adapter proves its declared postcondition.
+verified adapter proves its declared postcondition. The service worker wires
+the built-in GitHub and Vercel page-snapshot verifiers; generic and X actions
+remain postcondition-unverified.
+
+The shipped MV3 runtime selects three statically trusted, lazily loaded
+capability packs — `site.x`, `site.github`, and `site.vercel` — by exact HTTPS
+host/path and objective hints. Page snapshots cannot add or replace loaders;
+invalid, duplicate, overflow, and policy-failed descriptors are quarantined.
+The core combined registry allows up to 128 tools, while the shipped MV3
+runtime limits active and registered tools to 32.
 
 ## Session recovery
 
@@ -57,11 +67,26 @@ active tab session. After a service-worker disconnect or restart, the runtime
 reconnects, replaces the MAIN-world page binding, and submits a fresh snapshot
 before the next invocation. It never retries an in-flight mutation.
 
+Universal supports bounded multi-page missions with up to 16 exact tab/frame
+members. Page drift invalidates pending actions and a worker restart requires
+rebind; pending actions are not restored. The handoff broker supports login,
+2FA, and CAPTCHA steps with a five-minute default and fifteen-minute maximum
+TTL, exact-origin side-panel-created surfaces, and separate trusted
+open/complete proof. Credentials are not stored.
+
+Activation and page injection are bound to top-level frame 0; child iframe
+documents are not traversed. Rendered capture is audio-track/caption-only and
+rejects encrypted media (`mediaKeys`) with `DRM_MEDIA_UNSUPPORTED`.
+
 ## Multimodal evidence
 
-Activation captures a bounded visible-tab screenshot, eligible same-origin
-audio, and same-origin caption tracks. Media bytes live only in extension-owned volatile
-handles with size, count, timeout, and TTL limits and are zeroed on release.
+Activation captures a bounded visible-tab screenshot and eligible same-origin
+caption tracks. Explicit reanalysis can capture bounded rendered audio and
+loaded captions; the shipped provider leaves video at metadata/caption-only and
+does not decode or upload video bytes. The real Chrome gate covers this
+audio/caption path without dispatching a mutation. Media bytes live only in
+extension-owned volatile handles with size, count, timeout, and TTL limits and
+are zeroed on release.
 Multimodal output is untrusted evidence: it may enrich a snapshot but can never
 approve or execute an action. Metadata-only evidence is the default. The side
 panel can connect an optional OpenAI-compatible vision/ASR endpoint; its API key
@@ -95,4 +120,6 @@ host grant and temporary `debugger` permission so the test can perform genuine
 trusted clicks in the authentic side panel. The script first asserts that the
 source manifest contains neither `host_permissions` nor `debugger`; those test
 grants never ship in the production bundle, and the disposable copy is removed
-after the run.
+after the run. A separate `--live-read-only` mode has passed real GitHub
+repository and issue reads without external dispatch; no live-site mutation is
+claimed.

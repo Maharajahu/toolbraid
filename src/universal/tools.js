@@ -16,6 +16,7 @@ import {
   elementFingerprint,
   isPageSnapshot,
 } from './snapshot.js';
+import { validatePostconditionContract } from './postconditions.js';
 
 export const UNIVERSAL_TOOL_DESCRIPTOR_VERSION = 1;
 export const UNIVERSAL_TOOL_SOURCE = 'toolbraid.universal';
@@ -263,6 +264,15 @@ export function validateToolDescriptor(tool) {
   if (!tool.provenance || typeof tool.provenance.pageFingerprint !== 'string') {
     throw descriptorError('TOOL_PROVENANCE_MISSING', 'Generated tool provenance must include pageFingerprint.');
   }
+  if (tool.postcondition !== undefined) {
+    const contract = validatePostconditionContract(tool.postcondition);
+    if (tool.classification !== ACTION_CLASSES.MUTATE
+      || tool.provenance.source !== 'toolbraid.verified-adapter'
+      || tool.provenance.adapterId !== contract.adapterId
+      || String(tool.provenance.adapterVersion) !== contract.adapterVersion) {
+      throw descriptorError('TOOL_POSTCONDITION_INVALID', 'Postcondition contract does not match its verified adapter provenance.');
+    }
+  }
   if (!tool.effect || tool.effect.classification !== tool.classification) {
     throw descriptorError('TOOL_EFFECT_INVALID', 'Generated tool effect must match classification.');
   }
@@ -384,6 +394,7 @@ export function descriptorFingerprint(tool) {
     classification: tool.classification,
     target: tool.target,
     effect: tool.effect,
+    ...(tool.postcondition === undefined ? {} : { postcondition: validatePostconditionContract(tool.postcondition) }),
   }));
 }
 

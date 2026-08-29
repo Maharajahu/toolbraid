@@ -23,7 +23,7 @@ test('ToolBraid Universal is a minimal MV3 action extension', () => {
 test('the worker scopes dynamic injection to the activated tab and explicit worlds', () => {
   assert.match(serviceWorker, /files:\s*\['protocol-runtime\.js', 'injector-main\.js'\]/);
   assert.match(serviceWorker, /world:\s*'MAIN'/);
-  assert.match(serviceWorker, /files:\s*\['protocol-runtime\.js', 'page-extractor\.js', 'action-executor\.js', 'content-script\.js'\]/);
+  assert.match(serviceWorker, /files:\s*\['protocol-runtime\.js', 'page-extractor\.js', 'action-executor\.js', 'rendered-media-capture\.js', 'content-script\.js'\]/);
   assert.match(serviceWorker, /world:\s*'ISOLATED'/);
   assert.doesNotMatch(serviceWorker, /<all_urls>/);
 });

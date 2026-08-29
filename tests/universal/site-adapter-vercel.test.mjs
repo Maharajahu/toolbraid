@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
-import { createPageSnapshot, generateWebMcpToolDescriptors } from '../../src/universal/index.js';
+import { createPageSnapshot, generateWebMcpToolDescriptors, prepareAction } from '../../src/universal/index.js';
 import {
   SiteAdapterError,
   createSiteAdapterRegistry,
@@ -26,6 +26,32 @@ function urlSnapshot(url, extra = {}) {
     links: extra.links ?? [],
     forms: [],
     accessibleControls: [],
+    elementRefs: [],
+  });
+}
+
+function deploymentSnapshot({
+  id = 'dpl_123',
+  state = 'READY',
+  controls = [],
+  owner = 'toolbraid',
+  project = 'mission-control',
+  commitSha = '0123456789abcdef0123456789abcdef01234567',
+  host = 'vercel.com',
+} = {}) {
+  const url = `https://${host}/${owner}/${project}/${id}`;
+  return createPageSnapshot({
+    metadata: {
+      url,
+      origin: `https://${host}`,
+      title: `${id} - Vercel`,
+      vercel: { deployment: { id, state, commitSha } },
+    },
+    headings: [{ ref: 'deployment-heading', level: 1, text: id }],
+    mainText: `${id} ${state}`,
+    links: [],
+    forms: [],
+    accessibleControls: controls,
     elementRefs: [],
   });
 }
@@ -180,6 +206,43 @@ test('Vercel adapter supports an explicit test host without widening the default
   assert.equal(registry.generateTools(snapshot)[0].name, 'read_vercel_project');
 });
 
+test('Vercel mutation verification preserves an explicit adapter host binding', () => {
+  const adapter = createVercelAdapter({ hosts: ['vercel.example'] });
+  const registry = createSiteAdapterRegistry({ adapters: [adapter] });
+  const before = deploymentSnapshot({
+    owner: 'acme',
+    project: 'widget',
+    id: 'dpl-old',
+    state: 'READY',
+    controls: [{ ref: 'redeploy', role: 'button', type: 'button', name: 'Redeploy' }],
+    host: 'vercel.example',
+  });
+  const customBefore = before;
+  const customAfter = createPageSnapshot({
+    metadata: {
+      ...customBefore.metadata,
+      url: 'https://vercel.example/acme/widget/dpl-new',
+      origin: 'https://vercel.example',
+      vercel: { deployment: { id: 'dpl-new', state: 'BUILDING', commitSha: '0123456789abcdef0123456789abcdef01234567' } },
+    },
+    headings: customBefore.headings,
+    mainText: customBefore.mainText,
+    links: customBefore.links,
+    forms: customBefore.forms,
+    accessibleControls: customBefore.accessibleControls,
+    elementRefs: customBefore.elementRefs,
+  });
+  const redeploy = registry.generateTools(customBefore).find((tool) => tool.name === 'redeploy_vercel_deployment');
+  assert.ok(redeploy);
+  assert.equal(registry.verifyPostcondition(redeploy, {
+    tabId: 1,
+    frameId: 0,
+    sessionId: 'session-vercel-custom-host',
+    beforeSnapshot: customBefore,
+    afterSnapshot: customAfter,
+  }).status, 'verified-success');
+});
+
 test('Vercel specialized reads add structured semantics without duplicating generic page tools or claiming mutation', async () => {
   const snapshot = await fixture('vercel-project.snapshot.json');
   const registry = createSiteAdapterRegistry({ adapters: [createVercelAdapter()] });
@@ -192,4 +255,181 @@ test('Vercel specialized reads add structured semantics without duplicating gene
   assert.equal(verified[0].requiresApproval, false);
   assert.equal(verified[0].effect.externalStateChange, false);
   assert.equal(verified[0].annotations.readOnlyHint, true);
+});
+
+test('Vercel exposes only one exact enabled redeploy control on a known redeployable deployment', () => {
+  const registry = createSiteAdapterRegistry({ adapters: [createVercelAdapter()] });
+  const duplicate = deploymentSnapshot({
+    controls: [
+      { ref: 'redeploy-1', role: 'button', type: 'button', name: 'Redeploy' },
+      { ref: 'redeploy-2', role: 'button', type: 'button', name: 'Redeploy deployment' },
+    ],
+  });
+  assert.deepEqual(registry.generateTools(duplicate).map((tool) => tool.name), ['read_vercel_deployment']);
+
+  const disabledDuplicate = deploymentSnapshot({
+    controls: [
+      { ref: 'redeploy-disabled', role: 'button', type: 'button', name: 'Redeploy', disabled: true },
+      { ref: 'redeploy-enabled', role: 'button', type: 'button', name: 'Redeploy' },
+    ],
+  });
+  assert.deepEqual(registry.generateTools(disabledDuplicate).map((tool) => tool.name), ['read_vercel_deployment']);
+
+  const snapshot = deploymentSnapshot({
+    controls: [
+      { ref: 'redeploy', role: 'button', type: 'button', name: 'Redeploy' },
+      { ref: 'cancel', role: 'button', type: 'button', name: 'Cancel deployment', disabled: true },
+    ],
+  });
+  const tools = registry.generateTools(snapshot);
+  const redeploy = tools.find((tool) => tool.name === 'redeploy_vercel_deployment');
+  assert.ok(redeploy);
+  assert.equal(redeploy.classification, 'mutate');
+  assert.equal(redeploy.kind, 'mutate');
+  assert.equal(redeploy.requiresApproval, true);
+  assert.equal(redeploy.effect.externalStateChange, true);
+  assert.equal(redeploy.effect.requiresApproval, true);
+  assert.equal(redeploy.annotations.readOnlyHint, false);
+  assert.equal(redeploy.target.ref, 'redeploy');
+  assert.equal(redeploy.target.type, 'control');
+  assert.deepEqual(redeploy.target.binding, {
+    role: 'button',
+    name: 'Redeploy',
+    formRef: null,
+    type: 'button',
+  });
+  assert.equal(redeploy.sourceType, 'control');
+  assert.equal(redeploy.postcondition.id, 'vercel.deployment.redeploy.v1');
+  assert.doesNotThrow(() => prepareAction({ snapshot, descriptor: redeploy, input: {} }));
+});
+
+test('Vercel exposes cancel only for one enabled cancel control while deployment is active', () => {
+  const registry = createSiteAdapterRegistry({ adapters: [createVercelAdapter()] });
+  const active = deploymentSnapshot({
+    id: 'dpl-building',
+    state: 'BUILDING',
+    controls: [{ ref: 'cancel', role: 'button', type: 'button', name: 'Cancel deployment' }],
+  });
+  const cancel = registry.generateTools(active).find((tool) => tool.name === 'cancel_vercel_deployment');
+  assert.ok(cancel);
+  assert.equal(cancel.target.ref, 'cancel');
+  assert.equal(cancel.postcondition.id, 'vercel.deployment.cancel.v1');
+
+  const alreadyReady = deploymentSnapshot({
+    state: 'READY',
+    controls: [{ ref: 'cancel', role: 'button', type: 'button', name: 'Cancel deployment' }],
+  });
+  assert.equal(registry.generateTools(alreadyReady).some((tool) => tool.name === 'cancel_vercel_deployment'), false);
+
+  const duplicate = deploymentSnapshot({
+    id: 'dpl-duplicate',
+    state: 'QUEUED',
+    controls: [
+      { ref: 'cancel-1', role: 'button', type: 'button', name: 'Cancel' },
+      { ref: 'cancel-2', role: 'button', type: 'button', name: 'Stop deployment' },
+    ],
+  });
+  assert.equal(registry.generateTools(duplicate).some((tool) => tool.name === 'cancel_vercel_deployment'), false);
+
+  const genericLive = deploymentSnapshot({ state: null, controls: [
+    { ref: 'redeploy-live', role: 'button', type: 'button', name: 'Redeploy' },
+    { ref: 'cancel-live', role: 'button', type: 'button', name: 'Cancel deployment' },
+  ] });
+  assert.deepEqual(registry.generateTools(genericLive)
+    .filter((tool) => tool.classification === 'mutate')
+    .map((tool) => tool.name).sort(), ['cancel_vercel_deployment', 'redeploy_vercel_deployment']);
+});
+
+test('Vercel rejects lookalike, disabled, project-level, and target-drift mutation controls', () => {
+  const registry = createSiteAdapterRegistry({ adapters: [createVercelAdapter()] });
+  const lookalikes = deploymentSnapshot({
+    controls: [
+      { ref: 'deploy', role: 'button', type: 'button', name: 'Deploy' },
+      { ref: 'project-redeploy', role: 'button', type: 'button', name: 'Redeploy project' },
+      { ref: 'hidden-cancel', role: 'button', type: 'button', name: 'Cancel deployment', attributes: { 'aria-hidden': 'true' } },
+      { ref: 'aria-disabled', role: 'button', type: 'button', name: 'Redeploy', attributes: { 'ariaDisabled': 'true' } },
+    ],
+  });
+  assert.deepEqual(registry.generateTools(lookalikes).map((tool) => tool.name), ['read_vercel_deployment']);
+
+  const original = deploymentSnapshot({ controls: [{ ref: 'redeploy', role: 'button', type: 'button', name: 'Redeploy' }] });
+  const tool = registry.generateTools(original).find((entry) => entry.name === 'redeploy_vercel_deployment');
+  const changed = deploymentSnapshot({ controls: [{ ref: 'redeploy', role: 'button', type: 'button', name: 'Redeploy another deployment' }] });
+  assert.throws(() => prepareAction({ snapshot: changed, descriptor: tool, input: {} }), /page changed|fingerprint/i);
+});
+
+test('Vercel postconditions require a same-project state transition and never claim stale success', () => {
+  const registry = createSiteAdapterRegistry({ adapters: [createVercelAdapter()] });
+  const beforeRedeploy = deploymentSnapshot({
+    id: 'dpl-old',
+    state: 'READY',
+    controls: [{ ref: 'redeploy', role: 'button', type: 'button', name: 'Redeploy' }],
+  });
+  const redeploy = registry.generateTools(beforeRedeploy).find((tool) => tool.name === 'redeploy_vercel_deployment');
+  const afterRedeploy = deploymentSnapshot({ id: 'dpl-new', state: 'BUILDING' });
+  const redeployResult = registry.verifyPostcondition(redeploy, {
+    tabId: 1,
+    frameId: 0,
+    sessionId: 'session-vercel-redeploy',
+    beforeSnapshot: beforeRedeploy,
+    afterSnapshot: afterRedeploy,
+  });
+  assert.equal(redeployResult.status, 'verified-success');
+  assert.equal(redeployResult.reasonCode, 'VERCEL_REDEPLOY_STATE_CONFIRMED');
+
+  const genericBefore = deploymentSnapshot({ id: 'dpl-generic-old', state: null, controls: [
+    { ref: 'redeploy-generic', role: 'button', type: 'button', name: 'Redeploy' },
+  ] });
+  const genericRedeploy = registry.generateTools(genericBefore).find((tool) => tool.name === 'redeploy_vercel_deployment');
+  const genericAfter = deploymentSnapshot({ id: 'dpl-generic-new', state: null });
+  assert.equal(registry.verifyPostcondition(genericRedeploy, {
+    tabId: 1,
+    frameId: 0,
+    sessionId: 'session-vercel-generic',
+    beforeSnapshot: genericBefore,
+    afterSnapshot: genericAfter,
+  }).status, 'verified-success');
+
+  const unchanged = registry.verifyPostcondition(redeploy, {
+    tabId: 1,
+    frameId: 0,
+    sessionId: 'session-vercel-redeploy',
+    beforeSnapshot: beforeRedeploy,
+    afterSnapshot: deploymentSnapshot({ id: 'dpl-old', state: 'READY' }),
+  });
+  assert.equal(unchanged.status, 'unverified');
+
+  const wrongProject = registry.verifyPostcondition(redeploy, {
+    tabId: 1,
+    frameId: 0,
+    sessionId: 'session-vercel-redeploy',
+    beforeSnapshot: beforeRedeploy,
+    afterSnapshot: deploymentSnapshot({ owner: 'attacker', id: 'dpl-new', state: 'BUILDING' }),
+  });
+  assert.equal(wrongProject.status, 'unverified');
+
+  const beforeCancel = deploymentSnapshot({
+    id: 'dpl-cancel',
+    state: 'BUILDING',
+    controls: [{ ref: 'cancel', role: 'button', type: 'button', name: 'Cancel deployment' }],
+  });
+  const cancel = registry.generateTools(beforeCancel).find((tool) => tool.name === 'cancel_vercel_deployment');
+  const canceled = registry.verifyPostcondition(cancel, {
+    tabId: 1,
+    frameId: 0,
+    sessionId: 'session-vercel-cancel',
+    beforeSnapshot: beforeCancel,
+    afterSnapshot: deploymentSnapshot({ id: 'dpl-cancel', state: 'CANCELED' }),
+  });
+  assert.equal(canceled.status, 'verified-success');
+  assert.equal(canceled.reasonCode, 'VERCEL_CANCEL_STATE_CONFIRMED');
+
+  const notCanceled = registry.verifyPostcondition(cancel, {
+    tabId: 1,
+    frameId: 0,
+    sessionId: 'session-vercel-cancel',
+    beforeSnapshot: beforeCancel,
+    afterSnapshot: deploymentSnapshot({ id: 'dpl-cancel', state: 'READY' }),
+  });
+  assert.equal(notCanceled.status, 'unverified');
 });

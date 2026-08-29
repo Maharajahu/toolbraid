@@ -6,14 +6,14 @@ import {
 } from '../src/persistence/index.js';
 import { createUniversalSessionRuntime } from '../src/runtime/index.js';
 import {
-  createGitHubAdapter,
   createSiteAdapterRegistry,
-  createVercelAdapter,
-  createXPostAdapter,
 } from '../src/site-adapters/index.js';
+import { createCapabilityPackRegistry } from '../src/packs/universal/registry.js';
+import { createInternalUniversalBuiltinCapabilityPackCatalog } from '../src/packs/universal/builtins.js';
 import {
   createBrowserMediaCapture,
   createMultimodalPipeline,
+  normalizeMediaAsset,
 } from '../src/multimodal/index.js';
 import { assertPreparedActionCurrent, createPageSnapshot } from '../src/universal/index.js';
 import {
@@ -22,7 +22,7 @@ import {
   fingerprintAction,
   stableStringify,
 } from './approval-store.js';
-import { MESSAGE_TYPES, ProtocolError, isInjectableUrl } from './protocol.js';
+import { MESSAGE_TYPES, ProtocolError, createRequestId, isInjectableUrl } from './protocol.js';
 import {
   createConfiguredMultimodalAdapter,
   createMultimodalSettingsStore,
@@ -39,6 +39,14 @@ export const UI_MESSAGE_TYPES = Object.freeze({
 const UI_MESSAGE_SET = new Set(Object.values(UI_MESSAGE_TYPES));
 const MAX_SNAPSHOT_BYTES = 2 * 1024 * 1024;
 const MAX_CAPTURE_TRACKS = 24;
+const MAX_RENDERED_MEDIA_TARGETS = 8;
+const MAX_RENDERED_AUDIO_TARGETS = 2;
+const MAX_RENDERED_AUDIO_BYTES = 4 * 1024 * 1024;
+const RENDERED_AUDIO_DURATION_MS = 3_000;
+const RENDERED_CAPTURE_TIMEOUT_MS = 10_000;
+const REANALYZE_VIDEO_FRAMES = 3;
+const VIDEO_FRAME_INTERVAL_MS = 500;
+const CAPTURE_DRIFT_CODES = new Set(['CAPTURE_TAB_DRIFT', 'CAPTURE_SESSION_DRIFT', 'SESSION_DRIFT', 'CAPTURE_BINDING_MISMATCH']);
 const AUDIT_INDEX_KEY = 'toolbraid.universal.audit-index.v1';
 const DEFAULT_MAX_AUDIT_SESSIONS = 64;
 
@@ -94,7 +102,7 @@ function safeOrigin(url) {
 function captionTextFor(entry, captions) {
   const trackUrls = new Set((entry?.tracks ?? []).map((track) => track?.url ?? track?.src).filter(Boolean));
   const text = captions
-    .filter((caption) => trackUrls.has(caption?.url))
+    .filter((caption) => caption?.elementRef === entry?.ref || trackUrls.has(caption?.url))
     .map((caption) => caption?.text)
     .filter(Boolean)
     .join('\n')
@@ -102,9 +110,62 @@ function captionTextFor(entry, captions) {
   return text || null;
 }
 
+function renderedMediaCandidates(mediaInventory, limit = MAX_RENDERED_MEDIA_TARGETS) {
+  const candidates = [];
+  const seen = new Set();
+  for (const entry of mediaInventory ?? []) {
+    if (candidates.length >= limit) break;
+    const kind = entry?.kind;
+    const elementRef = entry?.ref;
+    if (!['audio', 'video'].includes(kind) || typeof elementRef !== 'string' || !elementRef || seen.has(elementRef)) continue;
+    seen.add(elementRef);
+    candidates.push(Object.freeze({ elementRef, kind }));
+  }
+  return candidates;
+}
+
+function decodeRenderedAudio(value, maxBytes = MAX_RENDERED_AUDIO_BYTES) {
+  if (typeof value !== 'string' || value.length < 4 || value.length > Math.ceil(maxBytes / 3) * 4 + 4
+    || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)) {
+    throw runtimeError('CAPTURE_ENCODING_INVALID', 'Rendered audio transport is invalid.');
+  }
+  let binary;
+  try { binary = atob(value); } catch {
+    throw runtimeError('CAPTURE_ENCODING_INVALID', 'Rendered audio transport is invalid.');
+  }
+  if (binary.length < 1 || binary.length > maxBytes) {
+    throw runtimeError('CAPTURE_BYTES_INVALID', 'Rendered audio bytes exceed their bound.');
+  }
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  return bytes;
+}
+
+function renderedCaptions(result, candidate) {
+  const output = [];
+  let characters = 0;
+  for (const track of Array.isArray(result?.captions) ? result.captions.slice(0, 8) : []) {
+    if (!plainObject(track) || typeof track.text !== 'string') continue;
+    const remaining = 32_768 - characters;
+    if (remaining <= 0) break;
+    const text = track.text.slice(0, remaining);
+    if (!text) continue;
+    characters += text.length;
+    output.push(Object.freeze({
+      elementRef: candidate.elementRef,
+      kind: typeof track.kind === 'string' ? track.kind.slice(0, 64) : 'captions',
+      language: typeof track.language === 'string' ? track.language.slice(0, 64) : null,
+      label: typeof track.label === 'string' ? track.label.slice(0, 256) : null,
+      text,
+    }));
+  }
+  return output;
+}
+
 function mediaAssets(mediaInventory, { origin, frameId, captions = [], maxAssets = 24 }) {
   return mediaInventory.slice(0, maxAssets).map((entry, index) => {
-    const candidate = entry?.src || entry?.sources?.find?.((source) => source?.src)?.src || entry?.poster || null;
+    const candidate = [entry?.src, ...(entry?.sources ?? []).map((source) => source?.src), entry?.poster]
+      .find((value) => typeof value === 'string' && value.length > 0 && value.length <= 8192) ?? null;
     const assetOrigin = candidate ? safeOrigin(candidate) : '';
     const capturedCaption = captionTextFor(entry, captions);
     return {
@@ -139,6 +200,14 @@ function pageLocation(snapshot) {
   const origin = safeOrigin(href) || snapshot?.metadata?.origin || '';
   if (typeof href !== 'string' || !href || !origin) return null;
   return Object.freeze({ href, origin });
+}
+
+function snapshotOrigin(snapshot) {
+  const metadata = snapshot?.metadata ?? {};
+  const urlOrigin = safeOrigin(metadata.url);
+  const declaredOrigin = typeof metadata.origin === 'string' ? metadata.origin : '';
+  if (urlOrigin && declaredOrigin && urlOrigin !== declaredOrigin) return null;
+  return declaredOrigin || urlOrigin || null;
 }
 
 function sameOriginTracks(mediaInventory, location) {
@@ -203,6 +272,27 @@ function sessionMatches(registry, tabId, frameId, sessionId) {
   return session;
 }
 
+function sendWithAbort(sendToContentScript, tabId, message, options = {}) {
+  const signal = options.signal;
+  if (!signal) return sendToContentScript(tabId, message, options);
+  if (signal.aborted) return Promise.reject(runtimeError('POSTCONDITION_ABORTED', 'The postcondition verifier was cancelled.'));
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const cleanup = () => signal.removeEventListener('abort', onAbort);
+    const settle = (callback, value) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      callback(value);
+    };
+    const onAbort = () => settle(reject, runtimeError('POSTCONDITION_ABORTED', 'The postcondition verifier was cancelled.'));
+    signal.addEventListener('abort', onAbort, { once: true });
+    Promise.resolve()
+      .then(() => sendToContentScript(tabId, message, options))
+      .then((value) => settle(resolve, value), (error) => settle(reject, error));
+  });
+}
+
 async function activeTab(chromeApi) {
   if (!chromeApi?.tabs?.query) throw runtimeError('ACTIVE_TAB_UNAVAILABLE', 'Chrome active-tab lookup is unavailable.');
   const tabs = await chromeApi.tabs.query({ active: true, currentWindow: true });
@@ -230,6 +320,7 @@ function uiState(tab, state, { audit = null, capture = null, multimodalProvider 
     pendingActions: state.pendingActions,
     receipts: state.receipts,
     multimodal: state.multimodal,
+    capabilityPacks: state.capabilityPacks,
     multimodalProvider,
     capture,
     audit,
@@ -246,10 +337,14 @@ export async function createExtensionUniversalRuntime({
   store: suppliedStore = null,
   now = () => new Date(),
   siteAdapterRegistry = null,
+  postconditionAdapterRegistry = null,
+  capabilityPackRegistry: suppliedCapabilityPackRegistry = null,
   multimodalPipeline = null,
   browserCapture: suppliedBrowserCapture = null,
   localApprovalStore: suppliedLocalApprovalStore = null,
   maxAuditSessions = DEFAULT_MAX_AUDIT_SESSIONS,
+  postconditionTimeoutMs,
+  renderedCaptureTimeoutMs = RENDERED_CAPTURE_TIMEOUT_MS,
 } = {}) {
   if (!chromeApi || !registry || !bridge || typeof sendToContentScript !== 'function') {
     throw new TypeError('chromeApi, registry, bridge, and sendToContentScript are required.');
@@ -257,13 +352,19 @@ export async function createExtensionUniversalRuntime({
   if (!Number.isInteger(maxAuditSessions) || maxAuditSessions < 1 || maxAuditSessions > 1024) {
     throw new RangeError('maxAuditSessions must be an integer between 1 and 1024.');
   }
+  if (!Number.isInteger(renderedCaptureTimeoutMs) || renderedCaptureTimeoutMs < 1 || renderedCaptureTimeoutMs > 30_000) {
+    throw new RangeError('renderedCaptureTimeoutMs must be an integer between 1 and 30000.');
+  }
   const store = storageFor(chromeApi, suppliedStore);
   const localApprovalStore = suppliedLocalApprovalStore ?? (chromeApi?.storage?.local
     ? createApprovalStore({ storageArea: chromeApi.storage.local, now: () => captureClock(now) })
     : null);
   const ledger = await createPersistentApprovalLedger({ store, key: 'toolbraid.universal.approval-ledger.v1', now });
-  const adapters = siteAdapterRegistry ?? createSiteAdapterRegistry({
-    adapters: [createXPostAdapter(), createGitHubAdapter(), createVercelAdapter()],
+  const adapters = siteAdapterRegistry ?? createSiteAdapterRegistry({ adapters: [] });
+  const postconditionAdapters = postconditionAdapterRegistry ?? adapters;
+  const capabilityPacks = suppliedCapabilityPackRegistry ?? createCapabilityPackRegistry({
+    catalog: createInternalUniversalBuiltinCapabilityPackCatalog(),
+    maxActiveTools: 32,
   });
   const browserCapture = suppliedBrowserCapture ?? createBrowserMediaCapture({
     documentRef: null,
@@ -329,8 +430,23 @@ export async function createExtensionUniversalRuntime({
     return Object.freeze({ ...state, multimodal: clone(override.multimodal) });
   }
 
-  function boundCaptureEvidence(evidence, { sessionId, pageFingerprint }) {
-    if (!evidence || evidence.sessionId !== sessionId || evidence.pageFingerprint !== pageFingerprint) return null;
+  function boundCaptureEvidence(evidence, {
+    tabId,
+    frameId,
+    sessionId,
+    pageFingerprint,
+    extractorPageFingerprint,
+    documentId,
+    pageInstanceId,
+  }) {
+    if (!evidence
+      || evidence.tabId !== tabId
+      || evidence.frameId !== frameId
+      || evidence.sessionId !== sessionId
+      || evidence.pageFingerprint !== pageFingerprint
+      || evidence.extractorPageFingerprint !== (extractorPageFingerprint ?? null)
+      || evidence.documentId !== (documentId ?? null)
+      || evidence.pageInstanceId !== (pageInstanceId ?? null)) return null;
     return evidence;
   }
 
@@ -342,7 +458,152 @@ export async function createExtensionUniversalRuntime({
     return tab;
   }
 
-  async function captureActivationEvidence({ tabId, frameId, sessionId, snapshot, mediaInventory, windowId, pageFingerprint }) {
+  function monitorCaptureTab(tabId, windowId) {
+    let drifted = false;
+    const onActivated = (info) => {
+      if (info?.tabId !== tabId || (Number.isInteger(windowId) && info?.windowId !== windowId)) drifted = true;
+    };
+    const onFocusChanged = (nextWindowId) => {
+      if (Number.isInteger(windowId) && nextWindowId !== windowId) drifted = true;
+    };
+    chromeApi.tabs?.onActivated?.addListener?.(onActivated);
+    chromeApi.windows?.onFocusChanged?.addListener?.(onFocusChanged);
+    return Object.freeze({
+      assert() {
+        if (drifted) throw runtimeError('CAPTURE_TAB_DRIFT', 'The active tab changed during visible-tab capture.');
+      },
+      close() {
+        chromeApi.tabs?.onActivated?.removeListener?.(onActivated);
+        chromeApi.windows?.onFocusChanged?.removeListener?.(onFocusChanged);
+      },
+    });
+  }
+
+  function captureBinding(session) {
+    return Object.freeze({
+      nonce: session.nonce,
+      documentId: session.documentId ?? null,
+      pageInstanceId: session.pageInstanceId ?? null,
+    });
+  }
+
+  function assertCaptureSession(tabId, frameId, sessionId, expected) {
+    const current = sessionMatches(registry, tabId, frameId, sessionId);
+    if (current.nonce !== expected.nonce
+      || (current.documentId ?? null) !== expected.documentId
+      || (current.pageInstanceId ?? null) !== expected.pageInstanceId) {
+      throw runtimeError('CAPTURE_SESSION_DRIFT', 'The page document changed during rendered media capture.');
+    }
+    return current;
+  }
+
+  async function requestRenderedCapture({
+    tabId,
+    frameId,
+    sessionId,
+    windowId,
+    location,
+    pageFingerprint,
+    extractorPageFingerprint,
+    candidate,
+    mode,
+    tabMonitor,
+  }) {
+    const session = sessionMatches(registry, tabId, frameId, sessionId);
+    const sessionBinding = captureBinding(session);
+    if (typeof sessionBinding.pageInstanceId !== 'string') {
+      throw runtimeError('CAPTURE_SESSION_UNBOUND', 'Rendered media capture requires an exact page instance binding.');
+    }
+    const requestId = createRequestId();
+    const message = {
+      type: MESSAGE_TYPES.PAGE_CAPTURE_RENDERED_MEDIA,
+      tabId,
+      frameId,
+      sessionId,
+      nonce: sessionBinding.nonce,
+      documentId: sessionBinding.documentId,
+      pageInstanceId: sessionBinding.pageInstanceId,
+      requestId,
+      mode,
+      elementRef: candidate.elementRef,
+      kind: candidate.kind,
+      pageFingerprint,
+      extractorPageFingerprint,
+      durationMs: RENDERED_AUDIO_DURATION_MS,
+      maxBytes: MAX_RENDERED_AUDIO_BYTES,
+      maxTracks: 8,
+      maxCues: 256,
+      maxCaptionBytes: 256 * 1024,
+      provenance: PROVENANCE,
+    };
+    await assertCaptureTab(tabId, windowId);
+    tabMonitor?.assert();
+    let timer = null;
+    let response;
+    try {
+      const timeout = new Promise((_, reject) => {
+        timer = setTimeout(() => reject(runtimeError('CAPTURE_TIMEOUT', 'Rendered media capture exceeded its worker timeout.')), renderedCaptureTimeoutMs);
+      });
+      response = await Promise.race([
+        Promise.resolve().then(() => sendToContentScript(tabId, message, { frameId })),
+        timeout,
+      ]);
+    } catch (error) {
+      if (error?.code === 'CAPTURE_TIMEOUT') {
+        void Promise.resolve(sendToContentScript(tabId, {
+          type: MESSAGE_TYPES.PAGE_CAPTURE_RENDERED_MEDIA_CANCEL,
+          tabId,
+          frameId,
+          sessionId,
+          nonce: sessionBinding.nonce,
+          requestId,
+          provenance: PROVENANCE,
+        }, { frameId })).catch(() => {});
+      }
+      throw error;
+    } finally {
+      if (timer !== null) clearTimeout(timer);
+    }
+    await assertCaptureTab(tabId, windowId);
+    tabMonitor?.assert();
+    assertCaptureSession(tabId, frameId, sessionId, sessionBinding);
+    if (!response?.ok) {
+      throw runtimeError(response?.error?.code ?? 'CAPTURE_FAILED', response?.error?.message ?? 'Rendered media capture failed.');
+    }
+    const result = response.result;
+    if (!plainObject(result)
+      || response.provenance !== PROVENANCE
+      || response.requestId !== requestId
+      || response.tabId !== tabId
+      || response.frameId !== frameId
+      || response.sessionId !== sessionId
+      || response.nonce !== sessionBinding.nonce
+      || response.documentId !== sessionBinding.documentId
+      || response.pageInstanceId !== sessionBinding.pageInstanceId
+      || response.pageFingerprint !== pageFingerprint
+      || response.extractorPageFingerprint !== extractorPageFingerprint
+      || !plainObject(result.metadata)
+      || result.metadata.elementRef !== candidate.elementRef
+      || result.metadata.sourceKind !== candidate.kind
+      || result.metadata.pageOrigin !== location.origin) {
+      throw runtimeError('CAPTURE_BINDING_MISMATCH', 'Rendered media evidence did not match its page target.');
+    }
+    return result;
+  }
+
+  async function captureActivationEvidence({
+    tabId,
+    frameId,
+    sessionId,
+    snapshot,
+    mediaInventory,
+    windowId,
+    pageFingerprint,
+    extractorPageFingerprint,
+    includeRenderedAudio = false,
+  }) {
+    const activeSession = sessionMatches(registry, tabId, frameId, sessionId);
+    const sessionBinding = captureBinding(activeSession);
     const key = captureKey(tabId, frameId, sessionId);
     clearCaptureCache(key);
     const location = pageLocation(snapshot);
@@ -351,7 +612,10 @@ export async function createExtensionUniversalRuntime({
         tabId,
         frameId,
         sessionId,
+        documentId: sessionBinding.documentId,
+        pageInstanceId: sessionBinding.pageInstanceId,
         pageFingerprint,
+        extractorPageFingerprint: extractorPageFingerprint ?? null,
         assets: Object.freeze([]),
         captions: Object.freeze([]),
         warnings: Object.freeze(['PAGE_LOCATION_UNAVAILABLE']),
@@ -363,19 +627,32 @@ export async function createExtensionUniversalRuntime({
     const warnings = [];
     const assets = [];
     const captions = [];
-    let screenshot = null;
+    const tabMonitor = monitorCaptureTab(tabId, windowId);
+    let committed = false;
     try {
-      sessionMatches(registry, tabId, frameId, sessionId);
-      await assertCaptureTab(tabId, windowId);
-      screenshot = await browserCapture.captureVisibleScreenshot({ windowId, locationRef: location });
-      await assertCaptureTab(tabId, windowId);
-      sessionMatches(registry, tabId, frameId, sessionId);
-      if (screenshot?.asset) assets.push(screenshot.asset);
-      else if (screenshot) assets.push(screenshot);
-    } catch (error) {
-      const capturedAsset = screenshot?.asset ?? screenshot;
-      if (capturedAsset?.handle) browserCapture.handleStore?.release?.(capturedAsset.handle);
-      warnings.push(error?.code ?? 'SCREENSHOT_CAPTURE_FAILED');
+    const candidates = renderedMediaCandidates(mediaInventory);
+    const screenshotCount = includeRenderedAudio && candidates.some((candidate) => candidate.kind === 'video')
+      ? REANALYZE_VIDEO_FRAMES
+      : 1;
+    for (let index = 0; index < screenshotCount; index += 1) {
+      if (index > 0) await new Promise((resolve) => setTimeout(resolve, VIDEO_FRAME_INTERVAL_MS));
+      let screenshot = null;
+      try {
+        assertCaptureSession(tabId, frameId, sessionId, sessionBinding);
+        tabMonitor.assert();
+        await assertCaptureTab(tabId, windowId);
+        screenshot = await browserCapture.captureVisibleScreenshot({ windowId, locationRef: location });
+        await assertCaptureTab(tabId, windowId);
+        tabMonitor.assert();
+        assertCaptureSession(tabId, frameId, sessionId, sessionBinding);
+        const asset = screenshot?.asset ?? screenshot;
+        if (asset) assets.push(screenshotCount > 1 ? { ...asset, id: `visible-frame-${index + 1}` } : asset);
+      } catch (error) {
+        const capturedAsset = screenshot?.asset ?? screenshot;
+        if (capturedAsset?.handle) browserCapture.handleStore?.release?.(capturedAsset.handle);
+        if (CAPTURE_DRIFT_CODES.has(error?.code)) throw error;
+        warnings.push(error?.code ?? 'SCREENSHOT_CAPTURE_FAILED');
+      }
     }
 
     const tracks = sameOriginTracks(mediaInventory, location);
@@ -387,33 +664,123 @@ export async function createExtensionUniversalRuntime({
       else warnings.push(result.reason?.code ?? 'CAPTION_CAPTURE_FAILED');
     }
 
-    const audioCandidates = mediaAssets(mediaInventory, {
-      origin: location.origin,
-      frameId,
-      captions,
-      maxAssets: 8,
-    }).filter((asset) => asset.kind === 'audio' && asset.url && safeOrigin(asset.url) === location.origin).slice(0, 2);
-    for (const candidate of audioCandidates) {
-      try {
-        const captured = await browserCapture.fetchAsset(candidate, { locationRef: location });
-        if (captured?.asset) assets.push(captured.asset);
-        else if (captured) assets.push(captured);
-      } catch (error) {
-        warnings.push(error?.code ?? 'AUDIO_CAPTURE_FAILED');
+    if (typeof extractorPageFingerprint === 'string') {
+      const captionResults = await Promise.allSettled(candidates.map((candidate) => requestRenderedCapture({
+        tabId,
+        frameId,
+        sessionId,
+        windowId,
+        location,
+        pageFingerprint,
+        extractorPageFingerprint,
+        candidate,
+        mode: 'captions',
+        tabMonitor,
+      })));
+      const fatalCaption = captionResults.find((outcome) => outcome.status === 'rejected' && CAPTURE_DRIFT_CODES.has(outcome.reason?.code));
+      if (fatalCaption) throw fatalCaption.reason;
+      captionResults.forEach((outcome, index) => {
+        if (outcome.status === 'fulfilled') {
+          captions.push(...renderedCaptions(outcome.value, candidates[index]));
+          if (outcome.value.ok !== true && outcome.value.code) warnings.push(outcome.value.code);
+        } else {
+          warnings.push(outcome.reason?.code ?? 'RENDERED_CAPTION_CAPTURE_FAILED');
+        }
+      });
+    }
+
+    if (includeRenderedAudio && typeof extractorPageFingerprint === 'string') {
+      for (const candidate of candidates.slice(0, MAX_RENDERED_AUDIO_TARGETS)) {
+        let bytes = null;
+        let stored = null;
+        try {
+          const result = await requestRenderedCapture({
+            tabId,
+            frameId,
+            sessionId,
+            windowId,
+            location,
+            pageFingerprint,
+            extractorPageFingerprint,
+            candidate,
+            mode: 'audio',
+            tabMonitor,
+          });
+          for (const captionTrack of renderedCaptions(result, candidate)) {
+            if (!captions.some((entry) => entry?.elementRef === captionTrack.elementRef
+              && entry?.language === captionTrack.language && entry?.text === captionTrack.text)) {
+              captions.push(captionTrack);
+            }
+          }
+          if (result.ok !== true) {
+            warnings.push(result.code ?? 'RENDERED_AUDIO_CAPTURE_FAILED');
+            continue;
+          }
+          const mimeType = typeof result.metadata.mimeType === 'string' ? result.metadata.mimeType.toLowerCase() : '';
+          if (!mimeType.startsWith('audio/')) throw runtimeError('CAPTURE_MIME_INVALID', 'Rendered audio MIME type is invalid.');
+          bytes = decodeRenderedAudio(result.audioBase64);
+          if (result.metadata.byteLength !== bytes.byteLength) throw runtimeError('CAPTURE_BYTES_INVALID', 'Rendered audio byte length did not match.');
+          if (typeof browserCapture.handleStore?.put !== 'function') throw runtimeError('MEDIA_HANDLE_STORE_UNAVAILABLE', 'Rendered audio handle storage is unavailable.');
+          stored = browserCapture.handleStore.put(bytes, {
+            kind: 'audio',
+            mimeType,
+            source: 'rendered-media',
+            pageOrigin: location.origin,
+            elementRef: candidate.elementRef,
+            sensitive: true,
+          });
+          const caption = renderedCaptions(result, candidate).map((track) => track.text).join('\n').slice(0, 4096) || null;
+          assets.push(normalizeMediaAsset({
+            id: `rendered-audio-${candidate.elementRef}`,
+            kind: 'audio',
+            source: 'capture',
+            handle: stored.handle,
+            mimeType,
+            byteLength: stored.byteLength,
+            durationMs: Number.isFinite(result.metadata.capturedDurationMs) ? result.metadata.capturedDurationMs : null,
+            caption,
+            pageOrigin: location.origin,
+            frameId: String(frameId),
+            crossOrigin: false,
+            sensitive: true,
+          }, { pageOrigin: location.origin }));
+        } catch (error) {
+          if (stored?.handle) browserCapture.handleStore?.release?.(stored.handle);
+          if (CAPTURE_DRIFT_CODES.has(error?.code)) throw error;
+          warnings.push(error?.code ?? 'RENDERED_AUDIO_CAPTURE_FAILED');
+        } finally {
+          bytes?.fill?.(0);
+        }
       }
     }
+
+    if (includeRenderedAudio && (snapshot?.elementRefs ?? []).some((entry) => entry?.tagName === 'iframe')) {
+      warnings.push('IFRAME_MEDIA_NOT_CAPTURED');
+    }
+
+    await assertCaptureTab(tabId, windowId);
+    tabMonitor.assert();
+    assertCaptureSession(tabId, frameId, sessionId, sessionBinding);
 
     const evidence = Object.freeze({
       tabId,
       frameId,
       sessionId,
+      documentId: sessionBinding.documentId,
+      pageInstanceId: sessionBinding.pageInstanceId,
       pageFingerprint,
+      extractorPageFingerprint: extractorPageFingerprint ?? null,
       assets: Object.freeze(assets),
       captions: Object.freeze(captions),
       warnings: Object.freeze([...new Set(warnings)]),
     });
     captureCache.set(key, evidence);
+    committed = true;
     return evidence;
+    } finally {
+      tabMonitor.close();
+      if (!committed) releaseCaptureEvidence({ assets });
+    }
   }
 
   function serializeAuditIndex(operation) {
@@ -499,16 +866,17 @@ export async function createExtensionUniversalRuntime({
     });
   }
 
-  async function requestRawSnapshot(tabId, frameId, sessionId) {
+  async function requestRawSnapshot(tabId, frameId, sessionId, signal = null) {
     const session = sessionMatches(registry, tabId, frameId, sessionId);
-    const response = await sendToContentScript(tabId, {
+    const response = await sendWithAbort(sendToContentScript, tabId, {
       type: MESSAGE_TYPES.PAGE_EXTRACT_SNAPSHOT,
       tabId,
       frameId,
       sessionId,
       nonce: session.nonce,
       provenance: PROVENANCE,
-    }, { frameId });
+    }, { frameId, ...(signal ? { signal } : {}) });
+    if (signal?.aborted) throw runtimeError('POSTCONDITION_ABORTED', 'The postcondition verifier was cancelled.');
     if (!response?.ok || !response.snapshot) {
       throw runtimeError(response?.error?.code ?? 'SNAPSHOT_REFRESH_FAILED', response?.error?.message ?? 'The live page snapshot could not be refreshed.');
     }
@@ -536,15 +904,68 @@ export async function createExtensionUniversalRuntime({
     return response.receipt ?? response.result ?? response;
   }
 
+  async function verifyPostcondition({
+    tabId,
+    frameId,
+    sessionId,
+    signal,
+    descriptor,
+    preparedAction,
+    dispatchReceipt,
+    beforeSnapshot,
+  }) {
+    // The post-dispatch observation is always obtained from the privileged
+    // content-script path.  An adapter may only classify that snapshot; it
+    // never supplies an executable verifier across the extension boundary.
+    if (signal?.aborted) throw runtimeError('POSTCONDITION_ABORTED', 'The postcondition verifier was cancelled.');
+    const rawSnapshot = await requestRawSnapshot(tabId, frameId, sessionId, signal);
+    if (signal?.aborted) throw runtimeError('POSTCONDITION_ABORTED', 'The postcondition verifier was cancelled.');
+    sessionMatches(registry, tabId, frameId, sessionId);
+    const afterSnapshot = createPageSnapshot(boundedSnapshot(rawSnapshot).snapshot);
+    const beforeOrigin = snapshotOrigin(beforeSnapshot);
+    const afterOrigin = snapshotOrigin(afterSnapshot);
+    if (!beforeOrigin || !afterOrigin || beforeOrigin !== afterOrigin) {
+      throw runtimeError('POSTCONDITION_ORIGIN_MISMATCH', 'The observed page changed origin after dispatch.');
+    }
+    const verdict = typeof postconditionAdapters.verifyPostcondition === 'function'
+      ? await postconditionAdapters.verifyPostcondition(descriptor, {
+        tabId,
+        frameId,
+        sessionId,
+        signal,
+        preparedAction,
+        dispatchReceipt,
+        beforeSnapshot,
+        afterSnapshot,
+      })
+      : null;
+    if (signal?.aborted) throw runtimeError('POSTCONDITION_ABORTED', 'The postcondition verifier was cancelled.');
+    sessionMatches(registry, tabId, frameId, sessionId);
+    const normalizedVerdict = verdict ?? {
+      status: 'unverified',
+      reasonCode: 'POSTCONDITION_VERIFIER_UNAVAILABLE',
+    };
+    return {
+      status: normalizedVerdict.status,
+      ...(normalizedVerdict.reasonCode ? { reasonCode: normalizedVerdict.reasonCode } : {}),
+      ...(normalizedVerdict.evidence ? { evidence: normalizedVerdict.evidence } : {}),
+      afterPageFingerprint: afterSnapshot.pageFingerprint,
+    };
+  }
+
   const runtime = createUniversalSessionRuntime({
     approvalLedger: ledger,
     siteAdapterRegistry: adapters,
+    capabilityPackRegistry: capabilityPacks,
+    maxRegisteredTools: 32,
     multimodalPipeline: multimodal,
     auditForSession,
     dispatchHookAware: true,
     now,
     registerTools: (request) => bridge.registerGeneratedTools(request),
     executePageAction,
+    postconditionVerifier: verifyPostcondition,
+    postconditionTimeoutMs,
   });
 
   bridge.setExecutionHandler(async (request) => {
@@ -568,16 +989,25 @@ export async function createExtensionUniversalRuntime({
     clearOtherSessionCaptureCache(tabId, frameId, sessionId);
     const bounded = boundedSnapshot(rawSnapshot);
     const pageFingerprint = canonicalPageFingerprint(bounded.snapshot);
+    const evidenceBinding = {
+      tabId,
+      frameId,
+      sessionId,
+      pageFingerprint,
+      extractorPageFingerprint: typeof rawSnapshot.pageFingerprint === 'string' ? rawSnapshot.pageFingerprint : null,
+      documentId: session.documentId ?? null,
+      pageInstanceId: session.pageInstanceId ?? null,
+    };
     const key = captureKey(tabId, frameId, sessionId);
     const origin = safeOrigin(bounded.snapshot.metadata?.url) || bounded.snapshot.metadata?.origin || '';
     let cachedEvidence = null;
     if (captureEvidence) {
-      if (boundCaptureEvidence(captureEvidence, { sessionId, pageFingerprint })) cachedEvidence = captureEvidence;
+      if (boundCaptureEvidence(captureEvidence, evidenceBinding)) cachedEvidence = captureEvidence;
       else if (captureCache.get(key) === captureEvidence) clearCaptureCache(key);
       else releaseCaptureEvidence(captureEvidence);
     } else if (bounded.mediaInventory.length > 0) {
       const cached = captureCache.get(key);
-      if (boundCaptureEvidence(cached, { sessionId, pageFingerprint })) cachedEvidence = cached;
+      if (boundCaptureEvidence(cached, evidenceBinding)) cachedEvidence = cached;
       else if (cached) clearCaptureCache(key);
     } else {
       clearCaptureCache(key);
@@ -615,7 +1045,7 @@ export async function createExtensionUniversalRuntime({
     }
     sessionMatches(registry, tabId, frameId, message?.sessionId);
     const run = async () => {
-      sessionMatches(registry, tabId, frameId, message?.sessionId);
+      const activeSession = sessionMatches(registry, tabId, frameId, message?.sessionId);
       clearOtherSessionCaptureCache(tabId, frameId, message?.sessionId);
       const bounded = boundedSnapshot(message?.snapshot);
       const pageFingerprint = canonicalPageFingerprint(bounded.snapshot);
@@ -630,10 +1060,19 @@ export async function createExtensionUniversalRuntime({
           mediaInventory: bounded.mediaInventory,
           windowId: sender?.tab?.windowId,
           pageFingerprint,
+          extractorPageFingerprint: message?.snapshot?.pageFingerprint,
         });
       } else if (bounded.mediaInventory.length > 0) {
         const cached = captureCache.get(captureCacheKey);
-        if (boundCaptureEvidence(cached, { sessionId: message?.sessionId, pageFingerprint })) captureEvidence = cached;
+        if (boundCaptureEvidence(cached, {
+          tabId,
+          frameId,
+          sessionId: message?.sessionId,
+          pageFingerprint,
+          extractorPageFingerprint: typeof message?.snapshot?.pageFingerprint === 'string' ? message.snapshot.pageFingerprint : null,
+          documentId: activeSession.documentId ?? null,
+          pageInstanceId: activeSession.pageInstanceId ?? null,
+        })) captureEvidence = cached;
         else if (cached) clearCaptureCache(captureCacheKey);
       } else {
         clearCaptureCache(captureCacheKey);
@@ -744,6 +1183,8 @@ export async function createExtensionUniversalRuntime({
           mediaInventory: bounded.mediaInventory,
           windowId: context.tab.windowId,
           pageFingerprint: canonicalPageFingerprint(bounded.snapshot),
+          extractorPageFingerprint: rawSnapshot.pageFingerprint,
+          includeRenderedAudio: true,
         });
         return ingestRaw({
           tabId: context.tab.id,
@@ -853,6 +1294,7 @@ export async function createExtensionUniversalRuntime({
     localApprovalStore,
     browserCapture,
     multimodalSettings,
+    capabilityPackRegistry: capabilityPacks,
     captureState: (tabId, frameId, sessionId) => clone(captureCache.get(captureKey(tabId, frameId, sessionId)) ?? null),
     ingestPageSnapshot,
     ingestRaw,

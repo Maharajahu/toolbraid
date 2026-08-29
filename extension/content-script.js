@@ -24,6 +24,7 @@
     mutationObserver: null,
     lastSnapshotFingerprint: null,
     snapshotInFlightFingerprint: null,
+    renderedCaptureControllers: new Map(),
   };
   if (!existing) {
     Object.defineProperty(global, stateKey, {
@@ -41,10 +42,18 @@
   if (state.readyTimer === undefined) state.readyTimer = null;
   if (state.lifecyclePort === undefined) state.lifecyclePort = null;
   if (state.lifecycleReconnectTimer === undefined) state.lifecycleReconnectTimer = null;
+  if (!(state.renderedCaptureControllers instanceof Map)) state.renderedCaptureControllers = new Map();
 
   const pageOrigin = () => global.location?.origin ?? '';
   const READY_HEARTBEAT_MS = 20_000;
   const LIFECYCLE_PORT_NAME = 'toolbraid:page-lifecycle';
+  const MAX_ACTIVE_RENDERED_CAPTURES = 2;
+  const MAX_RENDERED_CAPTURE_DURATION_MS = 3_000;
+  const MAX_RENDERED_CAPTURE_BYTES = 4 * 1024 * 1024;
+  const MAX_RENDERED_CAPTURE_TRACKS = 8;
+  const MAX_RENDERED_CAPTURE_CUES = 256;
+  const MAX_RENDERED_CAPTION_BYTES = 256 * 1024;
+  const PAGE_FINGERPRINT = /^[a-f0-9]{64}$/i;
 
   function sameBinding(left, right) {
     return Boolean(left && right
@@ -133,6 +142,164 @@
     };
   }
 
+  function clearCaptureBytes(result) {
+    try { result?.bytes?.fill?.(0); } catch { /* best-effort zeroization */ }
+  }
+
+  function abortRenderedCaptures() {
+    for (const controller of state.renderedCaptureControllers.values()) controller.abort();
+    state.renderedCaptureControllers.clear();
+  }
+
+  function boundedInteger(value, minimum, maximum) {
+    return Number.isInteger(value) && value >= minimum && value <= maximum;
+  }
+
+  function captureError(code, message) {
+    return { ok: false, error: { code, message, details: {} }, provenance: protocol.PROVENANCE };
+  }
+
+  function base64Bytes(bytes) {
+    if (!(bytes instanceof Uint8Array) || typeof global.btoa !== 'function') return null;
+    let binary = '';
+    for (let offset = 0; offset < bytes.byteLength; offset += 0x8000) {
+      const chunk = bytes.subarray(offset, Math.min(offset + 0x8000, bytes.byteLength));
+      binary += String.fromCharCode(...chunk);
+    }
+    return global.btoa(binary);
+  }
+
+  function captureTransport(result, mode) {
+    if (!result || typeof result !== 'object' || Array.isArray(result)) return null;
+    const { bytes, ...safe } = result;
+    if (mode !== 'audio' || result.ok !== true) return safe;
+    const audioBase64 = base64Bytes(bytes);
+    try { bytes?.fill?.(0); } catch { /* best-effort zeroization after encoding */ }
+    if (!audioBase64) return null;
+    return { ...safe, audioBase64 };
+  }
+
+  function handleRenderedMediaCapture(message, sendResponse) {
+    if (!boundExtensionMessage(message)) {
+      sendResponse?.(captureError('BINDING_MISMATCH', 'Rendered media capture did not match the active tab session.'));
+      return false;
+    }
+    const api = global.ToolBraidRenderedMediaCapture;
+    if (!api || typeof api.captureRenderedMedia !== 'function' || typeof api.readLoadedCaptions !== 'function') {
+      sendResponse?.(captureError('CAPTURE_UNSUPPORTED', 'The isolated rendered-media capture runtime is unavailable.'));
+      return false;
+    }
+    const mode = message.mode;
+    const requestId = message.requestId;
+    if (!['audio', 'captions'].includes(mode)
+      || typeof requestId !== 'string' || requestId.length < 8 || requestId.length > 256
+      || state.renderedCaptureControllers.has(requestId)
+      || message.provenance !== protocol.PROVENANCE
+      || message.pageInstanceId !== state.pageInstanceId
+      || !PAGE_FINGERPRINT.test(message.pageFingerprint ?? '')
+      || !PAGE_FINGERPRINT.test(message.extractorPageFingerprint ?? '')
+      || !boundedInteger(message.durationMs, 1, MAX_RENDERED_CAPTURE_DURATION_MS)
+      || !boundedInteger(message.maxBytes, 1, MAX_RENDERED_CAPTURE_BYTES)
+      || !boundedInteger(message.maxTracks, 1, MAX_RENDERED_CAPTURE_TRACKS)
+      || !boundedInteger(message.maxCues, 1, MAX_RENDERED_CAPTURE_CUES)
+      || !boundedInteger(message.maxCaptionBytes, 1, MAX_RENDERED_CAPTION_BYTES)) {
+      sendResponse?.(captureError('CAPTURE_REQUEST_INVALID', 'The rendered media capture request is invalid.'));
+      return false;
+    }
+    if (state.renderedCaptureControllers.size >= MAX_ACTIVE_RENDERED_CAPTURES) {
+      sendResponse?.(captureError('CAPTURE_BUSY', 'The rendered media capture concurrency limit was reached.'));
+      return false;
+    }
+    let before;
+    try { before = extractSnapshot(); } catch (error) {
+      sendResponse?.(snapshotError(error));
+      return false;
+    }
+    if (typeof message.extractorPageFingerprint !== 'string'
+      || before.pageFingerprint !== message.extractorPageFingerprint) {
+      sendResponse?.(captureError('CAPTURE_PAGE_DRIFT', 'The page changed before rendered media capture.'));
+      return false;
+    }
+    const controller = new AbortController();
+    state.renderedCaptureControllers.set(requestId, controller);
+    const request = {
+      elementRef: message.elementRef,
+      kind: message.kind,
+      durationMs: message.durationMs,
+      maxBytes: message.maxBytes,
+      maxTracks: message.maxTracks,
+      maxCues: message.maxCues,
+      maxCaptionBytes: message.maxCaptionBytes,
+      signal: controller.signal,
+    };
+    const operation = mode === 'audio'
+      ? api.captureRenderedMedia(request)
+      : api.readLoadedCaptions(request);
+    Promise.resolve(operation).then((result) => {
+      if (state.renderedCaptureControllers.get(requestId) !== controller || !boundExtensionMessage(message)) {
+        clearCaptureBytes(result);
+        sendResponse?.(captureError('CAPTURE_SESSION_DRIFT', 'The page session changed during rendered media capture.'));
+        return;
+      }
+      let after;
+      try { after = extractSnapshot(); } catch {
+        clearCaptureBytes(result);
+        sendResponse?.(captureError('CAPTURE_PAGE_DRIFT', 'The page could not be rebound after rendered media capture.'));
+        return;
+      }
+      if (after.pageFingerprint !== message.extractorPageFingerprint
+        || result?.metadata?.pageOrigin !== pageOrigin()
+        || result?.metadata?.elementRef !== message.elementRef
+        || result?.metadata?.sourceKind !== message.kind) {
+        clearCaptureBytes(result);
+        sendResponse?.(captureError('CAPTURE_PAGE_DRIFT', 'The page or media target changed during rendered media capture.'));
+        return;
+      }
+      const transport = captureTransport(result, mode);
+      if (!transport) {
+        clearCaptureBytes(result);
+        sendResponse?.(captureError('CAPTURE_ENCODING_FAILED', 'Rendered media bytes could not be encoded safely.'));
+        return;
+      }
+      sendResponse?.({
+        ok: true,
+        result: transport,
+        requestId,
+        tabId: message.tabId,
+        frameId: message.frameId,
+        sessionId: message.sessionId,
+        nonce: message.nonce,
+        pageInstanceId: message.pageInstanceId,
+        documentId: message.documentId ?? null,
+        pageFingerprint: message.pageFingerprint,
+        extractorPageFingerprint: after.pageFingerprint,
+        provenance: protocol.PROVENANCE,
+      });
+    }, () => {
+      sendResponse?.(captureError('CAPTURE_FAILED', 'Rendered media capture failed safely.'));
+    }).finally(() => {
+      if (state.renderedCaptureControllers.get(requestId) === controller) {
+        state.renderedCaptureControllers.delete(requestId);
+      }
+    });
+    return true;
+  }
+
+  function cancelRenderedMediaCapture(message, sendResponse) {
+    if (!boundExtensionMessage(message) || message.provenance !== protocol.PROVENANCE
+      || typeof message.requestId !== 'string') {
+      sendResponse?.(captureError('BINDING_MISMATCH', 'Rendered media cancellation did not match the active tab session.'));
+      return false;
+    }
+    const controller = state.renderedCaptureControllers.get(message.requestId);
+    if (controller) {
+      controller.abort();
+      state.renderedCaptureControllers.delete(message.requestId);
+    }
+    sendResponse?.({ ok: true, cancelled: Boolean(controller), requestId: message.requestId, provenance: protocol.PROVENANCE });
+    return false;
+  }
+
   function sendSnapshot(reason = 'page-change', force = false) {
     if (!state.session) return;
     const requestSession = state.session;
@@ -157,6 +324,7 @@
       if (!sameBinding(state.session, requestSession)) return;
       if (state.snapshotInFlightFingerprint !== fingerprint) return;
       state.snapshotInFlightFingerprint = null;
+      abortRenderedCaptures();
       if (!runtimeError && response?.ok === false && response?.error?.code === 'SESSION_NOT_FOUND') {
         requestReady();
         return;
@@ -295,6 +463,7 @@
     if (sameBinding(state.session, nextSession)) return;
     const previousSession = state.session;
     if (previousSession) {
+      abortRenderedCaptures();
       const close = protocol.createEnvelope(
         protocol.TYPES.CHANNEL_CLOSE,
         { provenance: protocol.PROVENANCE, reason: 'binding-replaced' },
@@ -374,6 +543,7 @@
       state.readyTimer = null;
       state.lastSnapshotFingerprint = null;
       state.snapshotInFlightFingerprint = null;
+      abortRenderedCaptures();
       for (const respond of state.pendingResponses.values()) respond({ ok: false, error: { code: 'SESSION_CLOSED', message: 'ToolBraid page session closed.' } });
       state.pendingResponses.clear();
       return false;
@@ -389,6 +559,12 @@
         sendResponse?.(snapshotError(error));
       }
       return false;
+    }
+    if (message.type === protocol.TYPES.PAGE_CAPTURE_RENDERED_MEDIA) {
+      return handleRenderedMediaCapture(message, sendResponse);
+    }
+    if (message.type === protocol.TYPES.PAGE_CAPTURE_RENDERED_MEDIA_CANCEL) {
+      return cancelRenderedMediaCapture(message, sendResponse);
     }
     if (message.type === protocol.TYPES.PAGE_ACTION_EXECUTE) {
       if (!boundExtensionMessage(message)) {

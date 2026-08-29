@@ -145,6 +145,12 @@ test('rejects extension-page sender spoofing and non-canonical extension origins
   assert.equal(uiSpoof.ok, false);
   assert.equal(uiSpoof.error.code, 'UI_SENDER_INVALID');
 
+  for (const type of ['UI_MISSION_CREATE', 'UI_HANDOFF_REQUEST', 'UI_HANDOFF_OPEN_SURFACE', 'UI_HANDOFF_COMPLETE']) {
+    const spoofed = await controller.handleRuntimeMessage({ type, payload: {} }, panelSender('attacker.html'));
+    assert.equal(spoofed.ok, false);
+    assert.equal(spoofed.error.code, 'UI_SENDER_INVALID');
+  }
+
   const wrongOrigin = await controller.handleRuntimeMessage({ type: MESSAGE_TYPES.BRIDGE_REGISTER_TOOLS, tabId: 7, tools: [] }, {
     id: EXTENSION_ID,
     url: `chrome-extension://${EXTENSION_ID}.attacker/bridge.html`,

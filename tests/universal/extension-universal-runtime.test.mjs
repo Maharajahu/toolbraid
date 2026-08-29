@@ -8,6 +8,9 @@ import {
   createExtensionUniversalRuntime,
 } from '../../extension/universal-runtime.js';
 import { MESSAGE_TYPES } from '../../extension/protocol.js';
+import { createPageSnapshot, generateWebMcpToolDescriptors } from '../../src/universal/index.js';
+import { createSiteAdapterRegistry } from '../../src/site-adapters/index.js';
+import { createMediaHandleStore } from '../../src/multimodal/index.js';
 
 function rawSnapshot() {
   return {
@@ -36,18 +39,22 @@ function rawSnapshot() {
   };
 }
 
-function harness() {
+function harness({ onSend = null } = {}) {
   const session = {
     tabId: 7,
     frameId: 0,
     sessionId: 'tab-7-session-runtime',
     nonce: '12345678-1234-4234-8234-123456789abc',
+    documentId: 'document-7-session-runtime',
+    pageInstanceId: 'page-instance-7-session-runtime',
   };
   const secondSession = {
     tabId: 8,
     frameId: 0,
     sessionId: 'tab-8-session-runtime',
     nonce: '87654321-4321-4321-8321-cba987654321',
+    documentId: 'document-8-session-runtime',
+    pageInstanceId: 'page-instance-8-session-runtime',
   };
   const sessions = new Map([[7, session], [8, secondSession]]);
   const registry = {
@@ -66,13 +73,20 @@ function harness() {
     setExecutionHandler(handler) { executeHandler = handler; },
   };
   const pageExecutions = [];
-  const sendToContentScript = async (_tabId, message) => {
+  const defaultSendToContentScript = async (_tabId, message) => {
     if (message.type === MESSAGE_TYPES.PAGE_EXTRACT_SNAPSHOT) return { ok: true, snapshot: rawSnapshot() };
     if (message.type === MESSAGE_TYPES.PAGE_ACTION_EXECUTE) {
       pageExecutions.push(message);
       return { ok: true, receipt: { receiptId: `receipt-${pageExecutions.length}`, mode: message.mode } };
     }
     throw new Error(`Unexpected content message: ${message.type}`);
+  };
+  const sendToContentScript = async (tabId, message, options = {}) => {
+    if (typeof onSend === 'function') {
+      const response = await onSend({ tabId, message, options, defaultSendToContentScript });
+      if (response !== undefined) return response;
+    }
+    return defaultSendToContentScript(tabId, message, options);
   };
   const chromeApi = {
     tabs: { query: async () => [{ id: activeTabId, url: 'https://example.test/form', title: 'Universal form' }] },
@@ -162,6 +176,264 @@ test('wires snapshot discovery, WebMCP execution, approval, exact refresh, and l
   assert.equal(executed.result.outcome, 'postcondition-unverified');
   assert.equal(h.pageExecutions.length, 1);
   assert.equal(h.pageExecutions[0].approved, true);
+});
+
+test('falls back to a local DOM handle for oversized media URLs', async () => {
+  const h = harness();
+  let analyzedAssets = null;
+  const integration = await createExtensionUniversalRuntime({
+    chromeApi: h.chromeApi,
+    registry: h.registry,
+    bridge: h.bridge,
+    sendToContentScript: h.sendToContentScript,
+    store: createMemoryKeyValueStore(),
+    localApprovalStore: h.localApprovalStore,
+    multimodalPipeline: {
+      limits: { maxAssets: 24 },
+      async analyzeAssets(assets) {
+        analyzedAssets = assets;
+        return {
+          version: 1,
+          results: [],
+          stats: { total: assets.length, completed: 0, blocked: 0, degraded: 0 },
+        };
+      },
+    },
+  });
+  const snapshot = rawSnapshot();
+  snapshot.mediaInventory[0].src = `data:image/png;base64,${'A'.repeat(8_192)}`;
+
+  const state = await integration.ingestPageSnapshot(
+    { sessionId: h.session.sessionId, snapshot },
+    { tab: { id: 7 }, frameId: 0 },
+  );
+  assert.equal(state.multimodal.stats.total, 1);
+  assert.equal(analyzedAssets[0].url, undefined);
+  assert.equal(analyzedAssets[0].handle, 'dom:hero');
+});
+
+test('observes a fresh page snapshot before applying a bound adapter postcondition verifier', async () => {
+  const h = harness();
+  const canonicalRaw = rawSnapshot();
+  delete canonicalRaw.pageFingerprint;
+  const page = createPageSnapshot(canonicalRaw);
+  const generic = generateWebMcpToolDescriptors(page, { includePageRead: true })
+    .find((tool) => tool.classification === 'mutate');
+  const contract = {
+    version: 1,
+    id: 'fixture.submit',
+    adapterId: 'fixture',
+    adapterVersion: '1',
+    observation: 'page-snapshot',
+  };
+  const descriptor = {
+    ...generic,
+    sourceType: 'verified-adapter',
+    adapter: { id: 'fixture', version: '1' },
+    provenance: {
+      ...generic.provenance,
+      source: 'toolbraid.verified-adapter',
+      adapterId: 'fixture',
+      adapterVersion: '1',
+      sourceType: 'verified-adapter',
+    },
+    postcondition: contract,
+  };
+  let verifierContext;
+  const siteAdapters = createSiteAdapterRegistry({
+    adapters: [{
+      id: 'fixture',
+      version: '1',
+      matches: () => true,
+      generateTools: () => [descriptor],
+    }],
+  });
+  const postconditionAdapters = createSiteAdapterRegistry({
+    adapters: [{
+      id: 'fixture',
+      version: '1',
+      matches: () => true,
+      generateTools: () => [],
+      verifyPostcondition: (context) => {
+        verifierContext = context;
+        return {
+          status: 'verified-success',
+          reasonCode: 'CONFIRMED',
+          afterPageFingerprint: context.afterSnapshot.pageFingerprint,
+        };
+      },
+    }],
+  });
+  const integration = await createExtensionUniversalRuntime({
+    chromeApi: h.chromeApi,
+    registry: h.registry,
+    bridge: h.bridge,
+    sendToContentScript: h.sendToContentScript,
+    siteAdapterRegistry: siteAdapters,
+    postconditionAdapterRegistry: postconditionAdapters,
+    store: createMemoryKeyValueStore(),
+    localApprovalStore: h.localApprovalStore,
+    now: () => new Date('2026-08-29T12:00:00.000Z'),
+  });
+  const state = await integration.ingestRaw({
+    tabId: 7,
+    frameId: 0,
+    sessionId: h.session.sessionId,
+    rawSnapshot: rawSnapshot(),
+  });
+  const mutation = state.tools.find((tool) => tool.postcondition?.id === contract.id);
+  assert.ok(mutation);
+  const property = Object.keys(mutation.inputSchema.properties)[0];
+  const prepared = await integration.handleUiMessage(UI_MESSAGE_TYPES.UI_PREPARE_ACTION, {
+    actionId: mutation.name,
+    arguments: { [property]: 'Publish this' },
+  });
+  const clock = new Date('2026-08-29T12:00:00.000Z');
+  const localApproval = {
+    version: 1,
+    provenance: PROVENANCE,
+    id: 'approval-local-postcondition',
+    nonce: 'local-postcondition-nonce-0001',
+    state: 'approved',
+    createdAt: clock.getTime(),
+    expiresAt: clock.getTime() + 60_000,
+    scope: prepared.preparedAction,
+    fingerprint: await fingerprintAction(prepared.preparedAction),
+  };
+  h.localApprovals.set(localApproval.id, localApproval);
+  await integration.handleUiMessage(UI_MESSAGE_TYPES.UI_APPROVE_ACTION, {
+    decision: 'approve',
+    approval: localApproval,
+  });
+  const executed = await integration.handleUiMessage(UI_MESSAGE_TYPES.UI_EXECUTE_ACTION, {
+    approval: localApproval,
+  });
+  assert.equal(executed.result.status, 'verified-success');
+  assert.equal(executed.result.postcondition, 'satisfied');
+  assert.equal(verifierContext.tool.name, mutation.name);
+  assert.equal(verifierContext.beforeSnapshot.pageFingerprint, page.pageFingerprint);
+  assert.equal(verifierContext.afterSnapshot.pageFingerprint, page.pageFingerprint);
+  assert.equal(h.pageExecutions.length, 1);
+});
+
+test('propagates postcondition timeout cancellation to the content snapshot request and ignores its late reply', async () => {
+  let actionDispatched = false;
+  let snapshotSignal;
+  let abortObserved = false;
+  let resolveSnapshotRequest;
+  const h = harness({
+    onSend: ({ tabId, message, options, defaultSendToContentScript }) => {
+      if (message.type === MESSAGE_TYPES.PAGE_ACTION_EXECUTE) {
+        actionDispatched = true;
+        return defaultSendToContentScript(tabId, message, options);
+      }
+      if (message.type === MESSAGE_TYPES.PAGE_EXTRACT_SNAPSHOT && actionDispatched) {
+        snapshotSignal = options.signal;
+        return new Promise((resolve) => {
+          resolveSnapshotRequest = resolve;
+          if (snapshotSignal?.addEventListener) {
+            snapshotSignal.addEventListener('abort', () => {
+              abortObserved = true;
+              resolve({ ok: true, snapshot: rawSnapshot() });
+            }, { once: true });
+          }
+        });
+      }
+      return defaultSendToContentScript(tabId, message, options);
+    },
+  });
+  const canonicalRaw = rawSnapshot();
+  delete canonicalRaw.pageFingerprint;
+  const page = createPageSnapshot(canonicalRaw);
+  const generic = generateWebMcpToolDescriptors(page, { includePageRead: true })
+    .find((tool) => tool.classification === 'mutate');
+  const contract = {
+    version: 1,
+    id: 'fixture.submit',
+    adapterId: 'fixture',
+    adapterVersion: '1',
+    observation: 'page-snapshot',
+  };
+  const descriptor = {
+    ...generic,
+    sourceType: 'verified-adapter',
+    adapter: { id: 'fixture', version: '1' },
+    provenance: {
+      ...generic.provenance,
+      source: 'toolbraid.verified-adapter',
+      adapterId: 'fixture',
+      adapterVersion: '1',
+      sourceType: 'verified-adapter',
+    },
+    postcondition: contract,
+  };
+  let verifierCalls = 0;
+  const siteAdapters = createSiteAdapterRegistry({
+    adapters: [{
+      id: 'fixture',
+      version: '1',
+      matches: () => true,
+      generateTools: () => [descriptor],
+      verifyPostcondition: () => {
+        verifierCalls += 1;
+        return { status: 'verified-success' };
+      },
+    }],
+  });
+  const integration = await createExtensionUniversalRuntime({
+    chromeApi: h.chromeApi,
+    registry: h.registry,
+    bridge: h.bridge,
+    sendToContentScript: h.sendToContentScript,
+    siteAdapterRegistry: siteAdapters,
+    store: createMemoryKeyValueStore(),
+    localApprovalStore: h.localApprovalStore,
+    postconditionTimeoutMs: 10,
+    now: () => new Date('2026-08-29T12:00:00.000Z'),
+  });
+  const state = await integration.ingestRaw({
+    tabId: 7,
+    frameId: 0,
+    sessionId: h.session.sessionId,
+    rawSnapshot: rawSnapshot(),
+  });
+  const mutation = state.tools.find((tool) => tool.postcondition?.id === contract.id);
+  assert.ok(mutation);
+  const property = Object.keys(mutation.inputSchema.properties)[0];
+  const prepared = await integration.handleUiMessage(UI_MESSAGE_TYPES.UI_PREPARE_ACTION, {
+    actionId: mutation.name,
+    arguments: { [property]: 'Publish this' },
+  });
+  const clock = new Date('2026-08-29T12:00:00.000Z');
+  const localApproval = {
+    version: 1,
+    provenance: PROVENANCE,
+    id: 'approval-local-postcondition-timeout',
+    nonce: 'local-postcondition-timeout-0001',
+    state: 'approved',
+    createdAt: clock.getTime(),
+    expiresAt: clock.getTime() + 60_000,
+    scope: prepared.preparedAction,
+    fingerprint: await fingerprintAction(prepared.preparedAction),
+  };
+  h.localApprovals.set(localApproval.id, localApproval);
+  await integration.handleUiMessage(UI_MESSAGE_TYPES.UI_APPROVE_ACTION, {
+    decision: 'approve',
+    approval: localApproval,
+  });
+  const executed = await integration.handleUiMessage(UI_MESSAGE_TYPES.UI_EXECUTE_ACTION, {
+    approval: localApproval,
+  });
+  assert.equal(executed.result.status, 'dispatched');
+  assert.equal(executed.result.verification.reasonCode, 'POSTCONDITION_TIMEOUT');
+  assert.equal(snapshotSignal instanceof AbortSignal, true);
+  assert.equal(snapshotSignal.aborted, true);
+  assert.equal(abortObserved, true);
+  assert.equal(verifierCalls, 0);
+  resolveSnapshotRequest({ ok: true, snapshot: rawSnapshot() });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(integration.runtime.state(7, 0).receipts.at(-1).verification.reasonCode, 'POSTCONDITION_TIMEOUT');
+  assert.equal(h.pageExecutions.length, 1);
 });
 
 test('rejects a locally tampered approval before durable authority is created', async () => {
@@ -448,6 +720,226 @@ test('captures visible multimodal evidence once per activation and reuses it acr
   await integration.closeSession(h.session, 'navigation');
   assert.deepEqual(calls.released, ['tb-media-activation-shot']);
   assert.equal(integration.captureState(7, 0, h.session.sessionId), null);
+});
+
+test('explicit multimodal reanalysis captures rendered audio, loaded captions, and bounded visible video frames', async () => {
+  const videoSnapshot = rawSnapshot();
+  videoSnapshot.pageFingerprint = 'a'.repeat(64);
+  videoSnapshot.mediaInventory = [{
+    ref: 'id:demo-video',
+    kind: 'video',
+    src: 'https://example.test/demo.mp4',
+  }];
+  videoSnapshot.elementRefs.push(
+    { ref: 'id:demo-video', tagName: 'video', role: null, name: '' },
+    { ref: 'id:embedded-player', tagName: 'iframe', role: null, name: '' },
+  );
+  const renderedCalls = [];
+  const h = harness({
+    onSend: async ({ message, defaultSendToContentScript }) => {
+      if (message.type === MESSAGE_TYPES.PAGE_EXTRACT_SNAPSHOT) return { ok: true, snapshot: videoSnapshot };
+      if (message.type !== MESSAGE_TYPES.PAGE_CAPTURE_RENDERED_MEDIA) return defaultSendToContentScript(7, message);
+      renderedCalls.push(message);
+      assert.equal(message.extractorPageFingerprint, videoSnapshot.pageFingerprint);
+      const responseBinding = {
+        provenance: PROVENANCE,
+        requestId: message.requestId,
+        tabId: message.tabId,
+        frameId: message.frameId,
+        sessionId: message.sessionId,
+        nonce: message.nonce,
+        documentId: message.documentId,
+        pageInstanceId: message.pageInstanceId,
+        pageFingerprint: message.pageFingerprint,
+        extractorPageFingerprint: videoSnapshot.pageFingerprint,
+      };
+      const metadata = {
+        elementRef: 'id:demo-video',
+        sourceKind: 'video',
+        pageOrigin: 'https://example.test',
+        pageUrl: 'https://example.test/form',
+      };
+      if (message.mode === 'captions') return {
+        ok: true,
+        ...responseBinding,
+        result: {
+          ok: true,
+          code: 'CAPTIONS_READY',
+          metadata,
+          captions: [{ kind: 'captions', language: 'en', label: 'English', text: 'A real rendered demonstration.' }],
+        },
+      };
+      return {
+        ok: true,
+        ...responseBinding,
+        result: {
+          ok: true,
+          code: 'CAPTURE_OK',
+          metadata: { ...metadata, mimeType: 'audio/webm', byteLength: 4, capturedDurationMs: 2500 },
+          captions: [{ kind: 'captions', language: 'en', label: 'English', text: 'A real rendered demonstration.' }],
+          audioBase64: 'AQIDBA==',
+        },
+      };
+    },
+  });
+  const handleStore = createMediaHandleStore();
+  let screenshots = 0;
+  const browserCapture = {
+    handleStore,
+    async captureVisibleScreenshot() {
+      screenshots += 1;
+      const stored = handleStore.put(new Uint8Array([screenshots]), { kind: 'image', mimeType: 'image/png' });
+      return { asset: {
+        kind: 'image',
+        source: 'capture',
+        handle: stored.handle,
+        mimeType: 'image/png',
+        byteLength: 1,
+        pageOrigin: 'https://example.test',
+        sensitive: true,
+      } };
+    },
+    async readCaptionTracks() { return []; },
+  };
+  const integration = await createExtensionUniversalRuntime({
+    chromeApi: h.chromeApi,
+    registry: h.registry,
+    bridge: h.bridge,
+    sendToContentScript: h.sendToContentScript,
+    store: createMemoryKeyValueStore(),
+    localApprovalStore: h.localApprovalStore,
+    browserCapture,
+  });
+  await integration.ingestRaw({
+    tabId: 7,
+    frameId: 0,
+    sessionId: h.session.sessionId,
+    rawSnapshot: videoSnapshot,
+  });
+
+  const response = await integration.handleUiMessage(UI_MESSAGE_TYPES.UI_REANALYZE_MULTIMODAL);
+  const capture = integration.captureState(7, 0, h.session.sessionId);
+
+  assert.equal(response.ok, true);
+  assert.equal(screenshots, 3);
+  assert.deepEqual(renderedCalls.map((message) => message.mode), ['captions', 'audio']);
+  assert.equal(capture.assets.length, 4);
+  assert.equal(capture.assets.filter((asset) => asset.kind === 'audio').length, 1);
+  assert.equal(capture.captions[0].text, 'A real rendered demonstration.');
+  assert.ok(capture.warnings.includes('IFRAME_MEDIA_NOT_CAPTURED'));
+  const audio = capture.assets.find((asset) => asset.kind === 'audio');
+  assert.deepEqual([...handleStore.get(audio.handle).bytes], [1, 2, 3, 4]);
+
+  await integration.closeSession(h.session, 'test-complete');
+  assert.equal(handleStore.stats().handles, 0);
+});
+
+test('times out and cancels hung rendered-media requests without retaining evidence', async () => {
+  const videoSnapshot = rawSnapshot();
+  videoSnapshot.pageFingerprint = 'b'.repeat(64);
+  videoSnapshot.mediaInventory = [{ ref: 'id:hung-video', kind: 'video', src: 'https://example.test/hung.mp4' }];
+  videoSnapshot.elementRefs.push({ ref: 'id:hung-video', tagName: 'video', role: null, name: '' });
+  const requested = [];
+  const cancelled = [];
+  const h = harness({
+    onSend: async ({ message, defaultSendToContentScript }) => {
+      if (message.type === MESSAGE_TYPES.PAGE_EXTRACT_SNAPSHOT) return { ok: true, snapshot: videoSnapshot };
+      if (message.type === MESSAGE_TYPES.PAGE_CAPTURE_RENDERED_MEDIA) {
+        requested.push(message.requestId);
+        return new Promise(() => {});
+      }
+      if (message.type === MESSAGE_TYPES.PAGE_CAPTURE_RENDERED_MEDIA_CANCEL) {
+        cancelled.push(message.requestId);
+        return { ok: true, cancelled: true };
+      }
+      return defaultSendToContentScript(7, message);
+    },
+  });
+  const released = [];
+  const integration = await createExtensionUniversalRuntime({
+    chromeApi: h.chromeApi,
+    registry: h.registry,
+    bridge: h.bridge,
+    sendToContentScript: h.sendToContentScript,
+    store: createMemoryKeyValueStore(),
+    localApprovalStore: h.localApprovalStore,
+    renderedCaptureTimeoutMs: 5,
+    browserCapture: {
+      handleStore: { release(handle) { released.push(handle); } },
+      async captureVisibleScreenshot() { return null; },
+      async readCaptionTracks() { return []; },
+    },
+  });
+  await integration.ingestRaw({ tabId: 7, frameId: 0, sessionId: h.session.sessionId, rawSnapshot: videoSnapshot });
+
+  const response = await integration.handleUiMessage(UI_MESSAGE_TYPES.UI_REANALYZE_MULTIMODAL);
+  const capture = integration.captureState(7, 0, h.session.sessionId);
+
+  assert.equal(response.ok, true);
+  assert.equal(requested.length, 2);
+  assert.deepEqual(cancelled, requested);
+  assert.ok(capture.warnings.includes('CAPTURE_TIMEOUT'));
+  assert.equal(capture.assets.length, 0);
+  assert.deepEqual(released, []);
+});
+
+test('rejects a rendered-audio response whose echoed worker binding is forged', async () => {
+  const audioSnapshot = rawSnapshot();
+  audioSnapshot.pageFingerprint = 'd'.repeat(64);
+  audioSnapshot.mediaInventory = [{ ref: 'id:bound-audio', kind: 'audio', src: 'https://example.test/audio.webm' }];
+  audioSnapshot.elementRefs.push({ ref: 'id:bound-audio', tagName: 'audio', role: null, name: '' });
+  const h = harness({
+    onSend: async ({ message, defaultSendToContentScript }) => {
+      if (message.type === MESSAGE_TYPES.PAGE_EXTRACT_SNAPSHOT) return { ok: true, snapshot: audioSnapshot };
+      if (message.type !== MESSAGE_TYPES.PAGE_CAPTURE_RENDERED_MEDIA) return defaultSendToContentScript(7, message);
+      const response = {
+        ok: true,
+        provenance: PROVENANCE,
+        requestId: message.requestId,
+        tabId: message.tabId,
+        frameId: message.frameId,
+        sessionId: message.sessionId,
+        nonce: message.mode === 'audio' ? 'forged-capture-nonce' : message.nonce,
+        documentId: message.documentId,
+        pageInstanceId: message.pageInstanceId,
+        pageFingerprint: message.pageFingerprint,
+        extractorPageFingerprint: message.extractorPageFingerprint,
+      };
+      const metadata = { elementRef: message.elementRef, sourceKind: message.kind, pageOrigin: 'https://example.test' };
+      if (message.mode === 'captions') return { ...response, result: { ok: true, metadata, captions: [] } };
+      return {
+        ...response,
+        result: {
+          ok: true,
+          metadata: { ...metadata, mimeType: 'audio/webm', byteLength: 4 },
+          captions: [],
+          audioBase64: 'AQIDBA==',
+        },
+      };
+    },
+  });
+  const handleStore = createMediaHandleStore();
+  const integration = await createExtensionUniversalRuntime({
+    chromeApi: h.chromeApi,
+    registry: h.registry,
+    bridge: h.bridge,
+    sendToContentScript: h.sendToContentScript,
+    store: createMemoryKeyValueStore(),
+    localApprovalStore: h.localApprovalStore,
+    browserCapture: {
+      handleStore,
+      async captureVisibleScreenshot() { return null; },
+      async readCaptionTracks() { return []; },
+    },
+  });
+  await integration.ingestRaw({ tabId: 7, frameId: 0, sessionId: h.session.sessionId, rawSnapshot: audioSnapshot });
+
+  await assert.rejects(
+    integration.handleUiMessage(UI_MESSAGE_TYPES.UI_REANALYZE_MULTIMODAL),
+    (error) => error.code === 'CAPTURE_BINDING_MISMATCH',
+  );
+  assert.equal(integration.captureState(7, 0, h.session.sessionId), null);
+  assert.equal(handleStore.stats().handles, 0);
 });
 
 test('rejects a forged session before privileged screenshot capture', async () => {

@@ -30,24 +30,32 @@ ToolBraid is the orchestration and safety layer above those tools. It discovers 
 
 The Universal extension extends that control plane to ordinary websites that have not implemented WebMCP. It observes the current page, builds a bounded DOM/ARIA snapshot, and registers a transparent local WebMCP surface inside the browser. Every generated tool is labelled `generated-by-toolbraid`; it is never presented as a native capability supplied by the website.
 
-The generated surface includes a bounded read tool plus target-specific tools for the exact live links, controls, and forms that ToolBraid can identify unambiguously. Known GitHub, Vercel, and X page shapes can be recognized by versioned, fail-closed adapters. All generic interactions require an exact approval in extension-owned UI before the isolated runtime can change the page. Approval is bound to the tab, session, origin, page and target fingerprints, normalized arguments, predicted effect, expiry, and a one-time nonce.
+The generated surface includes a bounded read tool plus target-specific tools for the exact live links, controls, and forms that ToolBraid can identify unambiguously. Known GitHub, Vercel, and X page shapes can be recognized by versioned, fail-closed adapters. When their exact controls or forms are present, the built-in packs can expose GitHub repository star/unstar, issue or pull-request comment, and close/reopen actions; Vercel deployment redeploy/cancel; and X like/repost actions plus reply staging. These are browser UI dispatches, not direct provider API calls. GitHub and Vercel have service-worker postcondition verifiers; X and generic interactions remain dispatch-unverified. All generic interactions require an exact approval in extension-owned UI before the isolated runtime can change the page. Approval is bound to the tab, session, origin, page and target fingerprints, normalized arguments, predicted effect, expiry, and a one-time nonce.
 
-Optional visual and audio analysis can enrich page evidence through an OpenAI-compatible endpoint configured by the user. The endpoint receives no authority: media stays behind short-lived extension-owned handles, credentials never enter the page context, and model output cannot approve or execute an action. Without a configured provider, Universal remains fully usable with deterministic DOM/ARIA and media metadata.
+Optional screenshot-vision and rendered-audio analysis can enrich page evidence through an OpenAI-compatible endpoint configured by the user. Activation captures a bounded visible-tab screenshot and eligible same-origin caption tracks; explicit reanalysis can capture bounded rendered audio. The shipped provider leaves video at metadata/caption-only and does not decode or upload video bytes. The endpoint receives no authority: media stays behind short-lived extension-owned handles, credentials never enter the page context, and model output cannot approve or execute an action. Without a configured provider, Universal remains fully usable with deterministic DOM/ARIA and media metadata.
 
-A generic receipt proves that the exact browser action was dispatched. It does not claim that a remote service completed the operation. Only a verified adapter with an observed postcondition may make that stronger claim.
+A generic receipt proves that the exact browser action was dispatched. It does not claim that a remote service completed the operation. Only a verified adapter with an observed postcondition may make that stronger claim. The MV3 service worker wires the built-in GitHub and Vercel verifiers; generic and X actions remain postcondition-unverified.
 
 ### Verified X surface
 
-On an exact `x.com/.../status/...` page, the fail-closed X adapter can expose:
+On an exact `x.com/.../status/...` or `twitter.com/.../status/...` page, the fail-closed X adapter can expose:
 
 - `read_x_post` for the visible post's author, handle, timestamp, text, URL, and media metadata;
 - `like_x_post` for the exact unliked post, gated by a fresh human approval;
-- `prepare_x_reply` only while a real reply editor is open; it stages text for review and never publishes it;
-- `repost_x_post` only while X exposes the exact positive repost confirmation item, also gated by approval.
+- `prepare_x_reply` only while a matching reply textbox/editor is present; it stages text for review and does not invoke publish (page-side reactions remain unverified);
+- `repost_x_post` only while X exposes a matching positive repost confirmation item, also gated by approval.
 
-The adapter anchors these tools to the article containing the exact status permalink and suppresses lookalike, quoted-post, stale, and already-completed controls. It does not currently claim a verified new-post publishing tool.
+The adapter attempts exact article scoping for post reads and likes. Reply and repost controls remain heuristic live-control matches; known opposite and already-completed controls are suppressed. It does not currently claim a verified new-post publishing tool.
 
 The MV3 content runtime keeps a validated lifecycle Port and heartbeat with the service worker. If the side panel closes or the worker disconnects, it re-establishes the page binding and submits a fresh snapshot before the next call. An interrupted mutation is never replayed automatically.
+
+### Capability packs, missions, and handoffs
+
+The shipped MV3 runtime selects three statically trusted, lazily loaded capability packs — `site.x`, `site.github`, and `site.vercel` — by exact HTTPS host/path and objective hints. Page snapshots cannot add or replace loaders; invalid, duplicate, overflow, and policy-failed descriptors are quarantined. The core combined registry allows up to 128 tools, while the shipped MV3 runtime limits active and registered tools to 32.
+
+Universal also supports bounded multi-page missions with up to 16 exact tab/frame members. Page drift invalidates pending actions and a worker restart requires rebind; pending actions are not restored. The handoff broker supports login, 2FA, and CAPTCHA steps with a five-minute default and fifteen-minute maximum TTL, exact-origin side-panel-created surfaces, and separate trusted open/complete proof. Credentials are not stored.
+
+Activation injects only top-level frame 0 and does not traverse child iframe documents. Rendered capture is audio-track/caption-only and rejects encrypted media (`mediaKeys`) with `DRM_MEDIA_UNSUPPORTED`.
 
 Build the load-unpacked extension with:
 
@@ -64,7 +72,7 @@ npm run validate:universal
 npm run test:universal:e2e
 ```
 
-The gate launches Chromium with the native `document.modelContext` surface, loads a temporary copy of the production bundle, and proves real read, exact approval, value change, form POST, redacted receipt, audit persistence, SPA invalidation, and adversarial rejection paths. Its fixture-origin and debugger grants exist only in that disposable test copy; the production manifest is asserted to contain neither permanent host access nor debugger authority.
+The gate launches Chromium with the native `document.modelContext` surface, loads a temporary copy of the production bundle, and proves real read, exact approval, value change, form POST, redacted receipt, audit persistence, SPA invalidation, rendered-audio/caption capture, and adversarial rejection paths. Its fixture-origin and debugger grants exist only in that disposable test copy; the production manifest is asserted to contain neither permanent host access nor debugger authority. A separate `--live-read-only` mode has passed real GitHub repository and issue reads without external dispatch; no live-site mutation is claimed.
 
 Universal E2E requires a Node Playwright module plus Chrome/Chromium. A non-standard installation can be supplied through `E2E_PLAYWRIGHT_MODULE` and `E2E_CHROME_PATH`; Python is needed only by the existing recovery-browser E2E commands.
 
@@ -168,6 +176,8 @@ Latest checked E2E outcome:
 ```text
 6 origins · 9 tools · 1 quarantined · 9 plan nodes
 recovery release-1841 · notice notice-r9 · 54 audit entries
+Universal: real GitHub repository + issue reads passed (read-only)
+Universal: real Chrome rendered audio + captions passed (no mutation)
 ```
 
 ## Repository map
@@ -175,6 +185,7 @@ recovery release-1841 · notice notice-r9 · 54 audit entries
 ```text
 src/engine/                 provider-neutral discovery, policy, graph, execution, approvals, audit
 src/packs/recovery/         recovery ontology, adapters, and two-stage plan
+src/packs/universal/        statically trusted lazy X, GitHub, and Vercel capability packs
 src/providers/recovery/     provider catalog and deterministic local fixtures
 providers/recovery/         six native provider documents plus same-origin live clients
 server/live-services/       allowlisted GitHub, Vercel, health, signing, and HTTP services
@@ -184,9 +195,9 @@ src/app/                    mission controller, state projection, constellation 
 src/universal/              bounded page snapshots, generated tools, policy, and execution contracts
 src/site-adapters/          versioned fail-closed adapters for supported live page shapes
 src/multimodal/             volatile media capture, evidence normalization, and provider contracts
-src/runtime/                Universal session and dispatch lifecycle
+src/runtime/                Universal session, dispatch, mission, and handoff lifecycle
 src/persistence/            bounded approvals, receipts, and audit persistence
-extension/                  MV3 worker, isolated runtime, MAIN-world registrar, and trusted side panel
+extension/                  MV3 worker, isolated runtime, MAIN registrar, media capture, missions, handoffs, and side panel
 tests/v2/                   unit, integration, security, and multi-origin contract tests
 tests/universal/            Universal unit, protocol, security, adapter, and build tests
 scripts/                    servers, checks, standalone/Vercel builds, capture, and browser E2E
@@ -200,7 +211,7 @@ docs/                       architecture, threat model, test evidence, and chall
 
 Agent-callable actions may start discovery, execute safe reads, inspect state, or attempt execution of already approved nodes. They cannot create approval.
 
-Approval creation is accepted only from a trusted human DOM activation. A synthetic `.click()` is rejected. Immediately before mutation, ToolBraid refreshes and rescans both live tools, verifies and atomically claims the full approval set, then executes recovery before publication. The local SHA-256 chain detects changes to the retained session record but is not a signed external audit log.
+Approval creation is accepted only from a trusted human DOM activation. A synthetic `.click()` is rejected. For native recovery, immediately before mutation, ToolBraid refreshes and rescans both live tools, verifies and atomically claims the full approval set, then executes recovery before publication. Universal page mutations refresh the current snapshot and bound target before dispatch. The local SHA-256 chain detects changes to the retained session record but is not a signed external audit log.
 
 ## Current scope
 

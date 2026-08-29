@@ -49,6 +49,33 @@
           </dl>
         </section>
 
+        <section class="panel mission-panel" aria-labelledby="missions-heading">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">MULTI-PAGE CONTINUITY</p>
+              <h2 id="missions-heading">Missions <span id="missions-count" class="count-badge">0</span></h2>
+            </div>
+            <button id="mission-start" class="button button-primary" type="button">Start on this page</button>
+          </div>
+          <div id="missions-list" class="stack-list" aria-live="polite">
+            <p class="empty-state">No active mission. Start one from the current page.</p>
+          </div>
+          <p id="mission-note" class="policy-note">Each mission keeps exact tab, frame, session, origin, and page-fingerprint ownership.</p>
+        </section>
+
+        <section class="panel handoff-panel" aria-labelledby="handoffs-heading">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">SECURE HUMAN HANDOFF</p>
+              <h2 id="handoffs-heading">Human steps <span id="handoffs-count" class="count-badge">0</span></h2>
+            </div>
+          </div>
+          <div id="handoffs-list" class="stack-list" aria-live="polite">
+            <p class="empty-state">No human-only step is waiting.</p>
+          </div>
+          <p id="handoff-note" class="policy-note">Credentials stay inside the approved site. ToolBraid stores no password, one-time code, or raw login URL.</p>
+        </section>
+
         <section class="panel" aria-labelledby="tools-heading">
           <div class="section-heading">
             <div>

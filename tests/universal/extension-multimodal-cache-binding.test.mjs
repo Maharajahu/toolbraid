@@ -45,6 +45,7 @@ function makePipeline() {
 function makeRuntime({
   browserCapture,
   tabsQuery = async () => [{ id: 7, url: 'https://example.test/page', title: 'Fixture' }],
+  tabsOnActivated = null,
   snapshotResponse = () => snapshot(),
 } = {}) {
   const sessions = new Map([[7, FIRST_SESSION]]);
@@ -56,7 +57,7 @@ function makeRuntime({
     },
     setExecutionHandler() {},
   };
-  const chromeApi = { tabs: { query: tabsQuery } };
+  const chromeApi = { tabs: { query: tabsQuery, ...(tabsOnActivated ? { onActivated: tabsOnActivated } : {}) } };
   return createExtensionUniversalRuntime({
     chromeApi,
     registry: { get(tabId, frameId = 0) { return frameId === 0 ? sessions.get(tabId) ?? null : null; } },
@@ -147,13 +148,40 @@ test('rejects a visible screenshot if the active tab changes while capture is in
       }];
     },
   });
-  const state = await integration.ingestPageSnapshot(
-    { sessionId: FIRST_SESSION.sessionId, reason: 'activation', snapshot: snapshot() },
-    { tab: { id: FIRST_SESSION.tabId, windowId: 19 }, frameId: 0 },
+  await assert.rejects(
+    integration.ingestPageSnapshot(
+      { sessionId: FIRST_SESSION.sessionId, reason: 'activation', snapshot: snapshot() },
+      { tab: { id: FIRST_SESSION.tabId, windowId: 19 }, frameId: 0 },
+    ),
+    (error) => error.code === 'CAPTURE_TAB_DRIFT',
   );
   assert.ok(queryCount >= 2, 'capture must verify active tab before and after the browser screenshot');
-  assert.equal(state.multimodal?.stats?.total ?? 0, 0);
   assert.equal(integration.captureState(7, 0, FIRST_SESSION.sessionId)?.assets?.length ?? 0, 0);
+});
+
+test('detects a switch away and back during capture through the activation generation', async () => {
+  const listeners = new Set();
+  const tabsOnActivated = {
+    addListener(listener) { listeners.add(listener); },
+    removeListener(listener) { listeners.delete(listener); },
+  };
+  const browserCapture = captureStub({
+    onCapture() {
+      for (const listener of listeners) listener({ tabId: 8, windowId: 19 });
+      for (const listener of listeners) listener({ tabId: 7, windowId: 19 });
+    },
+  });
+  const { integration } = await makeRuntime({ browserCapture, tabsOnActivated });
+
+  await assert.rejects(
+    integration.ingestPageSnapshot(
+      { sessionId: FIRST_SESSION.sessionId, reason: 'activation', snapshot: snapshot() },
+      { tab: { id: FIRST_SESSION.tabId, windowId: 19 }, frameId: 0 },
+    ),
+    (error) => error.code === 'CAPTURE_TAB_DRIFT',
+  );
+  assert.equal(listeners.size, 0);
+  assert.equal(integration.captureState(7, 0, FIRST_SESSION.sessionId), null);
 });
 
 test('orders activation capture and a faster page update by message arrival', async () => {

@@ -26,6 +26,8 @@ export const MESSAGE_TYPES = Object.freeze({
   PAGE_EVENT: 'toolbraid:page-event',
   PAGE_SNAPSHOT: 'toolbraid:page-snapshot',
   PAGE_EXTRACT_SNAPSHOT: 'toolbraid:extract-snapshot',
+  PAGE_CAPTURE_RENDERED_MEDIA: 'toolbraid:capture-rendered-media',
+  PAGE_CAPTURE_RENDERED_MEDIA_CANCEL: 'toolbraid:cancel-rendered-media-capture',
   PAGE_ACTION_EXECUTE: 'toolbraid:page-action-execute',
   BRIDGE_REGISTER_TOOLS: 'toolbraid:bridge-register-tools',
 });

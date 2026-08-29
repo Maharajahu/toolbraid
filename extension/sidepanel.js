@@ -5,6 +5,8 @@ import {
   stableStringify,
 } from './approval-store.js';
 import { createMultimodalSettingsStore } from './multimodal-provider.js';
+import { HANDOFF_UI_MESSAGE_TYPES } from './handoff-runtime.js';
+import { MISSION_UI_MESSAGE_TYPES } from './mission-runtime.js';
 
 export const UI_MESSAGE_TYPES = Object.freeze({
   UI_GET_STATE: 'UI_GET_STATE',
@@ -12,6 +14,11 @@ export const UI_MESSAGE_TYPES = Object.freeze({
   UI_APPROVE_ACTION: 'UI_APPROVE_ACTION',
   UI_EXECUTE_ACTION: 'UI_EXECUTE_ACTION',
   UI_REANALYZE_MULTIMODAL: 'UI_REANALYZE_MULTIMODAL',
+  UI_MISSION_CREATE: MISSION_UI_MESSAGE_TYPES.CREATE,
+  UI_MISSION_ATTACH: MISSION_UI_MESSAGE_TYPES.ATTACH,
+  UI_MISSION_REBIND: MISSION_UI_MESSAGE_TYPES.REBIND,
+  UI_HANDOFF_OPEN_SURFACE: HANDOFF_UI_MESSAGE_TYPES.OPEN_SURFACE,
+  UI_HANDOFF_COMPLETE: HANDOFF_UI_MESSAGE_TYPES.COMPLETE,
 });
 
 const UI_MESSAGE_TYPE_SET = new Set(Object.values(UI_MESSAGE_TYPES));
@@ -187,6 +194,42 @@ function normalizeMultimodalProvider(value) {
   };
 }
 
+function normalizeMission(value, index) {
+  const source = plainObject(value) ? value : {};
+  const members = (Array.isArray(source.members) ? source.members : []).slice(0, 16).map((member, memberIndex) => ({
+    memberId: boundedText(member?.memberId, `member-${memberIndex + 1}`, 220),
+    tabId: Number.isInteger(member?.tabId) ? member.tabId : null,
+    frameId: Number.isInteger(member?.frameId) ? member.frameId : 0,
+    origin: safeOrigin(member?.origin),
+    status: boundedText(member?.status, 'unknown', 32),
+    role: boundedText(member?.role, 'tab', 64),
+    required: member?.required === true,
+  }));
+  return {
+    missionId: boundedText(source.missionId, `mission-${index + 1}`, 220),
+    phase: boundedText(source.phase, 'running', 32),
+    revision: Number.isInteger(source.revision) ? source.revision : 0,
+    activeMemberId: boundedText(source.activeMemberId, '', 220),
+    members,
+  };
+}
+
+function normalizeHandoff(value, index) {
+  const source = plainObject(value) ? value : {};
+  const origin = safeOrigin(source.safeOrigin);
+  return {
+    handoffId: boundedText(source.handoffId, `handoff-${index + 1}`, 220),
+    type: boundedText(source.type, 'login', 24),
+    state: boundedText(source.state, 'unknown', 40),
+    missionId: boundedText(source.missionId, 'Unknown mission', 220),
+    memberId: boundedText(source.memberId, 'Unknown member', 220),
+    purpose: boundedText(source.purpose, 'Complete the human-only step.', 512),
+    safeOrigin: origin === 'Unavailable' ? null : origin,
+    expiresAt: boundedText(source.expiresAt, '', 64),
+    captchaCheckboxAttempts: Number.isInteger(source.captchaCheckboxAttempts) ? source.captchaCheckboxAttempts : 0,
+  };
+}
+
 function normalizeState(source = {}, localApprovals = []) {
   const page = plainObject(source.page) ? source.page : {};
   const tab = plainObject(source.tab) ? source.tab : {};
@@ -230,11 +273,37 @@ function normalizeState(source = {}, localApprovals = []) {
     receipts: (Array.isArray(source.receipts) ? source.receipts : []).slice(-24).map(normalizeReceipt),
     audit: normalizeAudit(source.audit),
     quarantinedCount: Array.isArray(source.quarantined) ? source.quarantined.length : 0,
+    missions: (Array.isArray(source.missions) ? source.missions : []).map(normalizeMission),
+    handoffs: (Array.isArray(source.handoffs) ? source.handoffs : []).map(normalizeHandoff),
+    missionError: boundedText(source.missionError?.message, '', 320),
+    handoffError: boundedText(source.handoffError?.message, '', 320),
   };
 }
 
 function trustedEvent(event) {
   return event?.isTrusted === true;
+}
+
+function callChromeApi(target, method, argument, runtime = globalThis.chrome?.runtime) {
+  const operation = target?.[method];
+  if (typeof operation !== 'function') return Promise.reject(new Error(`${method} is unavailable.`));
+  if (operation.length >= 2) {
+    return new Promise((resolve, reject) => {
+      try {
+        operation.call(target, argument, (value) => {
+          if (runtime?.lastError) reject(new Error(`${method} failed.`));
+          else resolve(value);
+        });
+      } catch {
+        reject(new Error(`${method} failed.`));
+      }
+    });
+  }
+  try {
+    return Promise.resolve(operation.call(target, argument));
+  } catch {
+    return Promise.reject(new Error(`${method} failed.`));
+  }
 }
 
 /**
@@ -276,6 +345,7 @@ export function sendUiMessage(type, payload = {}, runtime = globalThis.chrome?.r
 
 export function createUiController({
   runtime = globalThis.chrome?.runtime,
+  browser = globalThis.chrome,
   store = createApprovalStore(),
   multimodalSettings = createMultimodalSettingsStore(),
   now = () => Date.now(),
@@ -385,6 +455,83 @@ export function createUiController({
     }
   }
 
+  async function startMission(event) {
+    if (!trustedEvent(event)) return errorResult('TRUSTED_ACTIVATION_REQUIRED', 'Starting a mission requires a trusted user activation.');
+    if (!Number.isInteger(state.tab.id)) return errorResult('ACTIVE_TAB_UNAVAILABLE', 'Activate ToolBraid on an HTTP(S) tab first.');
+    if (state.missions.some((mission) => mission.members.some((member) => (
+      member.tabId === state.tab.id && member.frameId === 0 && member.status !== 'detached'
+    )))) {
+      return errorResult('TAB_FRAME_ALREADY_ATTACHED', 'The current page already belongs to an active mission.');
+    }
+    const created = await sendUiMessage(UI_MESSAGE_TYPES.UI_MISSION_CREATE, {}, runtime);
+    if (created.ok !== true) return created;
+    const missionId = created.result?.missionId;
+    if (typeof missionId !== 'string') return errorResult('MISSION_CREATE_INVALID', 'The mission runtime returned no mission identifier.');
+    const memberId = `member-${state.tab.id}-${Math.max(0, Math.trunc(Number(now())))}`;
+    return sendUiMessage(UI_MESSAGE_TYPES.UI_MISSION_ATTACH, {
+      missionId,
+      memberId,
+      tabId: state.tab.id,
+      frameId: 0,
+    }, runtime);
+  }
+
+  async function rebindMission(missionId, memberId, event) {
+    if (!trustedEvent(event)) return errorResult('TRUSTED_ACTIVATION_REQUIRED', 'Rebinding a mission requires a trusted user activation.');
+    if (!Number.isInteger(state.tab.id)) return errorResult('ACTIVE_TAB_UNAVAILABLE', 'Activate ToolBraid on an HTTP(S) tab first.');
+    return sendUiMessage(UI_MESSAGE_TYPES.UI_MISSION_REBIND, {
+      missionId: boundedText(missionId, '', 220),
+      memberId: boundedText(memberId, '', 220),
+      tabId: state.tab.id,
+      frameId: 0,
+    }, runtime);
+  }
+
+  async function openHandoff(handoffId, event) {
+    if (!trustedEvent(event)) return errorResult('TRUSTED_ACTIVATION_REQUIRED', 'Opening a human handoff requires a trusted user activation.');
+    const handoff = state.handoffs.find((entry) => entry.handoffId === handoffId);
+    if (!handoff?.safeOrigin) return errorResult('HANDOFF_ORIGIN_INVALID', 'The handoff has no exact safe origin.');
+    let createdWindow = null;
+    try {
+      if (!browser?.permissions?.request) return errorResult('HANDOFF_PERMISSION_UNAVAILABLE', 'Exact-origin handoff permission is unavailable.');
+      const granted = await callChromeApi(browser.permissions, 'request', { origins: [`${handoff.safeOrigin}/*`] }, browser.runtime);
+      if (granted !== true) return errorResult('HANDOFF_PERMISSION_DENIED', 'Exact-origin handoff permission was not granted.');
+      createdWindow = await callChromeApi(browser.windows, 'create', {
+        url: handoff.safeOrigin,
+        type: 'popup',
+        focused: true,
+        width: 520,
+        height: 720,
+      }, browser.runtime);
+      let surfaceTabId = createdWindow?.tabs?.[0]?.id;
+      if (!Number.isInteger(surfaceTabId) && Number.isInteger(createdWindow?.id)) {
+        const tabs = await callChromeApi(browser.tabs, 'query', { windowId: createdWindow.id }, browser.runtime);
+        surfaceTabId = tabs?.[0]?.id;
+      }
+      if (!Number.isInteger(surfaceTabId)) throw new Error('Human handoff tab is unavailable.');
+      const response = await sendUiMessage(UI_MESSAGE_TYPES.UI_HANDOFF_OPEN_SURFACE, {
+        handoffId: handoff.handoffId,
+        surfaceTabId,
+      }, runtime);
+      if (response.ok !== true && Number.isInteger(createdWindow?.id) && browser.windows?.remove) {
+        await callChromeApi(browser.windows, 'remove', createdWindow.id, browser.runtime).catch(() => undefined);
+      }
+      return response;
+    } catch {
+      if (Number.isInteger(createdWindow?.id) && browser?.windows?.remove) {
+        await callChromeApi(browser.windows, 'remove', createdWindow.id, browser.runtime).catch(() => undefined);
+      }
+      return errorResult('HANDOFF_OPEN_FAILED', 'The human handoff window could not be opened safely.');
+    }
+  }
+
+  async function completeHandoff(handoffId, event) {
+    if (!trustedEvent(event)) return errorResult('TRUSTED_ACTIVATION_REQUIRED', 'Completing a human handoff requires a trusted user activation.');
+    return sendUiMessage(UI_MESSAGE_TYPES.UI_HANDOFF_COMPLETE, {
+      handoffId: boundedText(handoffId, '', 220),
+    }, runtime);
+  }
+
   function getPreparedActions() {
     return [...prepared.values()];
   }
@@ -402,6 +549,10 @@ export function createUiController({
     executeApproval,
     configureMultimodal,
     disableMultimodal,
+    startMission,
+    rebindMission,
+    openHandoff,
+    completeHandoff,
     getPreparedActions,
     getState,
     now,
@@ -622,6 +773,80 @@ function renderApproval(record, controller, onChanged) {
   return card;
 }
 
+function renderMission(mission, controller, onChanged) {
+  const card = makeElement('article', 'item-card');
+  const heading = makeElement('div', 'item-heading');
+  heading.append(makeElement('h3', 'item-title', mission.missionId));
+  heading.append(badge(mission.phase, mission.phase === 'running' ? 'kind-read' : 'risk-badge'));
+  card.append(heading);
+  card.append(makeElement('p', 'item-description', `${mission.members.length} bound page${mission.members.length === 1 ? '' : 's'} · revision ${mission.revision}`));
+  const members = makeElement('div', 'detail-list');
+  for (const member of mission.members) {
+    const row = makeElement('div', 'mission-member');
+    const summary = makeElement('div', 'detail-list');
+    summary.append(detailRow(member.memberId, `${member.status} · tab ${member.tabId ?? '—'} · ${member.origin}`));
+    row.append(summary);
+    if (member.status === 'awaiting-rebind' || member.status === 'invalidated') {
+      const rebind = makeElement('button', 'button', 'Rebind current tab');
+      rebind.type = 'button';
+      rebind.addEventListener('click', async (event) => {
+        if (!trustedEvent(event)) return;
+        rebind.disabled = true;
+        const response = await controller.rebindMission(mission.missionId, member.memberId, event);
+        rebind.disabled = false;
+        onChanged(response, response.ok === true ? 'Mission member rebound to the live page.' : response.error?.message);
+      });
+      row.append(rebind);
+    }
+    members.append(row);
+  }
+  if (mission.members.length === 0) members.append(emptyMessage('No pages are attached to this mission.'));
+  card.append(members);
+  return card;
+}
+
+function renderHandoff(handoff, controller, onChanged) {
+  const card = makeElement('article', 'item-card approval-card');
+  const heading = makeElement('div', 'item-heading');
+  heading.append(makeElement('h3', 'item-title', handoff.type));
+  heading.append(badge(handoff.state, handoff.state === 'human-active' ? 'kind-mutate' : 'risk-badge'));
+  card.append(heading);
+  card.append(makeElement('p', 'item-description', handoff.purpose));
+  const details = makeElement('div', 'detail-list');
+  details.append(detailRow('Origin', handoff.safeOrigin ?? 'Unavailable'));
+  details.append(detailRow('Mission', handoff.missionId, true));
+  details.append(detailRow('Member', handoff.memberId, true));
+  if (handoff.expiresAt) details.append(detailRow('Expires', new Date(handoff.expiresAt).toLocaleTimeString()));
+  card.append(details);
+  const footer = makeElement('div', 'approval-footer');
+  if (handoff.state === 'awaiting-ui-gesture') {
+    const open = makeElement('button', 'button button-primary', 'Open human window');
+    open.type = 'button';
+    open.addEventListener('click', async (event) => {
+      if (!trustedEvent(event)) return;
+      open.disabled = true;
+      const response = await controller.openHandoff(handoff.handoffId, event);
+      open.disabled = false;
+      onChanged(response, response.ok === true ? 'Human-only window opened.' : response.error?.message);
+    });
+    footer.append(open);
+  }
+  if (handoff.state === 'human-active') {
+    const complete = makeElement('button', 'button button-primary', 'Done — validate & resume');
+    complete.type = 'button';
+    complete.addEventListener('click', async (event) => {
+      if (!trustedEvent(event)) return;
+      complete.disabled = true;
+      const response = await controller.completeHandoff(handoff.handoffId, event);
+      complete.disabled = false;
+      onChanged(response, response.ok === true ? 'Human step completed; mission can resume.' : response.error?.message);
+    });
+    footer.append(complete);
+  }
+  card.append(footer);
+  return card;
+}
+
 function renderEvidence(entry) {
   const card = makeElement('article', 'item-card evidence-card');
   const heading = makeElement('div', 'item-heading');
@@ -640,13 +865,21 @@ function renderReceipt(record) {
   const card = makeElement('article', 'item-card receipt-card');
   const heading = makeElement('div', 'item-heading');
   heading.append(makeElement('h3', 'item-title', record.operation));
-  heading.append(badge(record.status, record.status === 'outcome-unknown' ? 'risk-badge' : 'kind-mutate'));
+  const statusClass = record.status === 'verified-success'
+    ? 'kind-read'
+    : (record.status === 'verified-failure' ? 'kind-mutate' : 'risk-badge');
+  heading.append(badge(record.status, statusClass));
   card.append(heading);
   const details = makeElement('div', 'detail-list');
   details.append(detailRow('Target', record.target));
   details.append(detailRow('Action', record.actionId, true));
   details.append(detailRow('Events', record.events.join(', ') || 'Dispatched'));
-  details.append(detailRow('Outcome', record.outcome === 'unknown' ? 'Unknown after dispatch' : 'Postcondition unverified'));
+  const outcomeLabel = record.outcome === 'verified-success'
+    ? 'Verified success'
+    : (record.outcome === 'verified-failure'
+      ? 'Verified failure'
+      : (record.outcome === 'unknown' ? 'Unknown after dispatch' : 'Postcondition unverified'));
+  details.append(detailRow('Outcome', outcomeLabel));
   if (record.approvalFingerprint) details.append(detailRow('Approval', record.approvalFingerprint, true));
   card.append(details);
   return card;
@@ -688,6 +921,13 @@ export function createSidepanelApp({
     title: documentRef.getElementById('page-title'),
     tab: documentRef.getElementById('tab-value'),
     fingerprint: documentRef.getElementById('fingerprint-value'),
+    missionsCount: documentRef.getElementById('missions-count'),
+    missions: documentRef.getElementById('missions-list'),
+    missionStart: documentRef.getElementById('mission-start'),
+    missionNote: documentRef.getElementById('mission-note'),
+    handoffsCount: documentRef.getElementById('handoffs-count'),
+    handoffs: documentRef.getElementById('handoffs-list'),
+    handoffNote: documentRef.getElementById('handoff-note'),
     toolsCount: documentRef.getElementById('tools-count'),
     tools: documentRef.getElementById('tools-list'),
     actionsCount: documentRef.getElementById('actions-count'),
@@ -736,7 +976,12 @@ export function createSidepanelApp({
     if (refs.title) refs.title.textContent = boundedText(state.tab.title, 'Activate ToolBraid on a tab to inspect its live context.', 240);
     if (refs.tab) refs.tab.textContent = state.tab.id === null ? '—' : String(state.tab.id);
     if (refs.fingerprint) refs.fingerprint.textContent = boundedText(state.snapshot.fingerprint, '—', 128);
+    if (refs.missionStart) refs.missionStart.disabled = state.tab.id === null || state.missions.some((mission) => (
+      mission.members.some((member) => member.tabId === state.tab.id && member.frameId === 0 && member.status !== 'detached')
+    ));
     if (refs.toolsCount) refs.toolsCount.textContent = String(state.tools.length);
+    if (refs.missionsCount) refs.missionsCount.textContent = String(state.missions.length);
+    if (refs.handoffsCount) refs.handoffsCount.textContent = String(state.handoffs.length);
     if (refs.actionsCount) refs.actionsCount.textContent = String(state.actions.length);
     if (refs.approvalsCount) refs.approvalsCount.textContent = String(state.approvals.length);
     if (refs.evidenceCount) refs.evidenceCount.textContent = String(state.evidence.stats.total);
@@ -770,6 +1015,16 @@ export function createSidepanelApp({
     }
     if (refs.auditHead) refs.auditHead.textContent = state.audit.head;
     if (refs.quarantine) refs.quarantine.textContent = state.quarantinedCount ? `${state.quarantinedCount} quarantined` : 'No quarantined tools';
+    if (refs.missionNote) refs.missionNote.textContent = state.missionError || 'Each mission keeps exact tab, frame, session, origin, and page-fingerprint ownership.';
+    if (refs.handoffNote) refs.handoffNote.textContent = state.handoffError || 'Credentials stay inside the approved site. ToolBraid stores no password, one-time code, or raw login URL.';
+    if (refs.missions) renderList(refs.missions, state.missions, (mission) => renderMission(mission, appController, (response, message) => {
+      toast(message ?? 'Mission update failed.', response?.ok !== true);
+      if (response?.ok === true) void appController.refresh().then(render);
+    }), 'No active mission. Start one from the current page.');
+    if (refs.handoffs) renderList(refs.handoffs, state.handoffs, (handoff) => renderHandoff(handoff, appController, (response, message) => {
+      toast(message ?? 'Human handoff update failed.', response?.ok !== true);
+      if (response?.ok === true) void appController.refresh().then(render);
+    }), 'No human-only step is waiting.');
     if (refs.tools) renderList(refs.tools, state.tools, renderTool, 'No tools discovered yet.');
     if (refs.actions) renderList(refs.actions, state.actions, (action) => renderAction(action, appController, (response, message) => {
       toast(message ?? 'Action update failed.', response?.ok !== true);
@@ -816,6 +1071,14 @@ export function createSidepanelApp({
   refs.refresh?.addEventListener('click', (event) => {
     if (!trustedEvent(event)) return;
     void refresh();
+  });
+  refs.missionStart?.addEventListener('click', async (event) => {
+    if (!trustedEvent(event)) return;
+    refs.missionStart.disabled = true;
+    const response = await appController.startMission(event);
+    refs.missionStart.disabled = false;
+    toast(response.ok === true ? 'Mission started on the current page.' : response.error?.message, response.ok !== true);
+    if (response.ok === true) render(await appController.refresh());
   });
   refs.providerForm?.addEventListener('submit', async (event) => {
     event.preventDefault();

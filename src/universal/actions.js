@@ -19,6 +19,7 @@ import {
   descriptorFingerprint,
   validateToolDescriptor,
 } from './tools.js';
+import { validatePostconditionContract } from './postconditions.js';
 
 export const PREPARED_ACTION_VERSION = 1;
 
@@ -224,6 +225,7 @@ function actionPayload(action) {
     target: action.target,
     arguments: action.arguments,
     effect: action.effect,
+    ...(action.postcondition === undefined ? {} : { postcondition: action.postcondition }),
   };
 }
 
@@ -267,6 +269,9 @@ export function prepareAction(first, second, third, fourth) {
     origin: descriptor.provenance.origin ?? null,
   };
   const descriptorHash = descriptorFingerprint(descriptor);
+  const postcondition = descriptor.postcondition === undefined
+    ? undefined
+    : validatePostconditionContract(descriptor.postcondition);
   const payload = {
     version: PREPARED_ACTION_VERSION,
     pageFingerprint,
@@ -275,6 +280,7 @@ export function prepareAction(first, second, third, fourth) {
     target,
     arguments: normalizedArguments,
     effect,
+    ...(postcondition === undefined ? {} : { postcondition }),
   };
   const prepared = {
     version: PREPARED_ACTION_VERSION,
@@ -291,6 +297,7 @@ export function prepareAction(first, second, third, fourth) {
     classification: descriptor.classification,
     requiresApproval: descriptor.requiresApproval === true,
     effect,
+    ...(postcondition === undefined ? {} : { postcondition }),
     effectSummary: effect.summary,
     provenance: cloneJson(descriptor.provenance, '$.provenance'),
   };
@@ -308,6 +315,7 @@ export function prepareAction(first, second, third, fourth) {
 export function assertPreparedActionCurrent(prepared, rawSnapshot) {
   if (!prepared || typeof prepared !== 'object') throw actionError('ACTION_REQUIRED', 'A prepared action is required.');
   if (prepared.status !== 'prepared') throw actionError('ACTION_INVALIDATED', 'The prepared action is no longer executable.', { status: prepared.status });
+  if (prepared.postcondition !== undefined) validatePostconditionContract(prepared.postcondition);
   const snapshot = snapshotForAction(rawSnapshot);
   const currentFingerprint = snapshotFingerprint(snapshot);
   if (currentFingerprint !== prepared.pageFingerprint) {

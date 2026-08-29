@@ -16,9 +16,15 @@ import {
   safeHttpUrl,
   safeDomain,
 } from './common.js';
+import { elementFingerprint } from '../universal/snapshot.js';
+import { validateToolDescriptor } from '../universal/tools.js';
 
 export const VERCEL_HOSTS = Object.freeze(['vercel.com', 'www.vercel.com']);
 export const VERCEL_ADAPTER_VERSION = '1';
+export const VERCEL_POSTCONDITION_IDS = Object.freeze({
+  redeploy: 'vercel.deployment.redeploy.v1',
+  cancel: 'vercel.deployment.cancel.v1',
+});
 
 const SEGMENT_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const RESERVED_ROOTS = new Set([
@@ -216,6 +222,189 @@ function descriptorFor(snapshot, route, version) {
   });
 }
 
+const DEPLOYMENT_REDEPLOY_STATES = new Set(['ready', 'error', 'failed', 'canceled', 'cancelled']);
+const DEPLOYMENT_CANCEL_STATES = new Set(['queued', 'building', 'initializing', 'pending', 'waiting']);
+function controlAttribute(control, ...keys) {
+  const attributes = plainObject(control?.attributes) ? control.attributes : {};
+  for (const key of keys) {
+    if (Object.hasOwn(attributes, key)) return boundedText(attributes[key], null, 256);
+  }
+  return null;
+}
+
+function controlEnabled(control) {
+  if (!plainObject(control) || control.disabled === true || control.pressed === true || control.checked === true) return false;
+  if (String(controlAttribute(control, 'aria-disabled', 'ariaDisabled') ?? '').toLowerCase() === 'true') return false;
+  if (String(controlAttribute(control, 'aria-pressed', 'ariaPressed') ?? '').toLowerCase() === 'true') return false;
+  if (String(controlAttribute(control, 'aria-checked', 'ariaChecked') ?? '').toLowerCase() === 'true') return false;
+  if (String(controlAttribute(control, 'aria-hidden', 'ariaHidden', 'hidden') ?? '').toLowerCase() === 'true') return false;
+  if (Object.hasOwn(control?.attributes ?? {}, 'disabled')
+    && String(controlAttribute(control, 'disabled') ?? '').toLowerCase() !== 'false') return false;
+  if (Object.hasOwn(control?.attributes ?? {}, 'hidden')
+    && String(controlAttribute(control, 'hidden') ?? '').toLowerCase() !== 'false') return false;
+  if (control.hidden === true) return false;
+  const role = text(control.role, '', 64).toLowerCase();
+  const type = text(control.type, '', 64).toLowerCase();
+  return role === 'button' || type === 'button' || type === 'submit';
+}
+
+function controlRole(control) {
+  const role = text(control?.role, '', 64).toLowerCase();
+  if (role) return role;
+  const type = text(control?.type, '', 64).toLowerCase();
+  return ['button', 'submit'].includes(type) ? 'button' : null;
+}
+
+function namedActionKind(control) {
+  const name = text(control.name, '', 256).toLowerCase();
+  if (/^redeploy(?:\s+(?:this\s+)?deployment)?(?:\s+now)?$/.test(name)) return 'redeploy';
+  if (/^(?:cancel|stop)(?:\s+(?:this\s+)?)?(?:deployment|build)?$/.test(name)) return 'cancel';
+  return null;
+}
+
+function actionKindForControl(control) {
+  return controlEnabled(control) ? namedActionKind(control) : null;
+}
+
+function deploymentState(snapshot, route) {
+  return text(deploymentEvidence(snapshot, route).state, null, 64)?.toLowerCase() ?? null;
+}
+
+function deploymentId(snapshot, route) {
+  return deploymentEvidence(snapshot, route).deploymentId;
+}
+
+function uniqueDeploymentActionControl(snapshot, kind) {
+  const matches = (Array.isArray(snapshot?.accessibleControls) ? snapshot.accessibleControls : [])
+    .filter((control) => namedActionKind(control) === kind);
+  return matches.length === 1 && actionKindForControl(matches[0]) === kind ? matches[0] : null;
+}
+
+function actionDescriptor(snapshot, route, control, kind, version) {
+  const redeploy = kind === 'redeploy';
+  const name = redeploy ? 'redeploy_vercel_deployment' : 'cancel_vercel_deployment';
+  const title = redeploy ? 'Redeploy Vercel deployment' : 'Cancel Vercel deployment';
+  const summary = redeploy
+    ? `Redeploy the exact visible Vercel deployment ${route.deployment} after explicit approval.`
+    : `Cancel the exact visible Vercel deployment ${route.deployment} after explicit approval.`;
+  const targetFingerprint = elementFingerprint(control);
+  const postcondition = {
+    version: 1,
+    id: redeploy ? VERCEL_POSTCONDITION_IDS.redeploy : VERCEL_POSTCONDITION_IDS.cancel,
+    adapterId: 'vercel',
+    adapterVersion: version,
+    observation: 'page-snapshot',
+  };
+  const descriptor = {
+    version: 1,
+    name,
+    title,
+    description: `${summary} The page and deployment result remain untrusted until the postcondition is observed.`,
+    classification: 'mutate',
+    kind: 'mutate',
+    risk: 'transactional',
+    sourceType: 'control',
+    requiresApproval: true,
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    annotations: { readOnlyHint: false, untrustedContentHint: true },
+    provenance: {
+      source: 'toolbraid.verified-adapter',
+      adapterId: 'vercel',
+      adapterVersion: version,
+      generatorVersion: 1,
+      pageFingerprint: snapshot.pageFingerprint,
+      snapshotFingerprint: snapshot.pageFingerprint,
+      url: snapshot.metadata.url,
+      origin: route.url.origin,
+      sourceType: 'control',
+      elementRef: control.ref,
+      targetFingerprint,
+    },
+    pageFingerprint: snapshot.pageFingerprint,
+    target: {
+      ref: control.ref,
+      elementRef: control.ref,
+      type: 'control',
+      targetFingerprint,
+      binding: {
+        role: controlRole(control),
+        name: text(control.name, '', 256),
+        formRef: control.formRef ?? null,
+        ...(text(control.type, '', 64) ? { type: text(control.type, '', 64).toLowerCase() } : {}),
+      },
+    },
+    elementRef: control.ref,
+    effect: {
+      classification: 'mutate',
+      summary,
+      externalStateChange: true,
+      requiresApproval: true,
+    },
+    semanticEvidence: [{
+      source: 'verified-adapter',
+      code: redeploy ? 'VERCEL_REDEPLOY_CONTROL' : 'VERCEL_CANCEL_CONTROL',
+      adapterVersion: version,
+      deploymentId: route.deployment,
+    }],
+    postcondition,
+  };
+  validateToolDescriptor(descriptor);
+  return Object.freeze(descriptor);
+}
+
+function sameDeploymentProject(beforeRoute, afterRoute) {
+  return beforeRoute?.kind === 'deployment'
+    && afterRoute?.kind === 'deployment'
+    && beforeRoute.owner.toLowerCase() === afterRoute.owner.toLowerCase()
+    && beforeRoute.project.toLowerCase() === afterRoute.project.toLowerCase();
+}
+
+function verifyDeploymentPostcondition({ contract, beforeSnapshot, afterSnapshot, hosts = VERCEL_HOSTS }) {
+  const beforeRoute = routeFor(beforeSnapshot, hosts);
+  const afterRoute = routeFor(afterSnapshot, hosts);
+  if (!sameDeploymentProject(beforeRoute, afterRoute)) {
+    return {
+      status: 'unverified',
+      reasonCode: 'VERCEL_DEPLOYMENT_PAGE_MISMATCH',
+      evidence: { action: contract.id, beforeRoute: beforeRoute?.kind ?? null, afterRoute: afterRoute?.kind ?? null },
+    };
+  }
+  const beforeId = deploymentId(beforeSnapshot, beforeRoute);
+  const afterId = deploymentId(afterSnapshot, afterRoute);
+  const beforeState = deploymentState(beforeSnapshot, beforeRoute);
+  const afterState = deploymentState(afterSnapshot, afterRoute);
+  const evidence = { action: contract.id, beforeDeploymentId: beforeId, afterDeploymentId: afterId, beforeState, afterState };
+
+  if (contract.id === VERCEL_POSTCONDITION_IDS.cancel) {
+    const beforeControl = uniqueDeploymentActionControl(beforeSnapshot, 'cancel');
+    if (beforeId === afterId && beforeControl
+      && (beforeState === null || DEPLOYMENT_CANCEL_STATES.has(beforeState))
+      && ['canceled', 'cancelled'].includes(afterState)) {
+      return { status: 'verified-success', reasonCode: 'VERCEL_CANCEL_STATE_CONFIRMED', evidence };
+    }
+    return { status: 'unverified', reasonCode: 'VERCEL_CANCEL_NOT_CONFIRMED', evidence };
+  }
+
+  const newDeployment = Boolean(beforeId && afterId && beforeId !== afterId);
+  const beforeControl = uniqueDeploymentActionControl(beforeSnapshot, 'redeploy');
+  const matchingCommit = !beforeSnapshot || !afterSnapshot
+    ? false
+    : (() => {
+      const beforeCommit = deploymentEvidence(beforeSnapshot, beforeRoute).commitSha;
+      const afterCommit = deploymentEvidence(afterSnapshot, afterRoute).commitSha;
+      return !beforeCommit || !afterCommit || beforeCommit === afterCommit;
+    })();
+  const beforeStateAllowsRedeploy = beforeState === null || DEPLOYMENT_REDEPLOY_STATES.has(beforeState);
+  if (newDeployment && beforeControl && beforeStateAllowsRedeploy && matchingCommit
+    && (afterState === null || ['queued', 'building', 'initializing', 'pending', 'waiting', 'ready'].includes(afterState))) {
+    return { status: 'verified-success', reasonCode: 'VERCEL_REDEPLOY_STATE_CONFIRMED', evidence };
+  }
+  if (newDeployment && beforeControl && beforeStateAllowsRedeploy && matchingCommit && afterState === 'error') {
+    return { status: 'verified-failure', reasonCode: 'VERCEL_REDEPLOY_FAILED', evidence };
+  }
+  return { status: 'unverified', reasonCode: 'VERCEL_REDEPLOY_NOT_CONFIRMED', evidence };
+}
+
 export function parseVercelRoute(snapshot, { hosts = VERCEL_HOSTS } = {}) {
   const route = routeFor(snapshot, new Set([...hosts].map((host) => String(host).toLowerCase())));
   return route ? Object.freeze({ ...route, url: route.url.href }) : null;
@@ -249,7 +438,20 @@ export function createVercelAdapter({ hosts = VERCEL_HOSTS, version = VERCEL_ADA
     generateTools(snapshot) {
       const route = routeFor(snapshot, allowedHosts);
       if (!route) return Object.freeze([]);
-      return Object.freeze([descriptorFor(snapshot, route, version)]);
+      const tools = [descriptorFor(snapshot, route, version)];
+      if (route.kind !== 'deployment') return Object.freeze(tools);
+
+      const state = deploymentState(snapshot, route);
+      const redeployControl = (state === null || DEPLOYMENT_REDEPLOY_STATES.has(state))
+        ? uniqueDeploymentActionControl(snapshot, 'redeploy')
+        : null;
+      if (redeployControl) tools.push(actionDescriptor(snapshot, route, redeployControl, 'redeploy', version));
+
+      const cancelControl = (state === null || DEPLOYMENT_CANCEL_STATES.has(state))
+        ? uniqueDeploymentActionControl(snapshot, 'cancel')
+        : null;
+      if (cancelControl) tools.push(actionDescriptor(snapshot, route, cancelControl, 'cancel', version));
+      return Object.freeze(tools);
     },
     executeRead(tool, snapshot) {
       const route = routeFor(snapshot, allowedHosts);
@@ -257,6 +459,21 @@ export function createVercelAdapter({ hosts = VERCEL_HOSTS, version = VERCEL_ADA
       const expectedName = route.kind === 'project' ? 'read_vercel_project' : 'read_vercel_deployment';
       if (tool?.name !== expectedName || tool?.sourceType !== `vercel-${route.kind}`) return null;
       return extractVercelPage(snapshot);
+    },
+    verifyPostcondition(context = {}) {
+      const id = context?.contract?.id ?? context?.tool?.postcondition?.id;
+      if (![VERCEL_POSTCONDITION_IDS.redeploy, VERCEL_POSTCONDITION_IDS.cancel].includes(id)) {
+        return { status: 'unverified', reasonCode: 'VERCEL_POSTCONDITION_UNKNOWN' };
+      }
+      const result = verifyDeploymentPostcondition({
+        ...context,
+        hosts: allowedHosts,
+        contract: context.contract ?? context.tool.postcondition,
+      });
+      return {
+        ...result,
+        afterPageFingerprint: context.afterSnapshot?.pageFingerprint ?? null,
+      };
     },
   });
 }

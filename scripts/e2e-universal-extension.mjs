@@ -32,6 +32,7 @@ const INJECT_ISOLATED_FILES = Object.freeze([
   'protocol-runtime.js',
   'page-extractor.js',
   'action-executor.js',
+  'rendered-media-capture.js',
   'content-script.js',
 ]);
 
@@ -58,6 +59,7 @@ function parseArgs(argv) {
     headed: booleanEnv(process.env.E2E_HEADED, false),
     json: booleanEnv(process.env.E2E_JSON, false),
     keepProfile: booleanEnv(process.env.E2E_KEEP_PROFILE, false),
+    liveReadOnly: false,
     skipBuild: booleanEnv(process.env.E2E_SKIP_BUILD, false),
     timeoutMs: Number(process.env.E2E_TIMEOUT_MS ?? DEFAULT_TIMEOUT_MS),
   };
@@ -68,6 +70,7 @@ function parseArgs(argv) {
     else if (argument === '--json') options.json = true;
     else if (argument === '--keep-profile') options.keepProfile = true;
     else if (argument === '--skip-build') options.skipBuild = true;
+    else if (argument === '--live-read-only') options.liveReadOnly = true;
     else if (argument === '--timeout-ms') {
       options.timeoutMs = Number(argv[++index]);
     } else if (argument === '--help' || argument === '-h') {
@@ -90,6 +93,7 @@ function usage() {
     '  --headed       Launch headed Chrome (default is headless Chrome).',
     '  --headless     Force headless Chrome.',
     '  --skip-build   Use the existing dist/toolbraid-universal-extension.',
+    '  --live-read-only  Test real GitHub/Vercel pages without external mutations.',
     '  --keep-profile Keep the temporary Chrome profile for diagnosis.',
     '  --json         Emit only the final JSON report.',
     '  --timeout-ms N Override bounded wait timeout.',
@@ -100,6 +104,8 @@ function usage() {
     '  E2E_EXTENSION_DIR               Unpacked extension directory override.',
     '  E2E_PORT                        Fixture server port (0 chooses a free port).',
     '  E2E_WEBMCP_ARGS                 Additional WebMCP flags, separated by spaces.',
+    '  E2E_GITHUB_URL                  Required exact GitHub HTTPS URL for --live-read-only.',
+    '  E2E_VERCEL_URL                  Optional exact Vercel dashboard HTTPS URL.',
   ].join('\n');
 }
 
@@ -206,7 +212,7 @@ function fixtureHostPermission(origin) {
   return `${url.origin}/*`;
 }
 
-async function prepareLaunchBundle({ sourceExtensionDir, sourceManifest, fixtureOrigin }) {
+async function prepareLaunchBundle({ sourceExtensionDir, sourceManifest, fixtureOrigin, hostOrigins = null }) {
   if (Object.hasOwn(sourceManifest, 'host_permissions')) {
     fail('E2E_SOURCE_MANIFEST_AUTHORITY', 'The production manifest must not contain permanent host_permissions.', {
       sourceExtensionDir,
@@ -222,12 +228,17 @@ async function prepareLaunchBundle({ sourceExtensionDir, sourceManifest, fixture
   const launchBundleRoot = await mkdtemp(path.join(os.tmpdir(), 'toolbraid-universal-e2e-bundle-'));
   const tempExtensionDir = path.join(launchBundleRoot, 'extension');
   await cp(sourceExtensionDir, tempExtensionDir, { recursive: true });
-  const hostPermission = fixtureHostPermission(fixtureOrigin);
+  const requestedOrigins = hostOrigins ?? [fixtureOrigin];
+  if (!Array.isArray(requestedOrigins) || requestedOrigins.length < 1) {
+    fail('E2E_HOST_ORIGIN_INVALID', 'At least one exact launch origin is required.');
+  }
+  const hostPermissions = [...new Set(requestedOrigins.map(fixtureHostPermission))];
+  const hostPermission = hostPermissions[0];
   const tempManifestPath = path.join(tempExtensionDir, 'manifest.json');
   const tempManifest = {
     ...sourceManifest,
     permissions: [...new Set([...(sourceManifest.permissions ?? []), 'debugger'])],
-    host_permissions: [hostPermission],
+    host_permissions: hostPermissions,
   };
   await writeFile(tempManifestPath, `${JSON.stringify(tempManifest, null, 2)}\n`, 'utf8');
   await validateBundleImports(tempExtensionDir, tempManifest.background.service_worker);
@@ -237,6 +248,7 @@ async function prepareLaunchBundle({ sourceExtensionDir, sourceManifest, fixture
     sourceManifest,
     tempManifest,
     hostPermission,
+    hostPermissions: Object.freeze(hostPermissions),
   });
 }
 
@@ -913,12 +925,254 @@ async function addSpaMutationControl(page) {
   });
 }
 
+async function installDeterministicRenderedAudio(page) {
+  return page.evaluate(async () => {
+    const sampleRate = 8_000;
+    const sampleCount = sampleRate;
+    const bytes = new Uint8Array(44 + sampleCount * 2);
+    const view = new DataView(bytes.buffer);
+    const write = (offset, text) => { for (let index = 0; index < text.length; index += 1) bytes[offset + index] = text.charCodeAt(index); };
+    write(0, 'RIFF');
+    view.setUint32(4, 36 + sampleCount * 2, true);
+    write(8, 'WAVE');
+    write(12, 'fmt ');
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, 1, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * 2, true);
+    view.setUint16(32, 2, true);
+    view.setUint16(34, 16, true);
+    write(36, 'data');
+    view.setUint32(40, sampleCount * 2, true);
+    for (let index = 0; index < sampleCount; index += 1) {
+      view.setInt16(44 + index * 2, Math.round(Math.sin(2 * Math.PI * 440 * index / sampleRate) * 2_000), true);
+    }
+    let binary = '';
+    for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+      binary += String.fromCharCode(...bytes.subarray(offset, Math.min(offset + 0x8000, bytes.length)));
+    }
+    const audio = document.querySelector('audio');
+    audio.querySelectorAll('source').forEach((source) => source.remove());
+    audio.src = `data:audio/wav;base64,${btoa(binary)}`;
+    audio.loop = true;
+    audio.volume = 0.01;
+    await audio.play();
+    const video = document.querySelector('video');
+    const track = video.addTextTrack('captions', 'E2E rendered captions', 'en');
+    track.mode = 'hidden';
+    track.addCue(new VTTCue(0, 3, 'The checkout recovery completed successfully.'));
+    return { playing: !audio.paused, duration: audio.duration, tracks: video.textTracks.length };
+  });
+}
+
 async function expectRejected(response, label) {
   assert(response?.ok !== true, 'E2E_REJECTION_MISSING', `${label} unexpectedly succeeded.`, { response });
   return response?.error?.code ?? 'UNKNOWN_REJECTION';
 }
 
+function liveTarget(rawUrl, kind) {
+  let url;
+  try { url = new URL(rawUrl); } catch {
+    fail('E2E_LIVE_URL_INVALID', `The ${kind} live URL is invalid.`, { rawUrl });
+  }
+  const allowedHosts = kind === 'github' ? new Set(['github.com']) : new Set(['vercel.com', 'www.vercel.com']);
+  if (url.protocol !== 'https:' || !allowedHosts.has(url.hostname) || url.username || url.password || url.port) {
+    fail('E2E_LIVE_URL_INVALID', `The ${kind} live URL must use an exact supported HTTPS origin.`, { url: url.href });
+  }
+  return Object.freeze({ kind, url: url.href, origin: url.origin });
+}
+
+function liveReadTool(state, kind) {
+  return state?.tools?.find((tool) => tool?.classification === 'read'
+    && tool?.provenance?.source === 'toolbraid.verified-adapter'
+    && tool?.name?.startsWith(`read_${kind}_`));
+}
+
+async function verifyLiveReadOnlyTarget({ options, report, page, extensionPage, worker, target }) {
+  await page.goto(target.url, { waitUntil: 'domcontentloaded', timeout: options.timeoutMs });
+  await page.bringToFront();
+  const finalUrl = new URL(page.url());
+  if (finalUrl.pathname === '/login' || finalUrl.pathname.startsWith('/login/')) {
+    report.checks.push({ name: `live.${target.kind}.login-required`, ok: false, blocked: true, requestedUrl: target.url, finalUrl: finalUrl.href });
+    return { status: 'blocked', reason: 'LOGIN_REQUIRED' };
+  }
+  if (finalUrl.origin !== target.origin) {
+    fail('E2E_LIVE_REDIRECT_UNSAFE', `The ${target.kind} target redirected to another origin.`, {
+      requestedUrl: target.url,
+      finalUrl: finalUrl.href,
+    });
+  }
+  const tab = await activeFixtureTab(extensionPage, page, target.origin);
+  await injectProductionScripts(worker, tab.id);
+  const state = await waitFor(`${target.kind} live adapter ingestion`, async () => {
+    const response = await sendUi(extensionPage, page, 'UI_GET_STATE', {}, target.origin);
+    const candidate = response?.state;
+    if (response?.ok === true && liveReadTool(candidate, target.kind)) return candidate;
+    const loadProbe = candidate?.capabilityPacks?.quarantined?.some((entry) => entry.code === 'PACK_LOAD_FAILED')
+      ? await worker.evaluate(async ({ kind }) => {
+        try {
+          const module = await import(chrome.runtime.getURL(`src/site-adapters/${kind}.js`));
+          return { ok: true, exports: Object.keys(module) };
+        } catch (error) {
+          return { ok: false, name: error?.name ?? 'Error', message: error?.message ?? String(error) };
+        }
+      }, { kind: target.kind })
+      : null;
+    throw new Error(JSON.stringify({
+      url: page.url(),
+      responseError: response?.error ?? null,
+      tools: candidate?.tools?.map((tool) => ({ name: tool.name, sourceType: tool.sourceType, classification: tool.classification })) ?? [],
+      packs: candidate?.capabilityPacks?.activePacks ?? [],
+      quarantined: candidate?.capabilityPacks?.quarantined ?? candidate?.quarantined ?? [],
+      loadProbe,
+    }));
+  }, { timeoutMs: options.timeoutMs });
+  const packId = `site.${target.kind}`;
+  const activePack = state.capabilityPacks?.activePacks?.find((entry) => entry.id === packId);
+  assert(activePack?.version === '1', 'E2E_LIVE_PACK_MISSING', `The ${packId} capability pack did not activate on the live page.`, {
+    activePacks: state.capabilityPacks?.activePacks ?? [],
+    url: finalUrl.href,
+  });
+  const tool = liveReadTool(state, target.kind);
+  assert(tool?.provenance?.source === 'toolbraid.verified-adapter'
+    && tool?.provenance?.pageFingerprint === state.snapshot.pageFingerprint
+    && tool?.pageFingerprint === state.snapshot.pageFingerprint,
+  'E2E_LIVE_DESCRIPTOR_UNBOUND', 'The live read descriptor was not adapter-verified and fingerprint-bound.', { tool, snapshot: state.snapshot });
+  const read = await callRegisteredTool(page, tool.name, {});
+  assert(read?.ok === true
+    && read.result?.untrustedContent === true
+    && typeof read.result?.type === 'string'
+    && read.result.type.startsWith(`${target.kind}-`),
+  'E2E_LIVE_READ_FAILED', `The native WebMCP ${target.kind} read did not return bounded untrusted evidence.`, { read, tool });
+
+  let preparedMutation = null;
+  const mutation = state.tools.find((candidate) => candidate?.classification === 'mutate'
+    && candidate?.provenance?.source === 'toolbraid.verified-adapter'
+    && (candidate?.inputSchema?.required?.length ?? 0) === 0
+    && Object.keys(candidate?.inputSchema?.properties ?? {}).length === 0);
+  if (mutation) {
+    assert(mutation.kind === 'mutate'
+      && mutation.requiresApproval === true
+      && mutation.readOnlyHint === false
+      && mutation.effect?.externalStateChange === true
+      && typeof mutation.target?.ref === 'string'
+      && mutation.pageFingerprint === state.snapshot.pageFingerprint
+      && mutation.postcondition?.adapterId === target.kind,
+    'E2E_LIVE_MUTATION_UNBOUND', 'A live mutation descriptor was not exact, approval-gated, and postcondition-bound.', { mutation });
+    const prepared = await callRegisteredTool(page, mutation.name, {});
+    assert(prepared?.ok === true && prepared.result?.status === 'approval-required' && prepared.result?.preparedAction,
+      'E2E_LIVE_APPROVAL_BYPASS', 'A live mutation did not stop at the ToolBraid approval boundary.', { mutation, prepared });
+    const denied = await sendUi(extensionPage, page, 'UI_APPROVE_ACTION', {
+      decision: 'deny',
+      action: prepared.result.preparedAction,
+    }, target.origin);
+    assert(denied?.ok === true, 'E2E_LIVE_DENY_FAILED', 'The prepared live mutation could not be denied locally.', { denied });
+    preparedMutation = mutation.name;
+  }
+
+  const finalStateResponse = await sendUi(extensionPage, page, 'UI_GET_STATE', {}, target.origin);
+  const finalState = finalStateResponse?.state;
+  const events = finalState?.audit?.entries?.map((entry) => entry.event) ?? [];
+  assert(finalStateResponse?.ok === true
+    && finalState.audit?.verified === true
+    && events.includes('tool.read')
+    && !events.includes('action.dispatching')
+    && !events.includes('action.dispatched')
+    && (finalState.pendingActions?.length ?? 0) === 0,
+  'E2E_LIVE_AUDIT_INVALID', 'The live read-only run did not remain dispatch-free and audit-verifiable.', { events, finalState });
+  const runtime = await pageRuntimeState(page, { worker, tabId: tab.id });
+  assert(runtime.webmcp.available && runtime.main.session?.tabId === tab.id && runtime.content.session?.tabId === tab.id,
+    'E2E_LIVE_RUNTIME_UNBOUND', 'The live page did not retain an exact worker/content/MAIN WebMCP session.', { runtime, tab });
+  report.checks.push({
+    name: `live.${target.kind}.read-only`,
+    ok: true,
+    requestedUrl: target.url,
+    finalUrl: finalUrl.href,
+    tabId: tab.id,
+    pack: { id: activePack.id, version: activePack.version },
+    tool: tool.name,
+    resultType: read.result.type,
+    preparedMutation,
+    auditEvents: events,
+  });
+  return { status: 'passed' };
+}
+
+async function liveReadOnlyMain(options) {
+  const githubRaw = process.env.E2E_GITHUB_URL;
+  if (!githubRaw) fail('E2E_LIVE_URL_REQUIRED', 'E2E_GITHUB_URL is required for --live-read-only.');
+  const targets = [liveTarget(githubRaw, 'github')];
+  if (process.env.E2E_VERCEL_URL) targets.push(liveTarget(process.env.E2E_VERCEL_URL, 'vercel'));
+  const report = { ok: false, mode: 'live-read-only', checks: [], config: { targets: targets.map((entry) => entry.url) } };
+  let context = null;
+  let profile = null;
+  let launchBundleRoot = null;
+  let extensionPage = null;
+  try {
+    const sourceExtensionDir = resolveExtensionDir();
+    const playwright = resolvePlaywright();
+    const chromePath = resolveChromePath(playwright);
+    const sourceManifest = await ensureExtensionBundle(sourceExtensionDir, options.skipBuild);
+    const launchBundle = await prepareLaunchBundle({
+      sourceExtensionDir,
+      sourceManifest,
+      fixtureOrigin: targets[0].origin,
+      hostOrigins: targets.map((entry) => entry.origin),
+    });
+    launchBundleRoot = launchBundle.launchBundleRoot;
+    report.config.sourceExtensionDir = sourceExtensionDir;
+    report.config.chromePath = chromePath;
+    report.config.hostPermissions = launchBundle.hostPermissions;
+    profile = await mkdtemp(path.join(os.tmpdir(), 'toolbraid-universal-live-e2e-'));
+    const webmcpArgs = [...new Set([...DEFAULT_WEBMCP_ARGS, ...parseExtraWebMcpArgs()])];
+    context = await playwright.chromium.launchPersistentContext(profile, {
+      headless: !options.headed,
+      executablePath: chromePath,
+      ignoreDefaultArgs: ['--disable-extensions'],
+      args: [
+        `--disable-extensions-except=${launchBundle.tempExtensionDir}`,
+        `--load-extension=${launchBundle.tempExtensionDir}`,
+        '--no-first-run',
+        '--no-default-browser-check',
+        '--autoplay-policy=no-user-gesture-required',
+        ...webmcpArgs,
+      ],
+      viewport: { width: 1365, height: 900 },
+    });
+    const worker = await waitForWorker(context, options.timeoutMs);
+    const extensionId = extensionIdFromWorker(worker);
+    report.config.extensionId = extensionId;
+    const page = context.pages().find((candidate) => candidate.url() === 'about:blank') ?? await context.newPage();
+    await page.goto(targets[0].url, { waitUntil: 'domcontentloaded', timeout: options.timeoutMs });
+    await page.bringToFront();
+    const launcher = await context.newPage();
+    await launcher.goto(`chrome-extension://${extensionId}/sidepanel.html`, { waitUntil: 'domcontentloaded' });
+    extensionPage = await openTrustedSidePanel({
+      context,
+      worker,
+      launcherPage: launcher,
+      tabId: (await activeFixtureTab(launcher, page, targets[0].origin)).id,
+      extensionId,
+      timeoutMs: options.timeoutMs,
+    });
+    const outcomes = [];
+    for (const target of targets) outcomes.push(await verifyLiveReadOnlyTarget({ options, report, page, extensionPage, worker, target }));
+    assert(outcomes.some((entry) => entry.status === 'passed'), 'E2E_LIVE_NO_PASS', 'No real site completed the live read-only gate.', { outcomes });
+    report.ok = true;
+    report.message = 'Real-site Universal extension read-only E2E completed without external dispatch.';
+    return report;
+  } finally {
+    try { await extensionPage?.close?.(); } catch { /* diagnostic cleanup only */ }
+    try { await context?.close(); } catch { /* diagnostic cleanup only */ }
+    if (profile && !options.keepProfile) await rm(profile, { recursive: true, force: true }).catch(() => {});
+    else if (profile) report.profile = profile;
+    if (launchBundleRoot) await rm(launchBundleRoot, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
 async function main(options) {
+  if (options.liveReadOnly) return liveReadOnlyMain(options);
   const report = {
     ok: false,
     checks: [],
@@ -1000,6 +1254,7 @@ async function main(options) {
           '--load-extension=' + tempExtensionDir,
           '--no-first-run',
           '--no-default-browser-check',
+          '--autoplay-policy=no-user-gesture-required',
           ...webmcpArgs,
         ],
         viewport: { width: 1365, height: 900 },
@@ -1258,6 +1513,48 @@ async function main(options) {
     assert(spaChanged.state.pendingActions?.length === 0, 'E2E_SPA_PENDING_NOT_INVALIDATED', 'Fingerprint drift left the old pending action executable.', { pendingActions: spaChanged.state.pendingActions });
     assert(!spaChanged.runtime.main.registrations.some((entry) => oldRegistrationNames.includes(entry.name) && entry.name === spaPending.name), 'E2E_SPA_STALE_REGISTRATION', 'The old SPA registration remained active after DOM/history drift.', { oldRegistrationNames, current: spaChanged.runtime.main.registrations });
     report.checks.push({ name: 'spa-drift-stale-registration', ok: true, beforeFingerprint: spaPreparedState.state.snapshot.pageFingerprint, afterFingerprint: spaChanged.state.snapshot.pageFingerprint, beforeRevision: spaPreparedState.state.snapshot.navigationGeneration, afterRevision: spaChanged.state.snapshot.navigationGeneration, staleRejectionCode: staleWebMcpCode, registrationsBefore: oldRegistrationNames, registrationsAfter: spaChanged.runtime.main.registrations.map((entry) => entry.name) });
+
+    await fixturePage.goto(`${fixture.origin}/media`, { waitUntil: 'domcontentloaded' });
+    const mediaSetup = await installDeterministicRenderedAudio(fixturePage);
+    assert(mediaSetup.playing === true && mediaSetup.tracks >= 2, 'E2E_MEDIA_SETUP_FAILED', 'The deterministic rendered-media fixture did not start.', { mediaSetup });
+    await fixturePage.bringToFront();
+    const mediaTab = await activeFixtureTab(extensionPage, fixturePage, fixture.origin);
+    await injectProductionScripts(worker, mediaTab.id);
+    await waitFor('media fixture ingestion', async () => {
+      const response = await sendUi(extensionPage, fixturePage, 'UI_GET_STATE', {}, fixture.origin);
+      return response?.ok === true && response.state?.snapshot?.pageFingerprint ? response.state : null;
+    }, { timeoutMs: options.timeoutMs });
+    const mediaResponse = await sendUi(extensionPage, fixturePage, 'UI_REANALYZE_MULTIMODAL', {}, fixture.origin);
+    assert(mediaResponse?.ok === true, 'E2E_MEDIA_REANALYSIS_FAILED', 'Explicit rendered-media reanalysis failed.', { mediaResponse });
+    const mediaStateResponse = await sendUi(extensionPage, fixturePage, 'UI_GET_STATE', {}, fixture.origin);
+    const mediaState = mediaStateResponse?.state;
+    const renderedAudio = mediaState?.capture?.assets?.find((asset) => asset?.kind === 'audio' && asset?.source === 'capture');
+    const captionText = mediaState?.capture?.captions?.map((entry) => entry?.text).filter(Boolean) ?? [];
+    assert(mediaStateResponse?.ok === true
+      && renderedAudio?.sensitive === true
+      && renderedAudio?.pageOrigin === fixture.origin
+      && typeof renderedAudio?.handle === 'string'
+      && renderedAudio.handle.startsWith('tb-media-')
+      && renderedAudio.byteLength > 0,
+    'E2E_RENDERED_AUDIO_MISSING', 'Real Chrome did not return a bounded volatile rendered-audio handle.', { capture: mediaState?.capture });
+    assert(captionText.some((text) => text.includes('The checkout recovery completed successfully.')),
+      'E2E_RENDERED_CAPTION_MISSING', 'Loaded rendered captions were not captured from the real media element.', { captions: mediaState?.capture?.captions });
+    const mediaStorage = await readExtensionStorage(extensionPage);
+    const mediaStorageJson = JSON.stringify(mediaStorage.value);
+    const mediaAuditEvents = mediaState.audit?.entries?.map((entry) => entry.event) ?? [];
+    assert(!mediaStorageJson.includes('audioBase64')
+      && !mediaStorageJson.includes('data:audio/wav')
+      && !mediaAuditEvents.includes('action.dispatching')
+      && !mediaAuditEvents.includes('action.dispatched'),
+    'E2E_MEDIA_PERSISTENCE_INVALID', 'Rendered media leaked into durable storage or triggered a mutation.', { mediaAuditEvents });
+    report.checks.push({
+      name: 'multimodal.rendered-audio-captions',
+      ok: true,
+      asset: { handle: renderedAudio.handle, byteLength: renderedAudio.byteLength, mimeType: renderedAudio.mimeType },
+      captionMatches: captionText.filter((text) => text.includes('The checkout recovery completed successfully.')).length,
+      warnings: mediaState.capture.warnings,
+      auditEvents: mediaAuditEvents,
+    });
 
     await fixturePage.goto(`${fixture.origin}/adversarial`, { waitUntil: 'domcontentloaded' });
     await fixturePage.bringToFront();

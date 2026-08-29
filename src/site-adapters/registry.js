@@ -1,4 +1,11 @@
+import { cloneJson, freezeDeep } from '../universal/canonical.js';
 import { createPageSnapshot } from '../universal/snapshot.js';
+import {
+  normalizePostconditionResult,
+  POSTCONDITION_STATUSES,
+  validatePostconditionContract,
+} from '../universal/postconditions.js';
+import { validateToolDescriptor } from '../universal/tools.js';
 
 export class SiteAdapterError extends Error {
   constructor(code, message, details = {}) {
@@ -22,7 +29,19 @@ function validateAdapter(adapter) {
     matches: adapter.matches.bind(adapter),
     generateTools: adapter.generateTools.bind(adapter),
     executeRead: typeof adapter.executeRead === 'function' ? adapter.executeRead.bind(adapter) : null,
+    verifyPostcondition: typeof adapter.verifyPostcondition === 'function'
+      ? adapter.verifyPostcondition.bind(adapter)
+      : null,
   });
+}
+
+function snapshotOrigin(snapshot) {
+  const metadata = snapshot?.metadata ?? {};
+  let urlOrigin = '';
+  try { urlOrigin = metadata.url ? new URL(metadata.url).origin : ''; } catch { /* invalid URL is handled by the caller */ }
+  const declaredOrigin = typeof metadata.origin === 'string' ? metadata.origin : '';
+  if (urlOrigin && declaredOrigin && urlOrigin !== declaredOrigin) return null;
+  return declaredOrigin || urlOrigin || null;
 }
 
 function assertVerifiedRead(tool, adapter, snapshot) {
@@ -49,6 +68,42 @@ function assertVerifiedRead(tool, adapter, snapshot) {
   }
 }
 
+function normalizeVerifierResult(raw, { contract, beforeSnapshot, afterSnapshot }) {
+  const afterPageFingerprint = afterSnapshot.pageFingerprint;
+  let candidate = raw;
+  if (raw?.status === POSTCONDITION_STATUSES.VERIFIED_SUCCESS
+    || raw?.status === POSTCONDITION_STATUSES.VERIFIED_FAILURE) {
+    if (raw.afterPageFingerprint !== afterPageFingerprint) {
+      candidate = {
+        status: POSTCONDITION_STATUSES.UNVERIFIED,
+        reasonCode: 'POSTCONDITION_FINGERPRINT_MISMATCH',
+      };
+    }
+  } else if (raw?.status === POSTCONDITION_STATUSES.UNVERIFIED) {
+    // The adapter cannot choose which observation is attached to its verdict.
+    candidate = { ...raw, afterPageFingerprint };
+  }
+  try {
+    return normalizePostconditionResult(candidate, {
+      contract,
+      beforeSnapshot,
+      afterPageFingerprint,
+    });
+  } catch (error) {
+    return normalizePostconditionResult({
+      status: POSTCONDITION_STATUSES.UNVERIFIED,
+      reasonCode: error?.code === 'POSTCONDITION_RESULT_INVALID'
+        ? 'POSTCONDITION_RESULT_INVALID'
+        : 'POSTCONDITION_VERIFIER_FAILED',
+      afterPageFingerprint,
+    }, {
+      contract,
+      beforeSnapshot,
+      afterPageFingerprint,
+    });
+  }
+}
+
 export function createSiteAdapterRegistry({ adapters = [] } = {}) {
   const ids = new Set();
   const normalized = adapters.map(validateAdapter).sort((left, right) => right.priority - left.priority || left.id.localeCompare(right.id));
@@ -69,10 +124,29 @@ export function createSiteAdapterRegistry({ adapters = [] } = {}) {
     },
     generateTools(rawSnapshot) {
       const snapshot = createPageSnapshot(rawSnapshot);
-      const results = matching(snapshot).flatMap((adapter) => adapter.generateTools(snapshot).map((tool) => Object.freeze({
-        ...tool,
-        adapter: Object.freeze({ id: adapter.id, version: adapter.version }),
-      })));
+      const results = [];
+      for (const adapter of matching(snapshot)) {
+        let generated;
+        try {
+          generated = adapter.generateTools(snapshot);
+        } catch {
+          continue;
+        }
+        if (!Array.isArray(generated)) continue;
+        for (const tool of generated) {
+          if (!tool || typeof tool !== 'object' || Array.isArray(tool)) continue;
+          try {
+            const bound = {
+              ...tool,
+              adapter: { id: adapter.id, version: adapter.version },
+            };
+            validateToolDescriptor(bound);
+            results.push(freezeDeep(cloneJson(bound)));
+          } catch {
+            // A malformed adapter output is quarantined at the registry boundary.
+          }
+        }
+      }
       const names = new Set();
       for (const tool of results) {
         if (names.has(tool.name)) throw new SiteAdapterError('ADAPTER_TOOL_DUPLICATE', `Duplicate verified-adapter tool: ${tool.name}`);
@@ -88,6 +162,79 @@ export function createSiteAdapterRegistry({ adapters = [] } = {}) {
       if (!adapter.matches(snapshot)) throw new SiteAdapterError('ADAPTER_PAGE_MISMATCH', 'The verified adapter no longer matches the current page.');
       assertVerifiedRead(tool, adapter, snapshot);
       return adapter.executeRead(tool, snapshot, input);
+    },
+    verifyPostcondition(tool, context = {}) {
+      const rawContract = tool?.postcondition;
+      if (rawContract === undefined) return null;
+      if (!context || typeof context !== 'object' || Array.isArray(context)
+        || !Number.isInteger(context.tabId) || context.tabId < 0
+        || !Number.isInteger(context.frameId) || context.frameId < 0
+        || typeof context.sessionId !== 'string'
+        || context.sessionId.length < 8
+        || context.sessionId.length > 256) {
+        return { status: 'unverified', reasonCode: 'POSTCONDITION_CONTEXT_INVALID' };
+      }
+      if (context.signal?.aborted) return { status: 'unverified', reasonCode: 'POSTCONDITION_ABORTED' };
+      let contract;
+      try {
+        contract = validatePostconditionContract(rawContract);
+      } catch {
+        return { status: 'unverified', reasonCode: 'POSTCONDITION_CONTRACT_INVALID' };
+      }
+      const adapterId = tool?.adapter?.id ?? tool?.provenance?.adapterId;
+      const adapter = normalized.find((candidate) => candidate.id === adapterId);
+      if (!adapter || !adapter.verifyPostcondition) {
+        return { status: 'unverified', reasonCode: 'POSTCONDITION_VERIFIER_UNAVAILABLE' };
+      }
+      if (tool?.provenance?.source !== 'toolbraid.verified-adapter'
+        || tool?.provenance?.adapterId !== adapter.id
+        || String(tool?.provenance?.adapterVersion) !== adapter.version
+        || tool?.classification !== 'mutate'
+        || contract.adapterId !== adapter.id
+        || String(contract.adapterVersion) !== adapter.version) {
+        return { status: 'unverified', reasonCode: 'POSTCONDITION_ADAPTER_MISMATCH' };
+      }
+      let beforeSnapshot;
+      let afterSnapshot;
+      try {
+        beforeSnapshot = context.beforeSnapshot ? createPageSnapshot(context.beforeSnapshot) : null;
+        afterSnapshot = context.afterSnapshot ? createPageSnapshot(context.afterSnapshot) : null;
+      } catch {
+        return { status: 'unverified', reasonCode: 'POSTCONDITION_SNAPSHOT_INVALID' };
+      }
+      if (!beforeSnapshot || !afterSnapshot
+        || tool?.provenance?.pageFingerprint !== beforeSnapshot.pageFingerprint
+        || tool?.pageFingerprint !== beforeSnapshot.pageFingerprint) {
+        return { status: 'unverified', reasonCode: 'POSTCONDITION_PAGE_DRIFT' };
+      }
+      const beforeOrigin = snapshotOrigin(beforeSnapshot);
+      const afterOrigin = snapshotOrigin(afterSnapshot);
+      if (!beforeOrigin || !afterOrigin || beforeOrigin !== afterOrigin
+        || tool?.provenance?.origin !== beforeOrigin) {
+        return { status: 'unverified', reasonCode: 'POSTCONDITION_ORIGIN_MISMATCH' };
+      }
+      try {
+        if (adapter.matches(beforeSnapshot) !== true || adapter.matches(afterSnapshot) !== true) {
+          return { status: 'unverified', reasonCode: 'POSTCONDITION_PAGE_MISMATCH' };
+        }
+      } catch {
+        return { status: 'unverified', reasonCode: 'POSTCONDITION_PAGE_MISMATCH' };
+      }
+      let result;
+      try {
+        result = adapter.verifyPostcondition({ ...context, tool, contract, beforeSnapshot, afterSnapshot });
+      } catch {
+        return normalizeVerifierResult(null, { contract, beforeSnapshot, afterSnapshot });
+      }
+      if (result && typeof result.then === 'function') {
+        return result.then((verdict) => context.signal?.aborted
+          ? { status: 'unverified', reasonCode: 'POSTCONDITION_ABORTED' }
+          : normalizeVerifierResult(verdict, { contract, beforeSnapshot, afterSnapshot }), () =>
+          normalizeVerifierResult(null, { contract, beforeSnapshot, afterSnapshot }));
+      }
+      return context.signal?.aborted
+        ? { status: 'unverified', reasonCode: 'POSTCONDITION_ABORTED' }
+        : normalizeVerifierResult(result, { contract, beforeSnapshot, afterSnapshot });
     },
   });
 }
