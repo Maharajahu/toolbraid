@@ -532,11 +532,13 @@
     if (expanded !== null) record.expanded = expanded === 'true';
     const pressed = attr(element, 'aria-pressed', null);
     if (pressed !== null) record.pressed = pressed === 'true';
+    const testId = trimText(attr(element, 'data-testid', '')).slice(0, 128);
+    if (testId) record.attributes = { 'data-testid': testId };
     if (tagName(element) === 'select') record.options = optionsForSelect(element, options.maxItems);
     return record;
   }
 
-  function elementRecord(element, refs, elements, byId) {
+  function elementRecord(element, refs, elements, byId, options) {
     const role = attr(element, 'role', '').toLowerCase() || implicitRole(element) || null;
     const record = {
       ref: refs.get(element),
@@ -544,8 +546,16 @@
       role,
       name: accessibleName(element, elements, byId),
       locator: attr(element, 'id', '') ? `#${attr(element, 'id', '')}` : refs.get(element),
+      parentRef: refs.get(safeGet(element, 'parentElement', null)) || null,
     };
-    const text = nodeText(element, { includeShadow: false, max: 512 });
+    const attributes = {};
+    const testId = trimText(attr(element, 'data-testid', '')).slice(0, 128);
+    const datetime = trimText(attr(element, 'datetime', '')).slice(0, 128);
+    if (testId) attributes['data-testid'] = testId;
+    if (datetime) attributes.datetime = datetime;
+    if (Object.keys(attributes).length) record.attributes = attributes;
+    const textLimit = testId === 'tweetText' ? options.maxTextCharacters : 512;
+    const text = nodeText(element, { includeShadow: false, max: textLimit });
     if (text) record.text = text;
     return record;
   }
@@ -666,7 +676,7 @@
       });
     }
 
-    const elementRefs = items(limitedElements.map((element) => elementRecord(element, refs, elements, byId)));
+    const elementRefs = items(limitedElements.map((element) => elementRecord(element, refs, elements, byId, options)));
     const mediaInventory = items(limitedElements
       .filter((element) => ['img', 'audio', 'video'].includes(tagName(element)))
       .map((element) => mediaRecord(element, refs, location.url, options)));

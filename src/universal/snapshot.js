@@ -176,6 +176,7 @@ function normalizeElementRef(value, index) {
     locator: source.locator !== undefined
       ? sanitizedJson(source.locator, `elementRefs[${index}].locator`)
       : nullableString(source.selector ?? source.cssSelector ?? source.xpath),
+    parentRef: nullableString(source.parentRef ?? source.parent),
   };
   if (source.attributes !== undefined) output.attributes = sanitizedJson(source.attributes, `elementRefs[${index}].attributes`);
   if (source.text !== undefined) output.text = stringValue(source.text);

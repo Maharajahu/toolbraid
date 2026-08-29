@@ -142,6 +142,7 @@ function buildFixture() {
   const main = new FakeNode('main');
   const heading = new FakeNode('h1', { id: 'heading' }, 'Incident status');
   const paragraph = new FakeNode('p', {}, 'All systems are healthy.');
+  const longPost = new FakeNode('div', { 'data-testid': 'tweetText' }, 'x'.repeat(700));
   const link = new FakeNode('a', { href: '/status', id: 'status-link' }, 'Read status');
   const form = new FakeNode('form', { id: 'notice-form', method: 'post', action: '/api/notice', 'aria-label': 'Publish notice' });
   const label = new FakeNode('label', { for: 'message' }, 'Message');
@@ -152,7 +153,7 @@ function buildFixture() {
   select.options = [optionA, optionB];
   select.append(optionA, optionB);
   const checkbox = new FakeNode('input', { name: 'confirm', type: 'checkbox', required: true });
-  const submit = new FakeNode('button', { type: 'submit', 'aria-label': 'Publish notice' }, 'Publish notice');
+  const submit = new FakeNode('button', { type: 'submit', 'aria-label': 'Publish notice', 'data-testid': 'publish-notice' }, 'Publish notice');
   label.append(input);
   form.append(label, select, checkbox, submit);
   const image = new FakeNode('img', { src: '/chart.png', alt: 'Healthy chart', width: '320', height: '180' });
@@ -160,7 +161,7 @@ function buildFixture() {
   const shadowHeading = new FakeNode('h2', {}, 'Open shadow status');
   const shadowButton = new FakeNode('button', { type: 'button', 'aria-label': 'Refresh shadow' }, 'Refresh');
   host.setShadow(shadowHeading, shadowButton);
-  main.append(heading, paragraph, link, form, image, host);
+  main.append(heading, paragraph, longPost, link, form, image, host);
   body.append(main);
   html.append(head, body);
   const documentRef = new FakeDocument(html);
@@ -185,6 +186,9 @@ test('classic extractor emits bounded, serializable page semantics with open sha
   assert.equal(snapshot.forms[0].method, 'POST');
   assert.ok(snapshot.forms[0].fields.some((field) => field.name === 'Message'));
   assert.ok(snapshot.accessibleControls.some((control) => control.name === 'Refresh shadow'));
+  assert.equal(snapshot.accessibleControls.find((control) => control.name === 'Publish notice').attributes['data-testid'], 'publish-notice');
+  assert.equal(snapshot.elementRefs.find((element) => element.attributes?.['data-testid'] === 'publish-notice').parentRef, snapshot.forms[0].ref);
+  assert.equal(snapshot.elementRefs.find((element) => element.attributes?.['data-testid'] === 'tweetText').text.length, 700);
   assert.equal(snapshot.mediaInventory[0].kind, 'image');
   assert.equal(snapshot.mediaInventory[0].alt, 'Healthy chart');
   assert.match(snapshot.pageFingerprint, /^[a-f0-9]{64}$/);

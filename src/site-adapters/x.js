@@ -82,12 +82,63 @@ function availableControl(control) {
   return control?.disabled !== true && control?.pressed !== true && control?.checked !== true;
 }
 
+function dataTestId(value) {
+  return normalizedText(value?.attributes?.['data-testid'] ?? value?.attributes?.dataTestId).toLowerCase();
+}
+
+function postScope(snapshot) {
+  const elements = new Map(snapshot.elementRefs.map((element) => [element.ref, element]));
+  const article = snapshot.elementRefs.find((element) => dataTestId(element) === 'tweet') ?? null;
+  if (!article) return null;
+  const refs = new Set([article.ref]);
+  for (const element of snapshot.elementRefs) {
+    const visited = new Set();
+    let parentRef = element.parentRef;
+    while (parentRef && !visited.has(parentRef)) {
+      if (parentRef === article.ref) {
+        refs.add(element.ref);
+        break;
+      }
+      visited.add(parentRef);
+      parentRef = elements.get(parentRef)?.parentRef ?? null;
+    }
+  }
+  return { article, elements, refs };
+}
+
+function hasAncestor(element, scope, predicate) {
+  if (!element || !scope) return false;
+  const visited = new Set();
+  let parentRef = element.parentRef;
+  while (parentRef && parentRef !== scope.article.ref && !visited.has(parentRef)) {
+    visited.add(parentRef);
+    const parent = scope.elements.get(parentRef);
+    if (!parent) return false;
+    if (predicate(parent)) return true;
+    parentRef = parent.parentRef;
+  }
+  return false;
+}
+
+function linkUrl(link, baseUrl) {
+  try {
+    return new URL(link.href, baseUrl);
+  } catch {
+    return null;
+  }
+}
+
 function findLikeControl(snapshot) {
+  const scope = postScope(snapshot);
   return snapshot.accessibleControls.find((control) => {
+    if (scope && !scope.refs.has(control.ref)) return false;
     if (!availableControl(control) || normalizedText(control.role).toLowerCase() !== 'button') return false;
+    const testId = dataTestId(control);
+    if (testId === 'unlike') return false;
+    if (testId === 'like') return true;
     const name = normalizedText(control.name).toLowerCase();
-    if (/\b(?:unlike|liked|remove\s+like|undo\s+like)\b/.test(name)) return false;
-    return /\blike\b/.test(name);
+    if (/\b(?:unlike|liked|remove\s+like|undo\s+like|nu\s+mai\s+aprecia|anuleaz[ăa]\s+aprecierea|elimin[ăa]\s+aprecierea)\b/u.test(name)) return false;
+    return /\b(?:like|apreciere|apreciaz[ăa])\b/u.test(name);
   }) ?? null;
 }
 
@@ -96,9 +147,12 @@ function findRepostConfirmation(snapshot) {
     if (!availableControl(control)) return false;
     const role = normalizedText(control.role).toLowerCase();
     if (role !== 'menuitem' && role !== 'menuitemradio') return false;
+    const testId = dataTestId(control);
+    if (testId === 'unretweetconfirm') return false;
+    if (testId === 'retweetconfirm' || testId === 'repostconfirm') return true;
     const name = normalizedText(control.name).toLowerCase();
-    if (/\b(?:undo|remove|unrepost|unretweet|reposted|retweeted)\b/.test(name)) return false;
-    return name === 'repost' || name === 'retweet';
+    if (/\b(?:undo|remove|unrepost|unretweet|reposted|retweeted|anuleaz[ăa]\s+repostarea|elimin[ăa]\s+repostarea)\b/u.test(name)) return false;
+    return ['repost', 'retweet', 'repostare', 'repostează', 'reposteaza'].includes(name);
   }) ?? null;
 }
 
@@ -108,18 +162,56 @@ function findReplyEditor(snapshot) {
     const type = normalizedText(control.type).toLowerCase();
     const name = normalizedText(control.name).toLowerCase();
     const editable = role === 'textbox' || ['text', 'textarea'].includes(type);
-    return editable && /\b(?:reply|post|tweet)\b/i.test(name);
+    if (!editable) return false;
+    if (/^tweettextarea(?:_\d+)?$/.test(dataTestId(control))) return true;
+    return /\b(?:reply|post|tweet|postare|răspuns|raspuns)\b/iu.test(name);
   }) ?? null;
 }
 
 export function extractXPost(snapshot) {
   const explicit = snapshot.metadata.socialPost;
-  const authorLink = snapshot.links.find((link) => /@|\/profile\//.test(normalizedText(`${link.text} ${link.href}`))) ?? null;
-  const statusLink = snapshot.links.find((link) => /\/(?:status|x-post\/status)\/[A-Za-z0-9_-]+/.test(link.href)) ?? null;
-  const body = normalizedText(explicit?.text ?? snapshot.metadata.description ?? snapshot.mainText);
-  const handle = normalizedText(explicit?.handle ?? authorLink?.text?.match(/@[A-Za-z0-9_]+/)?.[0] ?? '');
-  const author = normalizedText(explicit?.author ?? authorLink?.text?.replace(handle, '') ?? '');
-  const publishedElement = snapshot.elementRefs.find((element) => element.attributes?.datetime) ?? null;
+  const currentUrl = pageUrl(snapshot);
+  const scope = postScope(snapshot);
+  const scopedLinks = scope ? snapshot.links.filter((link) => scope.refs.has(link.ref)) : snapshot.links;
+  const statusLink = scopedLinks.find((link) => {
+    const url = linkUrl(link, snapshot.metadata.url);
+    return Boolean(url && currentUrl && url.origin === currentUrl.origin && url.pathname === currentUrl.pathname);
+  }) ?? scopedLinks.find((link) => /\/(?:status|x-post\/status)\/[A-Za-z0-9_-]+(?:$|[/?#])/.test(link.href)) ?? null;
+  const statusUrl = linkUrl(statusLink, snapshot.metadata.url) ?? currentUrl;
+  const statusSegments = statusUrl?.pathname.split('/').filter(Boolean) ?? [];
+  const profilePath = statusSegments[1] === 'status' ? `/${statusSegments[0]}` : null;
+  const profileLinks = scopedLinks.filter((link) => {
+    const url = linkUrl(link, snapshot.metadata.url);
+    return Boolean(url && profilePath && statusUrl && url.origin === statusUrl.origin && url.pathname === profilePath);
+  });
+  const handle = normalizedText(
+    explicit?.handle
+      ?? profileLinks.map((link) => normalizedText(link.text).match(/@[A-Za-z0-9_]+/)?.[0]).find(Boolean)
+      ?? scopedLinks.map((link) => normalizedText(link.text).match(/@[A-Za-z0-9_]+/)?.[0]).find(Boolean)
+      ?? (profilePath ? `@${statusSegments[0]}` : ''),
+  );
+  const author = normalizedText(
+    explicit?.author
+      ?? profileLinks.map((link) => normalizedText(link.text).replace(handle, '').trim()).find(Boolean)
+      ?? scopedLinks.map((link) => normalizedText(link.text).replace(handle, '').trim()).find((text) => text && !text.startsWith('@'))
+      ?? '',
+  );
+  const tweetTextElements = scope
+    ? snapshot.elementRefs.filter((element) => scope.refs.has(element.ref) && dataTestId(element) === 'tweettext')
+    : [];
+  const bodyElement = tweetTextElements.find((element) => !hasAncestor(
+    element,
+    scope,
+    (ancestor) => normalizedText(ancestor.role).toLowerCase() === 'link' || ancestor.tagName === 'a',
+  )) ?? tweetTextElements[0] ?? null;
+  const body = normalizedText(explicit?.text ?? bodyElement?.text ?? snapshot.metadata.description ?? snapshot.mainText);
+  const publishedElement = statusLink && scope
+    ? snapshot.elementRefs.find((element) => element.attributes?.datetime && hasAncestor(
+      element,
+      scope,
+      (ancestor) => ancestor.ref === statusLink.ref,
+    ))
+    : snapshot.elementRefs.find((element) => element.attributes?.datetime) ?? null;
   return Object.freeze({
     type: 'x-post',
     author: author || null,
