@@ -752,7 +752,11 @@ function graphInput() {
       if (provider.origin === RECOVERY_PROVIDER_ORIGINS.pulse && providerSwapRequested) {
         visualState = semanticNodeState('service.health.read') === NODE_STATUS.COMPLETED ? 'complete' : 'active';
       }
-      return { ...provider, state: visualState };
+      return {
+        ...provider,
+        label: provider.id === 'source' ? 'GitHub Source' : provider.label,
+        state: visualState,
+      };
     }),
     capabilities: CAPABILITIES.map((capability) => {
       const node = nodeBySemantic(capability.id, 'capability');

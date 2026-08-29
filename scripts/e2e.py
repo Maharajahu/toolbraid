@@ -321,7 +321,7 @@ def main() -> int:
             overlaps = narrow_page.evaluate(
                 """() => {
                   const labels = [...document.querySelectorAll('.tb-node__label')];
-                  const pairs = [['Prepare recovery', 'Mirage Fixture'], ['Release history', 'Release Source']];
+                  const pairs = [['Prepare recovery', 'Mirage Fixture'], ['Release history', 'GitHub Source']];
                   const rect = text => labels.find(node => node.textContent.trim() === text)?.getBoundingClientRect();
                   return pairs.map(([left, right]) => {
                     const a = rect(left); const b = rect(right);

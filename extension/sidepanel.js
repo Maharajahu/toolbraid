@@ -953,9 +953,11 @@ export function createSidepanelApp({
     auditHead: documentRef.getElementById('audit-head'),
     audit: documentRef.getElementById('audit-list'),
     quarantine: documentRef.getElementById('quarantine-count'),
+    announcer: documentRef.getElementById('sidepanel-announcer'),
     toast: documentRef.getElementById('toast'),
   };
   let toastTimer = null;
+  let lastAnnouncement = '';
 
   function toast(message, isError = false) {
     if (!refs.toast) return;
@@ -1015,6 +1017,13 @@ export function createSidepanelApp({
     }
     if (refs.auditHead) refs.auditHead.textContent = state.audit.head;
     if (refs.quarantine) refs.quarantine.textContent = state.quarantinedCount ? `${state.quarantinedCount} quarantined` : 'No quarantined tools';
+    if (refs.announcer && state.connection === 'ready') {
+      const announcement = `Updated: ${state.missions.length} missions, ${state.handoffs.length} human steps, ${state.tools.length} tools, ${state.actions.length} actions, ${state.approvals.length} approvals, ${state.evidence.stats.total} evidence items, ${state.receipts.length} receipts.`;
+      if (announcement !== lastAnnouncement) {
+        refs.announcer.textContent = announcement;
+        lastAnnouncement = announcement;
+      }
+    }
     if (refs.missionNote) refs.missionNote.textContent = state.missionError || 'Each mission keeps exact tab, frame, session, origin, and page-fingerprint ownership.';
     if (refs.handoffNote) refs.handoffNote.textContent = state.handoffError || 'Credentials stay inside the approved site. ToolBraid stores no password, one-time code, or raw login URL.';
     if (refs.missions) renderList(refs.missions, state.missions, (mission) => renderMission(mission, appController, (response, message) => {

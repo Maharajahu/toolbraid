@@ -11,7 +11,13 @@
     <div class="app-shell">
       <header class="topbar">
         <div class="brand-lockup">
-          <span class="brand-mark" aria-hidden="true">TB</span>
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 40 40" focusable="false">
+              <path class="braid-path braid-cyan" d="M8 12.5c0-3 2.4-5.5 5.5-5.5S19 9.5 19 12.5 16.6 18 13.5 18H12c-3.1 0-5.5 2.5-5.5 5.5S8.9 29 12 29h7"/>
+              <path class="braid-path braid-pink" d="M32 12.5c0-3-2.4-5.5-5.5-5.5S21 9.5 21 12.5s2.4 5.5 5.5 5.5H28c3.1 0 5.5 2.5 5.5 5.5S31.1 29 28 29h-7"/>
+              <path class="braid-path braid-amber" d="M15 33c0-3 2.2-5 5-5s5 2 5 5"/>
+            </svg>
+          </span>
           <div>
             <p class="eyebrow">TOOLBRAID</p>
             <h1>Universal</h1>
@@ -57,7 +63,7 @@
             </div>
             <button id="mission-start" class="button button-primary" type="button">Start on this page</button>
           </div>
-          <div id="missions-list" class="stack-list" aria-live="polite">
+          <div id="missions-list" class="stack-list">
             <p class="empty-state">No active mission. Start one from the current page.</p>
           </div>
           <p id="mission-note" class="policy-note">Each mission keeps exact tab, frame, session, origin, and page-fingerprint ownership.</p>
@@ -70,7 +76,7 @@
               <h2 id="handoffs-heading">Human steps <span id="handoffs-count" class="count-badge">0</span></h2>
             </div>
           </div>
-          <div id="handoffs-list" class="stack-list" aria-live="polite">
+          <div id="handoffs-list" class="stack-list">
             <p class="empty-state">No human-only step is waiting.</p>
           </div>
           <p id="handoff-note" class="policy-note">Credentials stay inside the approved site. ToolBraid stores no password, one-time code, or raw login URL.</p>
@@ -84,7 +90,7 @@
             </div>
             <span id="quarantine-count" class="mode-pill">No quarantined tools</span>
           </div>
-          <div id="tools-list" class="stack-list" aria-live="polite">
+          <div id="tools-list" class="stack-list">
             <p class="empty-state">No tools discovered yet.</p>
           </div>
         </section>
@@ -97,7 +103,7 @@
             </div>
           </div>
           <p id="evidence-stats" class="metric-line">0 analyzed · 0 degraded · 0 blocked</p>
-          <div id="evidence-list" class="stack-list" aria-live="polite">
+          <div id="evidence-list" class="stack-list">
             <p class="empty-state">No visual, audio, or video evidence on this page.</p>
           </div>
           <p id="evidence-warnings" class="policy-note">Visible-tab capture is ephemeral and never grants action authority.</p>
@@ -138,14 +144,14 @@
           <p id="provider-note" class="policy-note">Disabled by default. Enabling requests access only to the exact endpoint origin; the API key stays in extension session storage.</p>
         </section>
 
-        <section class="panel" aria-labelledby="actions-heading">
+        <section class="panel action-panel" aria-labelledby="actions-heading">
           <div class="section-heading">
             <div>
               <p class="eyebrow">CONTROL SURFACE</p>
               <h2 id="actions-heading">Page actions <span id="actions-count" class="count-badge">0</span></h2>
             </div>
           </div>
-          <div id="actions-list" class="stack-list" aria-live="polite">
+          <div id="actions-list" class="stack-list">
             <p class="empty-state">No page actions discovered yet.</p>
           </div>
         </section>
@@ -157,7 +163,7 @@
               <h2 id="approvals-heading">Approvals <span id="approvals-count" class="count-badge">0</span></h2>
             </div>
           </div>
-          <div id="approvals-list" class="stack-list" aria-live="polite">
+          <div id="approvals-list" class="stack-list">
             <p class="empty-state">No active approvals.</p>
           </div>
           <p class="policy-note"><span aria-hidden="true">⌁</span> External effects remain blocked until the exact target, arguments, effect, and expiry are approved here.</p>
@@ -171,7 +177,7 @@
             </div>
             <span id="audit-badge" class="status-badge status-pending">Checking chain</span>
           </div>
-          <div id="receipts-list" class="stack-list" aria-live="polite">
+          <div id="receipts-list" class="stack-list">
             <p class="empty-state">No action has been dispatched.</p>
           </div>
           <div class="audit-summary">
@@ -184,6 +190,7 @@
         </section>
       </main>
 
+      <p id="sidepanel-announcer" class="visually-hidden" role="status" aria-live="polite" aria-atomic="true"></p>
       <p id="toast" class="toast" role="status" aria-live="polite" aria-atomic="true"></p>
     </div>
     <script type="module" src="sidepanel.js"></script>

@@ -52,6 +52,8 @@ test('side panel has extension CSP, no inline script, and renders through safe D
   assert.match(html, /id="audit-list"/);
   assert.match(html, /id="missions-list"/);
   assert.match(html, /id="handoffs-list"/);
+  assert.match(html, /id="sidepanel-announcer"[^>]+aria-live="polite"[^>]+aria-atomic="true"/);
+  assert.equal((html.match(/aria-live="polite"/g) ?? []).length, 2);
   assert.doesNotMatch(js, /Execute approved action|Action executed\./);
   assert.match(js, /Dispatch approved action/);
   assert.match(js, /postcondition unverified/i);
