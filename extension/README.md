@@ -38,14 +38,24 @@ generated page tools
 
 The MAIN-world registrar contains no credentials, approvals, durable state, or
 mutation policy. Page callbacks are treated as attacker-controlled input. A
-navigation, service-worker restart, registry drift, page drift, target drift,
-argument drift, expiry, or replay invalidates execution.
+navigation, registry drift, page drift, target drift, argument drift, expiry,
+or replay invalidates execution. A service-worker disconnect invalidates an
+in-flight action, but the isolated runtime may establish a fresh binding for a
+later call.
 
 Generic page interaction is conservative: reads may run automatically, while
 field changes, clicks, navigation, and form submission all require a fresh
 approval created by a trusted click in the extension side panel. A receipt
 proves exact browser dispatch; it is not described as remote success unless a
 verified adapter proves its declared postcondition.
+
+## Session recovery
+
+The isolated content runtime keeps a validated MV3 lifecycle Port open and
+sends a bounded `PAGE_READY` heartbeat. Closing the side panel does not end the
+active tab session. After a service-worker disconnect or restart, the runtime
+reconnects, replaces the MAIN-world page binding, and submits a fresh snapshot
+before the next invocation. It never retries an in-flight mutation.
 
 ## Multimodal evidence
 

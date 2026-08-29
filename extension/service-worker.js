@@ -14,6 +14,8 @@ import {
   isUiMessageType,
 } from './universal-runtime.js';
 
+const PAGE_LIFECYCLE_PORT = 'toolbraid:page-lifecycle';
+
 function fail(code, message, details = {}) {
   return { ok: false, error: { code, message, details }, provenance: PROVENANCE };
 }
@@ -270,6 +272,22 @@ export function installServiceWorker(chromeApi = globalThis.chrome) {
       .then((response) => sendResponse(response))
       .catch((error) => sendResponse(errorPayload(error)));
     return true;
+  });
+  chromeApi.runtime.onConnect?.addListener((port) => {
+    if (port?.name !== PAGE_LIFECYCLE_PORT) return;
+    if (!pageRuntimeSender(chromeApi, port.sender)) {
+      try {
+        port.disconnect?.();
+      } catch { /* an invalid lifecycle port remains unauthoritative */ }
+      return;
+    }
+    port.onMessage?.addListener((message) => {
+      if (message?.type !== MESSAGE_TYPES.PAGE_READY) return;
+      Promise.resolve(controller.handleRuntimeMessage(message, port.sender))
+        .then((response) => port.postMessage?.(response))
+        .catch((error) => port.postMessage?.(errorPayload(error)))
+        .catch?.(() => {});
+    });
   });
   chromeApi.action?.onClicked?.addListener((tab) => {
     if (Number.isInteger(tab?.id)) {

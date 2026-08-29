@@ -5,6 +5,9 @@ import test from 'node:test';
 import vm from 'node:vm';
 import { fileURLToPath } from 'node:url';
 
+import { createPageSnapshot } from '../../src/universal/index.js';
+import { createSiteAdapterRegistry, createXPostAdapter } from '../../src/site-adapters/index.js';
+
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const EXTRACTOR_SOURCE = fs.readFileSync(path.join(ROOT, 'extension/page-extractor.js'), 'utf8');
 
@@ -216,4 +219,126 @@ test('classic extractor enforces traversal and collection bounds', () => {
   assert.ok(snapshot.stats.nodesVisited <= 3);
   assert.ok(snapshot.elementRefs.length <= 2);
   assert.ok(snapshot.mainText.length <= 12);
+});
+
+test('classic extractor prioritizes the current semantic article on a truncated X document', () => {
+  const context = loadExtractor();
+  const statusUrl = 'https://x.com/thsottiaux/status/2093515916076343774';
+  const html = new FakeNode('html', { lang: 'en' });
+  const head = new FakeNode('head');
+  for (let index = 0; index < 600; index += 1) head.append(new FakeNode('script', {}, `filler-${index}`));
+
+  const body = new FakeNode('body');
+  const main = new FakeNode('main');
+  const decoyArticle = new FakeNode('article', { 'data-testid': 'tweet' });
+  decoyArticle.append(
+    new FakeNode('a', { href: '' }, 'Empty self link'),
+    new FakeNode('a', { href: '#comments' }, 'Fragment self link'),
+    new FakeNode('a', { href: `${statusUrl}#details` }, 'Hashed self link'),
+    new FakeNode('a', { href: 'https://x.com.evil/thsottiaux/status/2093515916076343774' }, 'Lookalike host'),
+    new FakeNode('a', { href: '/thsottiaux/status/2093515916076343774' }, 'Exact quoted link without timestamp'),
+    new FakeNode('div', { 'data-testid': 'tweetText' }, 'Decoy text'),
+  );
+  const nestedQuote = new FakeNode('article', { 'data-testid': 'tweet' });
+  const nestedPermalink = new FakeNode('a', { href: '/thsottiaux/status/2093515916076343774' }, 'Nested quoted timestamp');
+  nestedPermalink.append(new FakeNode('time', { datetime: '2026-08-29T01:47:44.000Z' }, '2:47 AM'));
+  nestedQuote.append(nestedPermalink);
+  decoyArticle.append(nestedQuote);
+  for (let index = 0; index < 300; index += 1) {
+    decoyArticle.append(new FakeNode('a', { href: `/noise/${index}` }, `Noise ${index}`));
+  }
+  const article = new FakeNode('article');
+  const viewsLink = new FakeNode('a', { href: '/thsottiaux/status/2093515916076343774' }, 'Views');
+  const author = new FakeNode('a', { href: '/thsottiaux' }, 'Tibo');
+  const handle = new FakeNode('a', { href: '/thsottiaux' }, '@thsottiaux');
+  const targetText = new FakeNode('div', { 'data-testid': 'tweetText' }, 'Target text');
+  const quotedLink = new FakeNode('div', { role: 'link' });
+  quotedLink.append(new FakeNode('div', { 'data-testid': 'tweetText' }, 'Quoted text'));
+  const permalink = new FakeNode('a', {
+    href: '/thsottiaux/status/2093515916076343774',
+    'data-timezone': 'Europe/London',
+  }, '2:47 AM · Aug 29, 2026');
+  article.append(viewsLink, author, handle, targetText, quotedLink, permalink);
+  main.append(decoyArticle, article);
+  body.append(main);
+  html.append(head, body);
+
+  const documentRef = new FakeDocument(html, { url: `${statusUrl}?s=20#focus` });
+  documentRef.title = 'Tibo on X';
+  const extracted = context.ToolBraidUniversalPageExtractor.extract({ documentRef });
+  assert.equal(extracted.stats.truncated, true);
+  const serializedPermalink = extracted.elementRefs.find((element) => element.attributes?.['data-timezone']);
+  assert.equal(serializedPermalink?.attributes?.['data-timezone'], 'Europe/London');
+  assert.equal(serializedPermalink?.text, '2:47 AM · Aug 29, 2026');
+
+  const snapshotInput = JSON.parse(JSON.stringify(extracted));
+  delete snapshotInput.pageFingerprint;
+  const snapshot = createPageSnapshot(snapshotInput);
+  const registry = createSiteAdapterRegistry({ adapters: [createXPostAdapter()] });
+  const readTool = registry.generateTools(snapshot).find((tool) => tool.name === 'read_x_post');
+  const result = registry.executeRead(readTool, snapshot);
+  assert.equal(result.author, 'Tibo');
+  assert.equal(result.handle, '@thsottiaux');
+  assert.equal(result.text, 'Target text');
+  assert.equal(result.publishedAt, '2:47 AM · Aug 29, 2026');
+  assert.equal(result.url, statusUrl);
+});
+
+test('classic extractor preserves generic document order when no exact article permalink exists', () => {
+  const context = loadExtractor();
+  const html = new FakeNode('html');
+  const head = new FakeNode('head');
+  head.append(new FakeNode('meta', { name: 'description', content: 'Generic page' }));
+  const body = new FakeNode('body');
+  const main = new FakeNode('main');
+  const article = new FakeNode('article');
+  article.append(new FakeNode('a', { href: '#section' }, 'Local section'));
+  main.append(article);
+  body.append(main);
+  html.append(head, body);
+  const snapshot = context.ToolBraidUniversalPageExtractor.extract({
+    documentRef: new FakeDocument(html, { url: 'https://example.test/page' }),
+    maxNodes: 4,
+    maxElements: 4,
+    maxItems: 4,
+  });
+
+  assert.equal(snapshot.elementRefs[0].tagName, 'html');
+  assert.equal(snapshot.metadata.description, 'Generic page');
+});
+
+test('classic extractor inspects a wide body without materializing every direct child', () => {
+  const context = loadExtractor();
+  const statusUrl = 'https://x.com/thsottiaux/status/2093515916076343774';
+  const html = new FakeNode('html');
+  const body = new FakeNode('body');
+  const article = new FakeNode('article', { 'data-testid': 'tweet' });
+  const permalink = new FakeNode('a', { href: '/thsottiaux/status/2093515916076343774' }, 'Permalink');
+  permalink.append(new FakeNode('time', { datetime: '2026-08-29T01:47:44.000Z' }, '2:47 AM'));
+  article.append(permalink);
+  body.append(article);
+  html.append(body);
+  const documentRef = new FakeDocument(html, { url: statusUrl });
+
+  let indexedReads = 0;
+  const wideChildren = new Proxy({ length: 10_000 }, {
+    get(target, property) {
+      if (property === 'length') return target.length;
+      if (/^\d+$/.test(String(property))) {
+        indexedReads += 1;
+        return Number(property) === 0 ? article : null;
+      }
+      return Reflect.get(target, property);
+    },
+  });
+  Object.defineProperty(body, 'children', { configurable: true, value: wideChildren });
+
+  const snapshot = context.ToolBraidUniversalPageExtractor.extract({
+    documentRef,
+    maxNodes: 1,
+    maxElements: 1,
+    maxItems: 1,
+  });
+  assert.equal(snapshot.elementRefs[0].tagName, 'article');
+  assert.equal(indexedReads, 1);
 });

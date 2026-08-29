@@ -398,3 +398,121 @@ test('executor blocks fingerprint drift, ambiguity, sensitive fields, and unknow
     (error) => error.code === 'DESTRUCTIVE_ACTION_UNKNOWN',
   );
 });
+
+test('executor resolves positional targets from the same prioritized semantic article as the extractor', () => {
+  const context = loadRuntime();
+  const statusUrl = 'https://x.com/thsottiaux/status/2093515916076343774';
+  const html = new FakeNode('html');
+  const head = new FakeNode('head');
+  for (let index = 0; index < 600; index += 1) head.append(new FakeNode('script', {}, `filler-${index}`));
+  const body = new FakeNode('body');
+  const main = new FakeNode('main');
+  const decoyArticle = new FakeNode('article', { 'data-testid': 'tweet' });
+  decoyArticle.append(
+    new FakeNode('a', { href: '' }, 'Empty self link'),
+    new FakeNode('a', { href: '#comments' }, 'Fragment self link'),
+    new FakeNode('a', { href: `${statusUrl}#details` }, 'Hashed self link'),
+    new FakeNode('a', { href: 'https://x.com.evil/thsottiaux/status/2093515916076343774' }, 'Lookalike host'),
+    new FakeNode('a', { href: '/thsottiaux/status/2093515916076343774' }, 'Exact quoted link without timestamp'),
+    new FakeNode('textarea', { 'aria-label': 'Decoy reply' }),
+  );
+  const nestedQuote = new FakeNode('article', { 'data-testid': 'tweet' });
+  const nestedPermalink = new FakeNode('a', { href: '/thsottiaux/status/2093515916076343774' }, 'Nested quoted timestamp');
+  nestedPermalink.append(new FakeNode('time', { datetime: '2026-08-29T01:47:44.000Z' }, '2:47 AM'));
+  nestedQuote.append(nestedPermalink);
+  decoyArticle.append(nestedQuote);
+  for (let index = 0; index < 300; index += 1) {
+    decoyArticle.append(new FakeNode('a', { href: `/noise/${index}` }, `Noise ${index}`));
+  }
+  const article = new FakeNode('article', { 'data-testid': 'tweet' });
+  const viewsLink = new FakeNode('a', { href: '/thsottiaux/status/2093515916076343774' }, 'Views');
+  const permalink = new FakeNode('a', {
+    href: '/thsottiaux/status/2093515916076343774',
+    'data-timezone': 'Europe/London',
+  }, '2:47 AM · Aug 29, 2026');
+  const editor = new FakeNode('textarea', { 'aria-label': 'Post your reply' });
+  article.append(viewsLink, permalink, editor);
+  main.append(decoyArticle, article);
+  body.append(main);
+  html.append(head, body);
+  const documentRef = new FakeDocument(html, `${statusUrl}?s=20#focus`);
+
+  const extractor = context.ToolBraidUniversalPageExtractor;
+  const executor = context.ToolBraidUniversalActionExecutor;
+  const snapshot = extractor.extract({ documentRef });
+  const target = snapshot.accessibleControls.find((control) => control.name === 'Post your reply');
+  assert.ok(target);
+  assert.match(target.ref, /^el-/);
+
+  const result = executor.executeAction({
+    documentRef,
+    pageFingerprint: snapshot.pageFingerprint,
+    classification: 'stage',
+    operation: 'input',
+    target: {
+      ref: target.ref,
+      role: target.role,
+      name: target.name,
+      formRef: target.formRef,
+      type: target.type,
+    },
+    arguments: { value: 'Draft reply' },
+  });
+  assert.equal(result.ok, true);
+  assert.equal(editor.value, 'Draft reply');
+});
+
+test('executor preserves ref parity without materializing a wide body child collection', () => {
+  const context = loadRuntime();
+  const statusUrl = 'https://x.com/thsottiaux/status/2093515916076343774';
+  const html = new FakeNode('html');
+  const body = new FakeNode('body');
+  const article = new FakeNode('article', { 'data-testid': 'tweet' });
+  const permalink = new FakeNode('a', { href: '/thsottiaux/status/2093515916076343774' }, 'Permalink');
+  permalink.append(new FakeNode('time', { datetime: '2026-08-29T01:47:44.000Z' }, '2:47 AM'));
+  const editor = new FakeNode('textarea', { 'aria-label': 'Post your reply' });
+  article.append(permalink, editor);
+  body.append(article);
+  html.append(body);
+  const documentRef = new FakeDocument(html, statusUrl);
+
+  let indexedReads = 0;
+  const wideChildren = new Proxy({ length: 10_000 }, {
+    get(target, property) {
+      if (property === 'length') return target.length;
+      if (/^\d+$/.test(String(property))) {
+        indexedReads += 1;
+        return Number(property) === 0 ? article : null;
+      }
+      return Reflect.get(target, property);
+    },
+  });
+  Object.defineProperty(body, 'children', { configurable: true, value: wideChildren });
+
+  const extractor = context.ToolBraidUniversalPageExtractor;
+  const executor = context.ToolBraidUniversalActionExecutor;
+  const snapshot = extractor.extract({ documentRef, maxNodes: 4, maxElements: 4, maxItems: 4 });
+  const target = snapshot.accessibleControls.find((control) => control.name === 'Post your reply');
+  assert.ok(target);
+
+  const result = executor.executeAction({
+    documentRef,
+    maxNodes: 4,
+    maxElements: 4,
+    maxItems: 4,
+    pageFingerprint: snapshot.pageFingerprint,
+    classification: 'stage',
+    operation: 'input',
+    target: {
+      ref: target.ref,
+      role: target.role,
+      name: target.name,
+      formRef: target.formRef,
+      type: target.type,
+    },
+    arguments: { value: 'Bounded draft' },
+  });
+  assert.equal(result.ok, true);
+  assert.equal(editor.value, 'Bounded draft');
+  assert.equal(indexedReads, 3);
+});

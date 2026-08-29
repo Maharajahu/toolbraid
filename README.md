@@ -36,6 +36,19 @@ Optional visual and audio analysis can enrich page evidence through an OpenAI-co
 
 A generic receipt proves that the exact browser action was dispatched. It does not claim that a remote service completed the operation. Only a verified adapter with an observed postcondition may make that stronger claim.
 
+### Verified X surface
+
+On an exact `x.com/.../status/...` page, the fail-closed X adapter can expose:
+
+- `read_x_post` for the visible post's author, handle, timestamp, text, URL, and media metadata;
+- `like_x_post` for the exact unliked post, gated by a fresh human approval;
+- `prepare_x_reply` only while a real reply editor is open; it stages text for review and never publishes it;
+- `repost_x_post` only while X exposes the exact positive repost confirmation item, also gated by approval.
+
+The adapter anchors these tools to the article containing the exact status permalink and suppresses lookalike, quoted-post, stale, and already-completed controls. It does not currently claim a verified new-post publishing tool.
+
+The MV3 content runtime keeps a validated lifecycle Port and heartbeat with the service worker. If the side panel closes or the worker disconnects, it re-establishes the page binding and submits a fresh snapshot before the next call. An interrupted mutation is never replayed automatically.
+
 Build the load-unpacked extension with:
 
 ```bash

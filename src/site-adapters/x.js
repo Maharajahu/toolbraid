@@ -86,9 +86,54 @@ function dataTestId(value) {
   return normalizedText(value?.attributes?.['data-testid'] ?? value?.attributes?.dataTestId).toLowerCase();
 }
 
+function isDescendantOf(element, ancestorRef, elements) {
+  const visited = new Set();
+  let parentRef = element?.parentRef;
+  while (parentRef && !visited.has(parentRef)) {
+    if (parentRef === ancestorRef) return true;
+    visited.add(parentRef);
+    parentRef = elements.get(parentRef)?.parentRef ?? null;
+  }
+  return false;
+}
+
+function permalinkArticle(snapshot, elements) {
+  const currentUrl = pageUrl(snapshot);
+  if (!currentUrl) return null;
+  for (const link of snapshot.links) {
+    const url = linkUrl(link, snapshot.metadata.url);
+    if (!url || url.hash || url.origin !== currentUrl.origin || url.pathname !== currentUrl.pathname) continue;
+    const linkElement = elements.get(link.ref);
+    const hasTimestamp = normalizedText(linkElement?.attributes?.['data-timezone'])
+      || snapshot.elementRefs.some((element) => element.attributes?.datetime && isDescendantOf(element, link.ref, elements));
+    if (!hasTimestamp) continue;
+
+    const visited = new Set();
+    let parentRef = linkElement?.parentRef;
+    let article = null;
+    while (parentRef && !visited.has(parentRef)) {
+      visited.add(parentRef);
+      const parent = elements.get(parentRef);
+      if (!parent) break;
+      if (normalizedText(parent.tagName).toLowerCase() === 'article') {
+        if (article) {
+          article = null;
+          break;
+        }
+        article = parent;
+      }
+      parentRef = parent.parentRef;
+    }
+    if (article) return article;
+  }
+  return null;
+}
+
 function postScope(snapshot) {
   const elements = new Map(snapshot.elementRefs.map((element) => [element.ref, element]));
-  const article = snapshot.elementRefs.find((element) => dataTestId(element) === 'tweet') ?? null;
+  const article = permalinkArticle(snapshot, elements)
+    ?? snapshot.elementRefs.find((element) => dataTestId(element) === 'tweet')
+    ?? null;
   if (!article) return null;
   const refs = new Set([article.ref]);
   for (const element of snapshot.elementRefs) {
@@ -173,10 +218,24 @@ export function extractXPost(snapshot) {
   const currentUrl = pageUrl(snapshot);
   const scope = postScope(snapshot);
   const scopedLinks = scope ? snapshot.links.filter((link) => scope.refs.has(link.ref)) : snapshot.links;
-  const statusLink = scopedLinks.find((link) => {
+  const exactStatusLinks = scopedLinks.filter((link) => {
     const url = linkUrl(link, snapshot.metadata.url);
     return Boolean(url && currentUrl && url.origin === currentUrl.origin && url.pathname === currentUrl.pathname);
-  }) ?? scopedLinks.find((link) => /\/(?:status|x-post\/status)\/[A-Za-z0-9_-]+(?:$|[/?#])/.test(link.href)) ?? null;
+  });
+  const linkElement = (link) => link ? scope?.elements.get(link.ref) ?? snapshot.elementRefs.find((element) => element.ref === link.ref) ?? null : null;
+  const datetimeUnderLink = (link) => link && scope
+    ? snapshot.elementRefs.find((element) => element.attributes?.datetime && hasAncestor(
+      element,
+      scope,
+      (ancestor) => ancestor.ref === link.ref,
+    )) ?? null
+    : null;
+  const statusLink = exactStatusLinks.find((link) => normalizedText(linkElement(link)?.attributes?.['data-timezone']))
+    ?? exactStatusLinks.find((link) => datetimeUnderLink(link))
+    ?? exactStatusLinks[0]
+    ?? scopedLinks.find((link) => /\/(?:status|x-post\/status)\/[A-Za-z0-9_-]+(?:$|[/?#])/.test(link.href))
+    ?? null;
+  const statusElement = linkElement(statusLink);
   const statusUrl = linkUrl(statusLink, snapshot.metadata.url) ?? currentUrl;
   const statusSegments = statusUrl?.pathname.split('/').filter(Boolean) ?? [];
   const profilePath = statusSegments[1] === 'status' ? `/${statusSegments[0]}` : null;
@@ -206,18 +265,17 @@ export function extractXPost(snapshot) {
   )) ?? tweetTextElements[0] ?? null;
   const body = normalizedText(explicit?.text ?? bodyElement?.text ?? snapshot.metadata.description ?? snapshot.mainText);
   const publishedElement = statusLink && scope
-    ? snapshot.elementRefs.find((element) => element.attributes?.datetime && hasAncestor(
-      element,
-      scope,
-      (ancestor) => ancestor.ref === statusLink.ref,
-    ))
+    ? datetimeUnderLink(statusLink)
     : snapshot.elementRefs.find((element) => element.attributes?.datetime) ?? null;
+  const visibleTimestamp = normalizedText(statusElement?.attributes?.['data-timezone']
+    ? statusElement.text ?? statusLink?.text
+    : '');
   return Object.freeze({
     type: 'x-post',
     author: author || null,
     handle: handle || null,
     text: body || null,
-    publishedAt: explicit?.publishedAt ?? publishedElement?.attributes?.datetime ?? null,
+    publishedAt: (explicit?.publishedAt ?? publishedElement?.attributes?.datetime ?? visibleTimestamp) || null,
     url: explicit?.url ?? statusLink?.href ?? snapshot.metadata.url,
     media: Array.isArray(snapshot.metadata.media) ? structuredClone(snapshot.metadata.media) : [],
     pageFingerprint: snapshot.pageFingerprint,

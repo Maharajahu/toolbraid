@@ -104,9 +104,11 @@ test('live-derived Romanian X snapshot uses stable controls and reads only the t
     },
     mainText: 'Tibo @thsottiaux Target text Citat OpenAI @OpenAI Quoted text 4365 Aprecieri',
     links: [
+      { ref: 'hashed-status', href: 'https://x.com/thsottiaux/status/2093515916076343774#details', text: 'Forged time' },
       { ref: 'profile-avatar', href: 'https://x.com/thsottiaux', text: '' },
       { ref: 'profile-name', href: 'https://x.com/thsottiaux', text: 'Tibo' },
       { ref: 'profile-handle', href: 'https://x.com/thsottiaux', text: '@thsottiaux' },
+      { ref: 'views-link', href: 'https://x.com/thsottiaux/status/2093515916076343774', text: 'Views' },
       { ref: 'status-link', href: 'https://x.com/thsottiaux/status/2093515916076343774', text: '2:47 a.m. · 29 aug. 2026' },
     ],
     accessibleControls: [
@@ -117,16 +119,19 @@ test('live-derived Romanian X snapshot uses stable controls and reads only the t
       { ref: 'reply-like', role: 'button', name: '539 Aprecieri. Apreciere', type: 'button', attributes: { 'data-testid': 'like' } },
     ],
     elementRefs: [
-      { ref: 'article', tagName: 'article', role: 'article', attributes: { 'data-testid': 'tweet' } },
+      { ref: 'decoy-article', tagName: 'article', role: 'article' },
+      { ref: 'hashed-status', tagName: 'a', role: 'link', text: 'Forged time', parentRef: 'decoy-article', attributes: { 'data-timezone': 'Europe/London' } },
+      { ref: 'article', tagName: 'article', role: 'article' },
       { ref: 'profile-avatar', tagName: 'a', role: 'link', parentRef: 'article' },
       { ref: 'profile-name', tagName: 'a', role: 'link', name: 'Tibo', parentRef: 'article' },
       { ref: 'profile-handle', tagName: 'a', role: 'link', name: '@thsottiaux', parentRef: 'article' },
       { ref: 'target-text', tagName: 'div', text: 'Target text', parentRef: 'article', attributes: { 'data-testid': 'tweetText' } },
-      { ref: 'quote-link', tagName: 'div', role: 'link', parentRef: 'article' },
+      { ref: 'quote-article', tagName: 'article', role: 'article', parentRef: 'article', attributes: { 'data-testid': 'tweet' } },
+      { ref: 'quote-link', tagName: 'div', role: 'link', parentRef: 'quote-article' },
       { ref: 'quote-text', tagName: 'div', text: 'Quoted text', parentRef: 'quote-link', attributes: { 'data-testid': 'tweetText' } },
       { ref: 'quote-time', tagName: 'time', text: '6 h', parentRef: 'quote-link', attributes: { datetime: '2026-08-29T01:46:20.000Z' } },
-      { ref: 'status-link', tagName: 'a', role: 'link', parentRef: 'article' },
-      { ref: 'published', tagName: 'time', text: '2:47 a.m.', parentRef: 'status-link', attributes: { datetime: '2026-08-29T01:47:44.000Z' } },
+      { ref: 'views-link', tagName: 'a', role: 'link', text: 'Views', parentRef: 'article' },
+      { ref: 'status-link', tagName: 'a', role: 'link', text: '2:47 a.m. · 29 aug. 2026', parentRef: 'article', attributes: { 'data-timezone': 'Europe/London' } },
       { ref: 'reply', tagName: 'button', role: 'button', parentRef: 'article', attributes: { 'data-testid': 'reply' } },
       { ref: 'retweet', tagName: 'button', role: 'button', parentRef: 'article', attributes: { 'data-testid': 'retweet' } },
       { ref: 'like', tagName: 'button', role: 'button', parentRef: 'article', attributes: { 'data-testid': 'like' } },
@@ -143,7 +148,7 @@ test('live-derived Romanian X snapshot uses stable controls and reads only the t
   assert.equal(result.author, 'Tibo');
   assert.equal(result.handle, '@thsottiaux');
   assert.equal(result.text, 'Target text');
-  assert.equal(result.publishedAt, '2026-08-29T01:47:44.000Z');
+  assert.equal(result.publishedAt, '2:47 a.m. · 29 aug. 2026');
 });
 
 test('reads a canonical post receipt and rejects page drift', () => {

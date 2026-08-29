@@ -73,7 +73,7 @@ The generic surface is deterministic and target-specific rather than a set of br
 - a strict JSON schema derived from the exact target's current fields;
 - provenance containing the generator version, origin, page fingerprint, element reference, and target fingerprint.
 
-Verified adapters may add narrow names such as `read_x_post` or `stage_x_reply` only when the exact supported page shape is present. Adapter targets suppress equivalent generic targets. The combined live registry is capped at 128 tools; overflow, duplicates, invalid descriptors, and policy failures are quarantined rather than registered.
+Verified adapters may add narrow names only when the exact supported page shape is present. The X adapter exposes `read_x_post`, approval-gated `like_x_post`, reversible `prepare_x_reply` when a reply editor is already open, and approval-gated `repost_x_post` only when the positive repost confirmation item is live. It anchors the target article to the exact status permalink and rejects quoted-post, lookalike, stale, already-completed, and ambiguous controls. Adapter targets suppress equivalent generic targets. The combined live registry is capped at 128 tools; overflow, duplicates, invalid descriptors, and policy failures are quarantined rather than registered.
 
 ## Action lifecycle
 
@@ -102,6 +102,8 @@ Dispatch is recorded as a two-step extension-owned transition: `dispatching` bef
 Authority is bound to a concrete top-level origin, document identity, page-instance nonce, snapshot fingerprint, and navigation generation. A cross-origin loading event invalidates the session immediately. Same-origin URL changes are not treated as proof of a new document because Chrome also emits them for `history.pushState`; instead, a new document replaces authority only when the injected page runtime announces a new document/page-instance identity. DOM or history changes within an SPA produce a new acknowledged snapshot generation, replace generated registrations, clear stale pending actions and multimodal evidence, and make captured `RegisteredTool` objects from the prior fingerprint unusable.
 
 Snapshot delivery is acknowledged rather than fire-and-forget. If the service worker rejects or misses an ingest, the isolated content runtime retries the same fingerprint until it receives `{ ok: true }`; it never marks an unacknowledged snapshot as current.
+
+The isolated content runtime also holds a validated lifecycle Port and sends a bounded `PAGE_READY` heartbeat. Closing the side panel does not revoke the active tab session. If the MV3 worker disconnects or restarts, the content runtime reconnects, replaces the MAIN-world binding, and submits a fresh snapshot before servicing a subsequent call. A mutation interrupted during that transition fails once and is never replayed automatically.
 
 ## Multimodal pipeline
 

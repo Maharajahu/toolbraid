@@ -136,17 +136,160 @@
     return mode === 'closed' ? null : root;
   }
 
+  const SEMANTIC_SCAN_NODE_LIMIT = 4_096;
+  const SEMANTIC_ANCESTOR_SCAN_LIMIT = 64;
+
+  function isXStatusUrl(url) {
+    const host = url.hostname.toLowerCase();
+    return ['x.com', 'www.x.com', 'twitter.com', 'www.twitter.com'].includes(host)
+      && /^\/[A-Za-z0-9_]+\/status\/[A-Za-z0-9_-]+\/?$/.test(url.pathname);
+  }
+
+  function resourceIdentity(url) {
+    const xStatus = isXStatusUrl(url);
+    return `${url.origin}${url.pathname}${xStatus ? '' : url.search}`;
+  }
+
+  function semanticParent(node) {
+    let parent = safeGet(node, 'parentElement', null) || safeGet(node, 'parentNode', null);
+    if (parent && !isElement(parent)) parent = safeGet(parent, 'host', null);
+    return parent;
+  }
+
+  function indexedChildren(node) {
+    const children = safeGet(node, 'children', null);
+    if (children && Number.isFinite(Number(safeGet(children, 'length', NaN)))) return children;
+    const childNodeList = safeGet(node, 'childNodes', null);
+    return childNodeList && Number.isFinite(Number(safeGet(childNodeList, 'length', NaN))) ? childNodeList : null;
+  }
+
+  function walkNodesBounded(root, limit, visitor) {
+    if (!root || !Number.isInteger(limit) || limit <= 0) return null;
+    const frame = (node) => ({ node, entered: false, children: null, length: 0, index: 0 });
+    const stack = [frame(root)];
+    const seen = new Set();
+    let inspected = 0;
+    let childSlots = 0;
+    while (stack.length && inspected < limit && childSlots < limit) {
+      const currentFrame = stack[stack.length - 1];
+      if (!currentFrame.entered) {
+        const node = currentFrame.node;
+        if (!node || seen.has(node)) {
+          stack.pop();
+          continue;
+        }
+        seen.add(node);
+        inspected += 1;
+        const result = visitor(node);
+        if (result) return result;
+        currentFrame.entered = true;
+        currentFrame.children = indexedChildren(node);
+        const length = Number(safeGet(currentFrame.children, 'length', 0));
+        currentFrame.length = Number.isFinite(length) && length > 0 ? Math.min(Math.floor(length), limit) : 0;
+        continue;
+      }
+      if (currentFrame.index >= currentFrame.length) {
+        stack.pop();
+        continue;
+      }
+      const child = safeGet(currentFrame.children, currentFrame.index, null);
+      currentFrame.index += 1;
+      childSlots += 1;
+      if (child && !seen.has(child)) stack.push(frame(child));
+    }
+    return null;
+  }
+
+  function permalinkArticle(linkElement) {
+    let article = null;
+    let current = linkElement;
+    for (let depth = 0; current && depth < SEMANTIC_ANCESTOR_SCAN_LIMIT; depth += 1) {
+      if (isElement(current) && tagName(current) === 'article') {
+        if (article) return null;
+        article = current;
+      }
+      current = semanticParent(current);
+    }
+    return article;
+  }
+
+  function timestampLink(timeElement) {
+    if (!trimText(attr(timeElement, 'datetime', ''))) return null;
+    let current = timeElement;
+    for (let depth = 0; current && depth < SEMANTIC_ANCESTOR_SCAN_LIMIT; depth += 1) {
+      if (isElement(current) && tagName(current) === 'a') return current;
+      if (current !== timeElement && isElement(current) && tagName(current) === 'article') return null;
+      current = semanticParent(current);
+    }
+    return null;
+  }
+
+  function preferredArticleRoot(documentRef) {
+    const href = String(safeGet(safeGet(documentRef, 'location', null), 'href', safeGet(documentRef, 'URL', '')) || '');
+    let currentUrl = null;
+    try { currentUrl = href ? new URL(href) : null; } catch { currentUrl = null; }
+    if (!currentUrl) return null;
+
+    currentUrl.hash = '';
+    const targetIdentity = resourceIdentity(currentUrl);
+    const currentIsXStatus = isXStatusUrl(currentUrl);
+    const root = safeGet(documentRef, 'body', null) || safeGet(documentRef, 'documentElement', null);
+    return walkNodesBounded(root, SEMANTIC_SCAN_NODE_LIMIT, (node) => {
+      let linkElement = null;
+      if (currentIsXStatus) {
+        if (!isElement(node)) return null;
+        if (tagName(node) === 'time') linkElement = timestampLink(node);
+        else if (tagName(node) === 'a' && trimText(attr(node, 'data-timezone', ''))) linkElement = node;
+        else return null;
+      } else if (isElement(node) && tagName(node) === 'a') {
+        linkElement = node;
+      }
+      if (linkElement) {
+        const rawHref = attr(linkElement, 'href', null);
+        const trimmedHref = typeof rawHref === 'string' ? rawHref.trim() : '';
+        if (trimmedHref && !trimmedHref.startsWith('#') && !trimmedHref.startsWith('?')) {
+          let linkUrl = null;
+          try { linkUrl = new URL(trimmedHref, currentUrl.href); } catch { linkUrl = null; }
+          if (linkUrl && !linkUrl.hash && resourceIdentity(linkUrl) === targetIdentity) {
+            return permalinkArticle(linkElement);
+          }
+        }
+      }
+      return null;
+    });
+  }
+
+  function semanticRoots(documentRef) {
+    const documentElement = safeGet(documentRef, 'documentElement', null);
+    const body = safeGet(documentRef, 'body', null);
+    const preferredArticle = preferredArticleRoot(documentRef);
+    let main = null;
+    if (preferredArticle) {
+      let current = preferredArticle;
+      for (let depth = 0; current && depth < SEMANTIC_ANCESTOR_SCAN_LIMIT; depth += 1) {
+        if (isElement(current) && tagName(current) === 'main') {
+          main = current;
+          break;
+        }
+        current = semanticParent(current);
+      }
+    }
+    const roots = [];
+    for (const root of preferredArticle
+      ? [preferredArticle, main, documentElement || body]
+      : [documentElement || body]) {
+      if (root && !roots.includes(root)) roots.push(root);
+    }
+    return roots;
+  }
+
   function traverseDocument(documentRef, options) {
     const elements = [];
     const seen = new Set();
     let nodesVisited = 0;
     let shadowRootsVisited = 0;
     let truncated = false;
-    const queue = [];
-    const documentElement = safeGet(documentRef, 'documentElement', null);
-    const body = safeGet(documentRef, 'body', null);
-    if (documentElement) queue.push({ node: documentElement, shadowDepth: 0 });
-    else if (body) queue.push({ node: body, shadowDepth: 0 });
+    const queue = semanticRoots(documentRef).map((node) => ({ node, shadowDepth: 0 }));
 
     const visit = (node, shadowDepth) => {
       if (!node || seen.has(node)) return;
@@ -551,8 +694,10 @@
     const attributes = {};
     const testId = trimText(attr(element, 'data-testid', '')).slice(0, 128);
     const datetime = trimText(attr(element, 'datetime', '')).slice(0, 128);
+    const timezone = trimText(attr(element, 'data-timezone', '')).slice(0, 128);
     if (testId) attributes['data-testid'] = testId;
     if (datetime) attributes.datetime = datetime;
+    if (timezone) attributes['data-timezone'] = timezone;
     if (Object.keys(attributes).length) record.attributes = attributes;
     const textLimit = testId === 'tweetText' ? options.maxTextCharacters : 512;
     const text = nodeText(element, { includeShadow: false, max: textLimit });

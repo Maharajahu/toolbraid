@@ -12,6 +12,12 @@
     pageInstanceId: null,
     listenersAttached: false,
     initAttempts: 0,
+    readyEnabled: true,
+    readyInFlight: false,
+    readyPort: null,
+    readyTimer: null,
+    lifecyclePort: null,
+    lifecycleReconnectTimer: null,
     pendingResponses: new Map(),
     snapshotTimer: null,
     snapshotPollTimer: null,
@@ -29,8 +35,24 @@
   }
   if (!state.pageInstanceId) state.pageInstanceId = protocol.createNonce?.();
   if (!state.pageInstanceId) return;
+  state.readyEnabled = true;
+  if (state.readyInFlight === undefined) state.readyInFlight = false;
+  if (state.readyPort === undefined) state.readyPort = null;
+  if (state.readyTimer === undefined) state.readyTimer = null;
+  if (state.lifecyclePort === undefined) state.lifecyclePort = null;
+  if (state.lifecycleReconnectTimer === undefined) state.lifecycleReconnectTimer = null;
 
   const pageOrigin = () => global.location?.origin ?? '';
+  const READY_HEARTBEAT_MS = 20_000;
+  const LIFECYCLE_PORT_NAME = 'toolbraid:page-lifecycle';
+
+  function sameBinding(left, right) {
+    return Boolean(left && right
+      && left.nonce === right.nonce
+      && left.sessionId === right.sessionId
+      && left.tabId === right.tabId
+      && left.frameId === right.frameId);
+  }
 
   function postToMain(envelope) {
     if (!state.session || !envelope) return false;
@@ -42,30 +64,43 @@
     }
   }
 
-  function postErrorFor(request, response) {
-    if (!state.session || !request?.requestId) return;
+  function postErrorFor(request, response, session = state.session) {
+    if (!session || !request?.requestId) return;
     const payload = response?.error
       ? response
       : { ok: false, error: { code: 'BRIDGE_UNAVAILABLE', message: 'ToolBraid bridge did not acknowledge the request.' }, provenance: protocol.PROVENANCE };
-    const result = protocol.createEnvelope(protocol.TYPES.EXECUTE_RESULT, payload, state.session, request.requestId);
-    postToMain(result);
+    const result = protocol.createEnvelope(protocol.TYPES.EXECUTE_RESULT, payload, session, request.requestId);
+    if (!result) return;
+    try {
+      global.window.postMessage(result, pageOrigin());
+    } catch {
+      // The request remains failed closed if the old MAIN channel disappeared.
+    }
   }
 
   function forwardPageEvent(envelope) {
+    const requestSession = state.session;
+    if (!requestSession) return;
     global.chrome.runtime.sendMessage({ type: protocol.TYPES.PAGE_EVENT, envelope }, (response) => {
       // Reading lastError is required in Chrome to consume a disconnected
       // receiver error without emitting an unhandled console warning.
       const runtimeError = global.chrome.runtime.lastError;
       if (runtimeError) {
-        if (envelope.type === protocol.TYPES.EXECUTE_REQUEST) postErrorFor(envelope, null);
+        if (envelope.type === protocol.TYPES.EXECUTE_REQUEST) postErrorFor(envelope, null, requestSession);
         return;
       }
+      if (response?.ok === false && response?.error?.code === 'SESSION_NOT_FOUND') {
+        if (envelope.type === protocol.TYPES.EXECUTE_REQUEST) postErrorFor(envelope, response, requestSession);
+        requestReady();
+        return;
+      }
+      if (!sameBinding(state.session, requestSession)) return;
       if (response?.envelope) {
-        const parsed = protocol.parseEnvelope(response.envelope, state.session);
+        const parsed = protocol.parseEnvelope(response.envelope, requestSession);
         if (parsed.ok) postToMain(parsed.value);
-        else if (envelope.type === protocol.TYPES.EXECUTE_REQUEST) postErrorFor(envelope, response);
+        else if (envelope.type === protocol.TYPES.EXECUTE_REQUEST) postErrorFor(envelope, response, requestSession);
       } else if (envelope.type === protocol.TYPES.EXECUTE_REQUEST) {
-        postErrorFor(envelope, response);
+        postErrorFor(envelope, response, requestSession);
       }
     });
   }
@@ -100,6 +135,7 @@
 
   function sendSnapshot(reason = 'page-change', force = false) {
     if (!state.session) return;
+    const requestSession = state.session;
     let snapshot;
     try {
       snapshot = extractSnapshot();
@@ -112,14 +148,19 @@
     state.snapshotInFlightFingerprint = fingerprint;
     global.chrome.runtime.sendMessage({
       type: protocol.TYPES.PAGE_SNAPSHOT,
-      sessionId: state.session.sessionId,
-      nonce: state.session.nonce,
+      sessionId: requestSession.sessionId,
+      nonce: requestSession.nonce,
       snapshot,
       reason,
     }, (response) => {
       const runtimeError = global.chrome.runtime.lastError;
+      if (!sameBinding(state.session, requestSession)) return;
       if (state.snapshotInFlightFingerprint !== fingerprint) return;
       state.snapshotInFlightFingerprint = null;
+      if (!runtimeError && response?.ok === false && response?.error?.code === 'SESSION_NOT_FOUND') {
+        requestReady();
+        return;
+      }
       if (!runtimeError && response?.ok === true) state.lastSnapshotFingerprint = fingerprint;
     });
   }
@@ -151,41 +192,143 @@
     }
   }
 
+  function scheduleReady() {
+    if (!state.readyEnabled || state.readyTimer !== null || typeof global.setTimeout !== 'function') return;
+    state.readyTimer = global.setTimeout(() => {
+      state.readyTimer = null;
+      sendReady();
+    }, READY_HEARTBEAT_MS);
+  }
+
+  function connectLifecyclePort() {
+    if (!state.readyEnabled || state.lifecyclePort || typeof global.chrome.runtime.connect !== 'function') return;
+    let port;
+    try {
+      port = global.chrome.runtime.connect({ name: LIFECYCLE_PORT_NAME });
+    } catch {
+      return;
+    }
+    if (!port || typeof port.postMessage !== 'function'
+      || !port.onMessage || typeof port.onMessage.addListener !== 'function'
+      || !port.onDisconnect || typeof port.onDisconnect.addListener !== 'function') return;
+    state.lifecyclePort = port;
+    port.onMessage.addListener((response) => {
+      if (state.lifecyclePort !== port || state.readyPort !== port || !state.readyInFlight) return;
+      finishReady(response, null, port);
+    });
+    port.onDisconnect.addListener(() => {
+      // Consume Chrome's connection error before scheduling a bounded recovery.
+      const runtimeError = global.chrome.runtime.lastError;
+      void runtimeError;
+      if (state.lifecyclePort !== port) return;
+      state.lifecyclePort = null;
+      if (state.readyPort === port) {
+        state.readyPort = null;
+        state.readyInFlight = false;
+      }
+      if (!state.readyEnabled || state.lifecycleReconnectTimer !== null) return;
+      state.lifecycleReconnectTimer = global.setTimeout(() => {
+        state.lifecycleReconnectTimer = null;
+        requestReady();
+      }, 250);
+    });
+  }
+
+  function requestReady() {
+    if (!state.readyEnabled) return;
+    connectLifecyclePort();
+    if (state.readyTimer !== null) global.clearTimeout(state.readyTimer);
+    state.readyTimer = null;
+    sendReady();
+  }
+
   function sendReady() {
+    if (!state.readyEnabled || state.readyInFlight) return;
+    state.readyInFlight = true;
     const message = {
       type: protocol.TYPES.PAGE_READY,
       url: global.location?.href ?? '',
       pageInstanceId: state.pageInstanceId,
     };
-    global.chrome.runtime.sendMessage(message, (response) => {
-      const runtimeError = global.chrome.runtime.lastError;
-      if (runtimeError || !response?.ok || !response.channel) return;
-      const parsed = protocol.parseEnvelope(response.channel);
-      if (!parsed.ok || parsed.value.type !== protocol.TYPES.CHANNEL_INIT) return;
-      state.session = {
-        nonce: parsed.value.nonce,
-        sessionId: parsed.value.sessionId,
-        tabId: parsed.value.tabId,
-        frameId: parsed.value.frameId,
-      };
-      state.initAttempts = 0;
-      observePage();
-      sendSnapshot('activation', true);
-      // The MAIN injector is installed immediately before this script, but a
-      // service-worker restart can race the injection. Re-announce a bounded
-      // number of times; failure remains a no-op rather than a direct fallback.
-      const announce = () => {
-        const envelope = protocol.createEnvelope(
-          protocol.TYPES.CHANNEL_INIT,
-          { provenance: protocol.PROVENANCE },
-          state.session,
-        );
-        postToMain(envelope);
-        state.initAttempts += 1;
-        if (state.initAttempts < 5) global.setTimeout(announce, 100);
-      };
-      announce();
-    });
+    connectLifecyclePort();
+    const port = state.lifecyclePort;
+    if (port) {
+      state.readyPort = port;
+      try {
+        port.postMessage(message);
+        return;
+      } catch {
+        state.readyPort = null;
+        state.lifecyclePort = null;
+        try {
+          port.disconnect?.();
+        } catch { /* fall through to one-time messaging */ }
+      }
+    }
+    try {
+      global.chrome.runtime.sendMessage(message, (response) => {
+        const runtimeError = global.chrome.runtime.lastError;
+        finishReady(response, runtimeError, null);
+      });
+    } catch {
+      state.readyInFlight = false;
+      scheduleReady();
+    }
+  }
+
+  function finishReady(response, runtimeError, port) {
+    if (port !== null && (state.lifecyclePort !== port || state.readyPort !== port)) return;
+    if (port === null && state.readyPort !== null) return;
+    state.readyInFlight = false;
+    state.readyPort = null;
+    if (!state.readyEnabled) return;
+    scheduleReady();
+    if (runtimeError || !response?.ok || !response.channel) return;
+    const parsed = protocol.parseEnvelope(response.channel);
+    if (!parsed.ok || parsed.value.type !== protocol.TYPES.CHANNEL_INIT) return;
+    const nextSession = {
+      nonce: parsed.value.nonce,
+      sessionId: parsed.value.sessionId,
+      tabId: parsed.value.tabId,
+      frameId: parsed.value.frameId,
+    };
+    if (sameBinding(state.session, nextSession)) return;
+    const previousSession = state.session;
+    if (previousSession) {
+      const close = protocol.createEnvelope(
+        protocol.TYPES.CHANNEL_CLOSE,
+        { provenance: protocol.PROVENANCE, reason: 'binding-replaced' },
+        previousSession,
+      );
+      postToMain(close);
+      for (const respond of state.pendingResponses.values()) {
+        respond({ ok: false, error: { code: 'SESSION_CLOSED', message: 'ToolBraid page session was replaced.' } });
+      }
+      state.pendingResponses.clear();
+    }
+    state.session = nextSession;
+    state.lastSnapshotFingerprint = null;
+    state.snapshotInFlightFingerprint = null;
+    if (state.snapshotTimer !== null) global.clearTimeout(state.snapshotTimer);
+    state.snapshotTimer = null;
+    state.initAttempts = 0;
+    // The MAIN injector is installed immediately before this script, but a
+    // service-worker restart can race the injection. Re-announce a bounded
+    // number of times; failure remains a no-op rather than a direct fallback.
+    const announce = () => {
+      if (!sameBinding(state.session, nextSession)) return;
+      const envelope = protocol.createEnvelope(
+        protocol.TYPES.CHANNEL_INIT,
+        { provenance: protocol.PROVENANCE },
+        nextSession,
+      );
+      postToMain(envelope);
+      state.initAttempts += 1;
+      if (state.initAttempts < 5) global.setTimeout(announce, 100);
+    };
+    announce();
+    observePage();
+    sendSnapshot('activation', true);
   }
 
   function onWindowMessage(event) {
@@ -212,6 +355,14 @@
   function onRuntimeMessage(message, _sender, sendResponse) {
     if (!state.session || !message || typeof message !== 'object') return false;
     if (message.type === protocol.TYPES.CHANNEL_CLOSE) {
+      state.readyEnabled = false;
+      const lifecyclePort = state.lifecyclePort;
+      state.lifecyclePort = null;
+      try {
+        lifecyclePort?.disconnect?.();
+      } catch { /* an already closed lifecycle port is inert */ }
+      if (state.lifecycleReconnectTimer !== null) global.clearTimeout(state.lifecycleReconnectTimer);
+      state.lifecycleReconnectTimer = null;
       state.session = null;
       state.mutationObserver?.disconnect?.();
       state.mutationObserver = null;
@@ -219,6 +370,8 @@
       state.snapshotTimer = null;
       if (state.snapshotPollTimer !== null) global.clearInterval?.(state.snapshotPollTimer);
       state.snapshotPollTimer = null;
+      if (state.readyTimer !== null) global.clearTimeout(state.readyTimer);
+      state.readyTimer = null;
       state.lastSnapshotFingerprint = null;
       state.snapshotInFlightFingerprint = null;
       for (const respond of state.pendingResponses.values()) respond({ ok: false, error: { code: 'SESSION_CLOSED', message: 'ToolBraid page session closed.' } });
@@ -319,5 +472,5 @@
   }
   // A repeated dynamic injection is a safe way to re-handshake after the
   // service worker has restarted; the page instance id remains document-local.
-  sendReady();
+  requestReady();
 }(globalThis));
