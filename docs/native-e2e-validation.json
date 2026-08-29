@@ -11,6 +11,6 @@
   "audit": {
     "algorithm": "sha256-chain-v1",
     "entries": 54,
-    "head": "3658e2e57e8a8f7dcf5d2c3260de6c67e14ad728e69f4a4c369e3937d3c65b39"
+    "head": "ec9250eee8256abca88cdd6cd755992e662a844900ac8425e1f7331c7d1cd4a8"
   }
 }

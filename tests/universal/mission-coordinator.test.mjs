@@ -355,3 +355,38 @@ test('terminal missions reject all membership, action, and phase mutations', () 
     assert.equal(instance.state(missionId).revision, terminal.revision);
   }
 });
+
+test('persists a bounded redacted objective and resolves an exact pending action', () => {
+  const instance = coordinator();
+  const mission = instance.createMission({
+    missionId: 'mission-objective',
+    objective: '  Publish a notice   password=secret-value and preserve the objective.  ',
+  });
+  assert.equal(mission.objective, 'Publish a notice password=[redacted] and preserve the objective.');
+  const attached = instance.attachMember({
+    missionId: mission.missionId,
+    memberId: 'member-objective',
+    ...member(),
+  });
+  instance.registerPendingAction({
+    missionId: mission.missionId,
+    memberId: 'member-objective',
+    bindingDigest: attached.members[0].bindingDigest,
+    actionId: 'action-objective',
+  });
+  const resolved = instance.resolvePendingAction({
+    missionId: mission.missionId,
+    memberId: 'member-objective',
+    bindingDigest: attached.members[0].bindingDigest,
+    actionId: 'action-objective',
+  });
+  assert.deepEqual(resolved.resolvedActionIds, ['action-objective']);
+  assert.deepEqual(resolved.pendingActions, []);
+
+  const persisted = instance.toPersistence();
+  assert.equal(persisted.missions[0].objective, mission.objective);
+  const restored = rehydrateMissionCoordinator(persisted, {
+    now: () => new Date('2026-08-29T00:01:00.000Z'),
+  });
+  assert.equal(restored.state(mission.missionId).objective, mission.objective);
+});

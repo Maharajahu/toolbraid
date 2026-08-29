@@ -3,6 +3,11 @@ import { validateToolDescriptor } from '../universal/tools.js';
 
 const DEFAULT_HOSTS = Object.freeze(['x.com', 'www.x.com', 'twitter.com', 'www.twitter.com']);
 
+export const X_POSTCONDITION_IDS = Object.freeze({
+  like: 'x.post.like.v1',
+  repost: 'x.post.repost.v1',
+});
+
 function normalizedText(value) {
   return String(value ?? '').replace(/\s+/g, ' ').trim();
 }
@@ -49,6 +54,7 @@ function descriptor(snapshot, adapterVersion, {
   inputSchema = { type: 'object', properties: {}, additionalProperties: false },
   target = null,
   summary,
+  postcondition,
 }) {
   const tool = {
     version: 1,
@@ -67,12 +73,16 @@ function descriptor(snapshot, adapterVersion, {
     target: {
       ref: target?.ref ?? null,
       elementRef: target?.ref ?? null,
-      type: 'verified-adapter',
+      // Action preparation resolves verified-adapter controls from the
+      // accessibleControls collection.  Keeping the concrete kind here also
+      // preserves the control fingerprint across the isolated-world boundary.
+      type: target ? 'control' : 'verified-adapter',
       targetFingerprint: target ? elementFingerprint(target) : null,
     },
     elementRef: target?.ref ?? null,
     effect: effect(classification, summary),
     semanticEvidence: [{ source: 'verified-adapter', code: 'X_POST_CONTRACT', adapterVersion }],
+    ...(postcondition === undefined ? {} : { postcondition }),
   };
   validateToolDescriptor(tool);
   return Object.freeze(tool);
@@ -151,6 +161,26 @@ function postScope(snapshot) {
   return { article, elements, refs };
 }
 
+function controlsForPost(snapshot) {
+  const scope = postScope(snapshot);
+  if (!scope) return snapshot.accessibleControls;
+  return snapshot.accessibleControls.filter((control) => {
+    if (!scope.refs.has(control.ref)) return false;
+    const element = scope.elements.get(control.ref);
+    if (!element) return false;
+    const visited = new Set();
+    let parentRef = element.parentRef;
+    while (parentRef && !visited.has(parentRef)) {
+      visited.add(parentRef);
+      const parent = scope.elements.get(parentRef);
+      if (!parent) return false;
+      if (parent.ref !== scope.article.ref && normalizedText(parent.tagName).toLowerCase() === 'article') return false;
+      parentRef = parent.parentRef;
+    }
+    return true;
+  });
+}
+
 function hasAncestor(element, scope, predicate) {
   if (!element || !scope) return false;
   const visited = new Set();
@@ -174,35 +204,42 @@ function linkUrl(link, baseUrl) {
 }
 
 function findLikeControl(snapshot) {
-  const scope = postScope(snapshot);
-  return snapshot.accessibleControls.find((control) => {
-    if (scope && !scope.refs.has(control.ref)) return false;
+  const matches = controlsForPost(snapshot).filter((control) => {
     if (!availableControl(control) || normalizedText(control.role).toLowerCase() !== 'button') return false;
     const testId = dataTestId(control);
+    const name = normalizedText(control.name).toLowerCase();
+    if (/\b(?:unlike|liked|remove\s+like|undo\s+like|nu\s+mai\s+aprecia|anuleaz[ăa]\s+aprecierea|elimin[ăa]\s+aprecierea|apreciat(?:ă)?)\b/u.test(name)) return false;
     if (testId === 'unlike') return false;
     if (testId === 'like') return true;
-    const name = normalizedText(control.name).toLowerCase();
-    if (/\b(?:unlike|liked|remove\s+like|undo\s+like|nu\s+mai\s+aprecia|anuleaz[ăa]\s+aprecierea|elimin[ăa]\s+aprecierea)\b/u.test(name)) return false;
     return /\b(?:like|apreciere|apreciaz[ăa])\b/u.test(name);
-  }) ?? null;
+  });
+  return matches.length === 1 ? matches[0] : null;
+}
+
+function isRepostConfirmation(control) {
+  if (!availableControl(control)) return false;
+  const role = normalizedText(control.role).toLowerCase();
+  if (role !== 'menuitem' && role !== 'menuitemradio') return false;
+  const testId = dataTestId(control);
+  if (testId === 'unretweetconfirm') return false;
+  if (testId === 'retweetconfirm' || testId === 'repostconfirm') return true;
+  const name = normalizedText(control.name).toLowerCase();
+  if (/\b(?:undo|remove|unrepost|unretweet|reposted|retweeted|anuleaz[ăa]\s+repostarea|elimin[ăa]\s+repostarea)\b/u.test(name)) return false;
+  return ['repost', 'retweet', 'repostare', 'repostează', 'reposteaza'].includes(name);
+}
+
+function repostConfirmationControls(snapshot) {
+  return snapshot.accessibleControls.filter(isRepostConfirmation);
 }
 
 function findRepostConfirmation(snapshot) {
-  return snapshot.accessibleControls.find((control) => {
-    if (!availableControl(control)) return false;
-    const role = normalizedText(control.role).toLowerCase();
-    if (role !== 'menuitem' && role !== 'menuitemradio') return false;
-    const testId = dataTestId(control);
-    if (testId === 'unretweetconfirm') return false;
-    if (testId === 'retweetconfirm' || testId === 'repostconfirm') return true;
-    const name = normalizedText(control.name).toLowerCase();
-    if (/\b(?:undo|remove|unrepost|unretweet|reposted|retweeted|anuleaz[ăa]\s+repostarea|elimin[ăa]\s+repostarea)\b/u.test(name)) return false;
-    return ['repost', 'retweet', 'repostare', 'repostează', 'reposteaza'].includes(name);
-  }) ?? null;
+  const matches = repostConfirmationControls(snapshot);
+  return matches.length === 1 ? matches[0] : null;
 }
 
 function findReplyEditor(snapshot) {
-  return snapshot.accessibleControls.find((control) => {
+  const matches = snapshot.accessibleControls.filter((control) => {
+    if (!availableControl(control)) return false;
     const role = normalizedText(control.role).toLowerCase();
     const type = normalizedText(control.type).toLowerCase();
     const name = normalizedText(control.name).toLowerCase();
@@ -210,7 +247,154 @@ function findReplyEditor(snapshot) {
     if (!editable) return false;
     if (/^tweettextarea(?:_\d+)?$/.test(dataTestId(control))) return true;
     return /\b(?:reply|post|tweet|postare|răspuns|raspuns)\b/iu.test(name);
-  }) ?? null;
+  });
+  return matches.length === 1 ? matches[0] : null;
+}
+
+const LIKE_ACTIVE_NAME = /\b(?:unlike|liked|remove\s+like|undo\s+like|nu\s+mai\s+aprecia|anuleaz[ăa]\s+aprecierea|elimin[ăa]\s+aprecierea|apreciat(?:ă)?)\b/iu;
+const LIKE_NAME = /\b(?:like|apreciere|apreciaz[ăa])\b/iu;
+
+function likeControlState(control) {
+  const testId = dataTestId(control);
+  const name = normalizedText(control.name);
+  const looksLike = testId === 'like' || testId === 'unlike' || LIKE_NAME.test(name) || LIKE_ACTIVE_NAME.test(name);
+  if (!looksLike) return 'other';
+  if (testId === 'unlike' || LIKE_ACTIVE_NAME.test(name)
+    || ((testId === 'like' || LIKE_NAME.test(name)) && (control.pressed === true || control.checked === true))) {
+    return 'active';
+  }
+  return availableControl(control) ? 'available' : 'other';
+}
+
+function likeObservation(snapshot) {
+  const controls = controlsForPost(snapshot);
+  return {
+    controls,
+    available: controls.filter((control) => likeControlState(control) === 'available'),
+    active: controls.filter((control) => likeControlState(control) === 'active'),
+  };
+}
+
+const REPOST_ACTIVE_NAME = /\b(?:undo\s+(?:repost|retweet)|remove\s+(?:repost|retweet)|unrepost|unretweet|reposted|retweeted|repostat(?:ă)?|repostare\s+anulat[ăa]|anuleaz[ăa]\s+repostarea|elimin[ăa]\s+repostarea)\b/iu;
+
+function repostControlState(control) {
+  const testId = dataTestId(control);
+  const name = normalizedText(control.name);
+  const toolbar = testId === 'retweet' || testId === 'repost' || /\b(?:repost|retweet|repostare)\b/iu.test(name);
+  if (testId === 'unretweet' || testId === 'unrepost' || REPOST_ACTIVE_NAME.test(name)
+    || (toolbar && (control.pressed === true || control.checked === true))) return 'active';
+  return 'other';
+}
+
+function repostObservation(snapshot) {
+  const controls = controlsForPost(snapshot);
+  return {
+    controls,
+    active: controls.filter((control) => repostControlState(control) === 'active'),
+    confirmations: repostConfirmationControls(snapshot),
+  };
+}
+
+function postRoute(snapshot, hosts, allowFixture) {
+  const url = pageUrl(snapshot);
+  if (!url || !hosts.has(url.hostname.toLowerCase())) return null;
+  const pathname = url.pathname.replace(/\/+$/, '') || '/';
+  const statusPath = /^\/[A-Za-z0-9_]+\/status\/[A-Za-z0-9_-]+$/.test(pathname);
+  const fixturePath = allowFixture && pathname.startsWith('/x-post');
+  return statusPath || fixturePath ? { origin: url.origin, pathname } : null;
+}
+
+function samePostRoute(before, after) {
+  return Boolean(before && after && before.origin === after.origin && before.pathname === after.pathname);
+}
+
+function postconditionContract(id, adapterVersion) {
+  return {
+    version: 1,
+    id,
+    adapterId: 'x-post',
+    adapterVersion: String(adapterVersion),
+    observation: 'page-snapshot',
+  };
+}
+
+function postconditionResult(status, reasonCode, afterSnapshot, evidence = {}) {
+  return {
+    status,
+    reasonCode,
+    evidence,
+    ...(typeof afterSnapshot?.pageFingerprint === 'string' ? { afterPageFingerprint: afterSnapshot.pageFingerprint } : {}),
+  };
+}
+
+function descriptorTarget(tool, controls) {
+  const ref = tool?.target?.ref ?? tool?.target?.elementRef ?? tool?.elementRef ?? tool?.provenance?.elementRef;
+  const fingerprint = tool?.target?.targetFingerprint ?? tool?.provenance?.targetFingerprint;
+  if (typeof ref !== 'string' || !ref || typeof fingerprint !== 'string' || !fingerprint) return null;
+  const matches = controls.filter((control) => control.ref === ref && elementFingerprint(control) === fingerprint);
+  return matches.length === 1 ? matches[0] : null;
+}
+
+function verifyXPostcondition({ tool, contract: suppliedContract, beforeSnapshot, afterSnapshot }, hosts, allowFixture, adapterVersion) {
+  const contract = suppliedContract ?? tool?.postcondition ?? null;
+  const beforeRoute = postRoute(beforeSnapshot, hosts, allowFixture);
+  const afterRoute = postRoute(afterSnapshot, hosts, allowFixture);
+  if (!samePostRoute(beforeRoute, afterRoute)) {
+    return postconditionResult('unverified', 'X_POST_ROUTE_DRIFT', afterSnapshot);
+  }
+
+  const expectedIds = {
+    like_x_post: X_POSTCONDITION_IDS.like,
+    repost_x_post: X_POSTCONDITION_IDS.repost,
+  };
+  const expectedId = expectedIds[tool?.name];
+  if (!expectedId || contract?.id !== expectedId
+    || contract?.adapterId !== 'x-post'
+    || String(contract?.adapterVersion) !== String(adapterVersion)) {
+    return postconditionResult('unverified', 'X_POST_CONTRACT_MISMATCH', afterSnapshot);
+  }
+
+  if (postScope(beforeSnapshot) && !postScope(afterSnapshot)) {
+    return postconditionResult('unverified', 'X_POST_SCOPE_NOT_CONFIRMED', afterSnapshot);
+  }
+
+  if (tool.name === 'like_x_post') {
+    const before = likeObservation(beforeSnapshot);
+    const after = likeObservation(afterSnapshot);
+    const target = descriptorTarget(tool, before.controls);
+    const evidence = {
+      beforeAvailable: before.available.length,
+      beforeActive: before.active.length,
+      afterAvailable: after.available.length,
+      afterActive: after.active.length,
+      targetRef: target?.ref ?? null,
+    };
+    if (before.available.length !== 1 || before.active.length !== 0 || !target) {
+      return postconditionResult('unverified', 'X_LIKE_PRECONDITION_NOT_CONFIRMED', afterSnapshot, evidence);
+    }
+    if (after.active.length !== 1 || after.available.length !== 0) {
+      return postconditionResult('unverified', 'X_LIKE_STATE_NOT_CONFIRMED', afterSnapshot, evidence);
+    }
+    return postconditionResult('verified-success', 'X_LIKE_STATE_CONFIRMED', afterSnapshot, evidence);
+  }
+
+  const before = repostObservation(beforeSnapshot);
+  const after = repostObservation(afterSnapshot);
+  const target = descriptorTarget(tool, before.confirmations);
+  const evidence = {
+    beforeConfirmations: before.confirmations.length,
+    beforeActive: before.active.length,
+    afterConfirmations: after.confirmations.length,
+    afterActive: after.active.length,
+    targetRef: target?.ref ?? null,
+  };
+  if (before.confirmations.length !== 1 || before.active.length !== 0 || !target) {
+    return postconditionResult('unverified', 'X_REPOST_PRECONDITION_NOT_CONFIRMED', afterSnapshot, evidence);
+  }
+  if (after.active.length !== 1 || after.confirmations.length !== 0) {
+    return postconditionResult('unverified', 'X_REPOST_STATE_NOT_CONFIRMED', afterSnapshot, evidence);
+  }
+  return postconditionResult('verified-success', 'X_REPOST_STATE_CONFIRMED', afterSnapshot, evidence);
 }
 
 export function extractXPost(snapshot) {
@@ -334,6 +518,7 @@ export function createXPostAdapter({ hosts = DEFAULT_HOSTS, allowFixture = false
         risk: 'transactional',
         target: like,
         summary: 'Like the exact visible X post.',
+        postcondition: postconditionContract(X_POSTCONDITION_IDS.like, version),
       }));
       // X's toolbar "Repost" button opens a menu; it does not itself prove a
       // repost. Expose the verified mutation only when the exact positive
@@ -348,8 +533,12 @@ export function createXPostAdapter({ hosts = DEFAULT_HOSTS, allowFixture = false
         risk: 'transactional',
         target: repost,
         summary: 'Repost the exact visible X post.',
+        postcondition: postconditionContract(X_POSTCONDITION_IDS.repost, version),
       }));
       return Object.freeze(tools);
+    },
+    verifyPostcondition(context = {}) {
+      return verifyXPostcondition(context, allowedHosts, allowFixture, version);
     },
     executeRead(tool, snapshot) {
       if (tool.name !== 'read_x_post') throw new Error(`Unsupported X read tool: ${tool.name}`);

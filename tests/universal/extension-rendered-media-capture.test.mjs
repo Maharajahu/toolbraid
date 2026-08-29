@@ -100,10 +100,16 @@ function cue(startTime, endTime, text) {
   return { startTime, endTime, text };
 }
 
-function load({ elements, recorder = EmittingRecorder, fetchImpl = () => { throw new Error('fetch must not be called'); } } = {}) {
+function load({
+  elements,
+  recorder = EmittingRecorder,
+  fetchImpl = () => { throw new Error('fetch must not be called'); },
+  locationHref = 'https://example.test/watch',
+} = {}) {
   const elementByRef = new Map(elements.map((element) => [element.ref, element]));
+  const location = new URL(locationHref);
   const documentRef = {
-    location: { href: 'https://example.test/watch', origin: 'https://example.test' },
+    location: { href: location.href, origin: location.origin },
     querySelectorAll(selector) {
       assert.equal(selector, 'audio,video');
       return elements;
@@ -314,4 +320,143 @@ test('rejects paused and encrypted media explicitly before captureStream', async
   assert.equal(encryptedResult.code, 'DRM_MEDIA_UNSUPPORTED');
   assert.equal(paused.captureCalls, 0);
   assert.equal(encrypted.captureCalls, 0);
+});
+
+test('captures bounded visible video keyframes without resolving the media URL', async () => {
+  const video = new FakeElement('video', 'id:video', { textTracks: [] });
+  video.videoWidth = 640;
+  video.videoHeight = 360;
+  video.currentTime = 1.25;
+  video.getBoundingClientRect = () => ({ width: 640, height: 360 });
+  video.requestVideoFrameCallback = (callback) => {
+    callback(0, { mediaTime: video.currentTime });
+    return 1;
+  };
+  let frame = 0;
+  const canvases = [];
+  const canvasFactory = () => {
+    const canvas = {
+    width: 0,
+    height: 0,
+    getContext() {
+      return { drawImage() { frame += 1; }, clearRect() {} };
+    },
+    toBlob(callback) {
+      callback(new Uint8Array([frame, frame + 1]));
+    },
+    };
+    canvases.push(canvas);
+    return canvas;
+  };
+  let resolvedUrl = false;
+  const { api } = load({
+    elements: [video],
+    locationHref: 'https://example.test/watch?token=SUPERSECRET#private',
+    fetchImpl: () => { resolvedUrl = true; throw new Error('must not fetch'); },
+  });
+  const result = await api.captureFrames(request({
+    elementRef: 'id:video',
+    kind: 'video',
+    maxFrames: 2,
+    frameIntervalMs: 1,
+    maxFrameBytes: 8,
+    maxTotalFrameBytes: 8,
+    canvasFactory,
+  }));
+
+  assert.equal(result.ok, true);
+  assert.equal(result.code, 'CAPTURE_FRAMES_OK');
+  assert.equal(result.metadata.captureKind, 'frames');
+  assert.equal(result.frames.length, 2);
+  assert.deepEqual([...result.frames[0].bytes], [1, 2]);
+  assert.deepEqual([...result.frames[1].bytes], [2, 3]);
+  assert.equal(result.frames[0].timeMs, 1250);
+  assert.equal(resolvedUrl, false);
+  assert.equal(Object.hasOwn(result.metadata, 'pageUrl'), false);
+  assert.equal(JSON.stringify(result).includes('SUPERSECRET'), false);
+  assert.ok(canvases.every((canvas) => canvas.width === 0 && canvas.height === 0));
+});
+
+test('fails closed for DRM, hidden, and oversized video keyframe capture', async () => {
+  const encrypted = new FakeElement('video', 'id:encrypted');
+  encrypted.videoWidth = 320;
+  encrypted.videoHeight = 180;
+  encrypted.mediaKeys = {};
+  const hidden = new FakeElement('video', 'id:hidden');
+  hidden.videoWidth = 320;
+  hidden.videoHeight = 180;
+  hidden.getBoundingClientRect = () => ({ width: 0, height: 0 });
+  const oversized = new FakeElement('video', 'id:oversized');
+  oversized.videoWidth = 320;
+  oversized.videoHeight = 180;
+  const canvasFactory = () => ({
+    getContext() { return { drawImage() {} }; },
+    toBlob(callback) { callback(new Uint8Array([1, 2, 3, 4])); },
+  });
+  const { api } = load({ elements: [encrypted, hidden, oversized] });
+
+  const encryptedResult = await api.captureFrames(request({ elementRef: 'id:encrypted', kind: 'video', canvasFactory }));
+  const hiddenResult = await api.captureFrames(request({ elementRef: 'id:hidden', kind: 'video', canvasFactory }));
+  const oversizedResult = await api.captureFrames(request({
+    elementRef: 'id:oversized',
+    kind: 'video',
+    canvasFactory,
+    maxFrameBytes: 3,
+  }));
+
+  assert.equal(encryptedResult.code, 'DRM_MEDIA_UNSUPPORTED');
+  assert.equal(hiddenResult.code, 'MEDIA_NOT_VISIBLE');
+  assert.equal(oversizedResult.code, 'CAPTURE_FRAME_OVERSIZED');
+});
+
+test('aborts pending frame encoding and rejects page binding drift', async () => {
+  const video = new FakeElement('video', 'id:video');
+  video.videoWidth = 320;
+  video.videoHeight = 180;
+  video.getBoundingClientRect = () => ({ width: 320, height: 180 });
+  const controller = new AbortController();
+  let encodeCallback;
+  const { api } = load({ elements: [video] });
+  const pending = api.capture(request({
+    mode: 'frames',
+    elementRef: 'id:video',
+    kind: 'video',
+    maxFrames: 1,
+    signal: controller.signal,
+    canvasFactory: () => ({
+      getContext() { return { drawImage() {} }; },
+      toBlob(callback) { encodeCallback = callback; },
+    }),
+  }));
+  controller.abort();
+  const aborted = await pending;
+  assert.equal(aborted.code, 'CAPTURE_ABORTED');
+  encodeCallback?.(new Uint8Array([1]));
+
+  let pageFingerprint = 'initial';
+  const driftingVideo = new FakeElement('video', 'id:drifting');
+  driftingVideo.videoWidth = 320;
+  driftingVideo.videoHeight = 180;
+  driftingVideo.getBoundingClientRect = () => ({ width: 320, height: 180 });
+  const extractor = {
+    getStableElementRef(_document, element) { return element.ref; },
+    extractPageSnapshot() { return { pageFingerprint }; },
+  };
+  const drifting = load({ elements: [driftingVideo] }).api;
+  const drifted = await drifting.captureFrames(request({
+    elementRef: 'id:drifting',
+    kind: 'video',
+    extractor,
+    extractorPageFingerprint: 'initial',
+    maxFrames: 1,
+    canvasFactory: () => ({
+      getContext() { return { drawImage() {} }; },
+      toBlob(callback) {
+        pageFingerprint = 'changed';
+        callback(new Uint8Array([1]));
+      },
+    }),
+  }));
+  assert.equal(drifted.code, 'CAPTURE_PAGE_DRIFT');
+  assert.equal(drifted.frames?.length ?? 0, 0);
 });

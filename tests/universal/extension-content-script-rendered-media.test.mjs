@@ -87,6 +87,25 @@ function harness() {
           elementRef: 'id:video', sourceKind: 'video', pageOrigin: 'https://example.test'
         }, captions: [], bytes: new Uint8Array(0) };
       },
+      captureRenderedFrames(request) {
+        globalThis.__frameRequest = request;
+        globalThis.__lastFrameBytes = new Uint8Array([5, 6, 7, 8]);
+        return Promise.resolve({
+          ok: true,
+          code: 'CAPTURE_FRAMES_OK',
+          metadata: {
+            elementRef: 'id:video',
+            sourceKind: 'video',
+            captureKind: 'frames',
+            pageOrigin: 'https://example.test',
+            pageUrl: 'https://example.test/private-video-url',
+            frameByteLength: 4,
+          },
+          captions: [],
+          frames: [{ index: 0, timeMs: 125, mimeType: 'image/png', width: 640, height: 360, byteLength: 4, bytes: globalThis.__lastFrameBytes }],
+          bytes: new Uint8Array(0),
+        });
+      },
     };
   `, context);
   vm.runInContext(contentSource, context, { filename: 'content-script.js' });
@@ -110,6 +129,11 @@ function request(context, overrides = {}) {
     maxTracks: 8,
     maxCues: 32,
     maxCaptionBytes: 4096,
+    maxFrames: 3,
+    maxFrameBytes: 1024,
+    maxTotalFrameBytes: 2048,
+    frameIntervalMs: 100,
+    frameMimeType: 'image/png',
     provenance: context.ToolBraidUniversalProtocol.PROVENANCE,
     ...overrides,
   };
@@ -136,6 +160,22 @@ test('content relay binds rendered capture and transports bytes as bounded base6
   assert.equal(response.nonce, binding.nonce);
   assert.equal(response.pageFingerprint, 'c'.repeat(64));
   assert.equal(response.extractorPageFingerprint, 'f'.repeat(64));
+});
+
+test('content relay captures bounded rendered video frames without URL or page authority', async () => {
+  const context = harness();
+  const response = await dispatch(context, request(context, { mode: 'frames' }));
+
+  assert.equal(response.ok, true);
+  assert.equal(response.result.frames.length, 1);
+  assert.equal(response.result.frames[0].frameBase64, 'BQYHCA==');
+  assert.equal(Object.hasOwn(response.result.frames[0], 'bytes'), false);
+  assert.equal(Object.hasOwn(response.result.metadata, 'pageUrl'), false);
+  assert.equal(Object.hasOwn(response.result.metadata, 'pageOrigin'), false);
+  assert.equal(context.__frameRequest.elementRef, 'id:video');
+  assert.equal(context.__frameRequest.pageFingerprint, 'c'.repeat(64));
+  assert.equal(context.__frameRequest.extractorPageFingerprint, 'f'.repeat(64));
+  assert.deepEqual(Array.from(context.__lastFrameBytes), [0, 0, 0, 0]);
 });
 
 test('content relay discards bytes when the page fingerprint changes in flight', async () => {

@@ -9,6 +9,7 @@ import {
   normalizeMultimodalConfig,
   permissionOriginForBaseUrl,
 } from '../../extension/multimodal-provider.js';
+import { normalizeMediaAsset } from '../../src/multimodal/media.js';
 
 function memoryArea() {
   const values = {};
@@ -24,13 +25,14 @@ function volatileEntry(handle = 'tb-media-shot', {
   bytes = new Uint8Array([1, 2, 3]),
   mimeType = 'image/png',
   expiresAt = 2_000,
+  metadata = {},
 } = {}) {
   return {
     handle,
     bytes,
     byteLength: bytes.byteLength,
     expiresAt,
-    metadata: { mimeType },
+    metadata: { mimeType, ...metadata },
   };
 }
 
@@ -187,6 +189,7 @@ test('does not persist provider configuration when optional host permission is d
 
 test('configured vision adapter resolves only an extension-owned volatile handle and sends bounded provider input', async () => {
   const calls = [];
+  const entry = volatileEntry();
   const adapter = createConfiguredMultimodalAdapter({
     settings: {
       async read() {
@@ -202,7 +205,7 @@ test('configured vision adapter resolves only an extension-owned volatile handle
     handleStore: {
       get(handle) {
         assert.equal(handle, 'tb-media-shot');
-        return volatileEntry();
+        return entry;
       },
     },
     now: () => 1_000,
@@ -233,6 +236,7 @@ test('configured vision adapter resolves only an extension-owned volatile handle
   const body = JSON.parse(calls[0].options.body);
   assert.equal(body.model, 'vision-model');
   assert.match(body.messages[1].content[1].image_url.url, /^data:image\/png;base64,/);
+  assert.deepEqual([...entry.bytes], [0, 0, 0]);
 });
 
 test('supports callback-style Chrome APIs and never leaks runtime.lastError text', async () => {
@@ -395,6 +399,148 @@ test('supports bounded audio transcription and keeps MIME-derived filenames iner
   assert.equal(file.name, 'toolbraid-audio.webm');
 });
 
+test('analyzes video from bounded volatile keyframe handles and optional rendered audio', async () => {
+  const binding = {
+    pageOrigin: 'https://example.test',
+    frameId: '0',
+    sessionId: 'session-video',
+    pageFingerprint: 'a'.repeat(64),
+    elementRef: 'id:video',
+  };
+  const frame1 = volatileEntry('tb-media-frame-1', { bytes: new Uint8Array([1, 2]), mimeType: 'image/png', metadata: binding });
+  const frame2 = volatileEntry('tb-media-frame-2', { bytes: new Uint8Array([3, 4]), mimeType: 'image/jpeg', metadata: binding });
+  const audio = volatileEntry('tb-media-audio', { bytes: new Uint8Array([5, 6]), mimeType: 'audio/webm', metadata: binding });
+  const entries = new Map([[frame1.handle, frame1], [frame2.handle, frame2], [audio.handle, audio]]);
+  const calls = [];
+  const adapter = createConfiguredMultimodalAdapter({
+    settings: configuredSettings({ audioModel: 'asr-model' }),
+    handleStore: { get(handle) { return entries.get(handle) ?? null; } },
+    fetchImpl: async (url, options) => {
+      calls.push({ url, options });
+      if (url.endsWith('/audio/transcriptions')) {
+        return { ok: true, async json() { return { text: 'Rendered speech', language: 'en', model: 'asr-model', segments: [{ start: 0, end: 1, text: 'Rendered speech' }] }; } };
+      }
+      const body = JSON.parse(options.body);
+      const imageUrl = body.messages[1].content[1].image_url.url;
+      return {
+        ok: true,
+        async json() {
+          return {
+            model: 'vision-model',
+            choices: [{ message: { content: JSON.stringify({ summary: imageUrl.includes('AQI=') ? 'First frame' : 'Second frame', labels: ['visible'] }) } }],
+          };
+        }
+      };
+    },
+    now: () => 1_000,
+  });
+  const videoAsset = normalizeMediaAsset({
+    id: 'video',
+    kind: 'video',
+    source: 'capture',
+    url: 'https://example.test/video.mp4?private=never-upload',
+    mimeType: 'video/webm',
+    caption: 'Loaded captions',
+    pageOrigin: binding.pageOrigin,
+    frameId: binding.frameId,
+    elementRef: binding.elementRef,
+    captureBinding: binding,
+    keyframes: [
+      { id: 'frame-1', kind: 'image', source: 'capture', handle: frame1.handle, mimeType: 'image/png', byteLength: 2, timeMs: 0 },
+      { id: 'frame-2', kind: 'image', source: 'capture', handle: frame2.handle, mimeType: 'image/jpeg', byteLength: 2, timeMs: 1_000 },
+    ],
+    audioAsset: { id: 'audio', kind: 'audio', source: 'capture', handle: audio.handle, mimeType: 'audio/webm', byteLength: 2 },
+  });
+  const result = await adapter.analyze(videoAsset, { context: { frameId: 0, sessionId: binding.sessionId } });
+
+  assert.equal(result.transcript, 'Rendered speech');
+  assert.equal(result.keyframes.length, 2);
+  assert.deepEqual(result.keyframes.map((frame) => frame.timeMs), [0, 1_000]);
+  assert.equal(result.summary.includes('frame'), true);
+  assert.equal(calls.filter((call) => call.url.endsWith('/chat/completions')).length, 2);
+  assert.equal(calls.filter((call) => call.url.endsWith('/audio/transcriptions')).length, 1);
+  assert.equal(JSON.stringify(result).includes('AQI'), false);
+  assert.equal(calls.some((call) => JSON.stringify(call.options).includes('private=never-upload')), false);
+});
+
+test('video analysis never uploads raw video URLs or bytes and fails closed on frame binding drift', async () => {
+  let fetched = false;
+  const adapter = createConfiguredMultimodalAdapter({
+    settings: configuredSettings({ audioModel: 'asr-model' }),
+    handleStore: { get() { throw new Error('must not resolve'); } },
+    fetchImpl: async () => { fetched = true; throw new Error('must not fetch'); },
+  });
+  const raw = await adapter.analyze({
+    id: 'raw-video',
+    kind: 'video',
+    url: 'https://media.example/video.mp4',
+    bytes: new Uint8Array([9, 9, 9]),
+    caption: 'Caption only',
+    frames: [{ url: 'https://media.example/frame.png', mimeType: 'image/png' }],
+  });
+  assert.equal(raw.model, 'toolbraid-metadata-only');
+  assert.equal(fetched, false);
+
+  const frame = volatileEntry('tb-media-frame-drift', { bytes: new Uint8Array([1]), mimeType: 'image/png' });
+  fetched = false;
+  const drifted = createConfiguredMultimodalAdapter({
+    settings: configuredSettings(),
+    handleStore: { get() { return frame; } },
+    fetchImpl: async () => { fetched = true; throw new Error('must not fetch'); },
+    now: () => 1_000,
+  });
+  const result = await drifted.analyze({
+    id: 'bound-video',
+    kind: 'video',
+    source: 'capture',
+    captureBinding: { pageFingerprint: 'a'.repeat(64) },
+    keyframes: [{ id: 'frame', handle: frame.handle, kind: 'image', source: 'capture', mimeType: 'image/png', byteLength: 1 }],
+  });
+  assert.equal(result.model, 'toolbraid-metadata-only');
+  assert.equal(fetched, false);
+
+  const missingBindingEntry = volatileEntry('tb-media-frame-unbound', { bytes: new Uint8Array([7]), mimeType: 'image/png' });
+  const unbound = createConfiguredMultimodalAdapter({
+    settings: configuredSettings(),
+    handleStore: { get() { return missingBindingEntry; } },
+    fetchImpl: async () => { fetched = true; throw new Error('must not fetch'); },
+    now: () => 1_000,
+  });
+  const missing = await unbound.analyze({
+    id: 'unbound-video',
+    kind: 'video',
+    source: 'capture',
+    keyframes: [{ id: 'frame', handle: missingBindingEntry.handle, kind: 'image', source: 'capture', mimeType: 'image/png', byteLength: 1 }],
+  });
+  assert.equal(missing.model, 'toolbraid-metadata-only');
+  assert.equal(fetched, false);
+
+  const exactBinding = {
+    pageOrigin: 'https://example.test',
+    frameId: '0',
+    sessionId: 'session-video',
+    pageFingerprint: 'b'.repeat(64),
+    elementRef: 'id:video',
+  };
+  const conflictEntry = volatileEntry('tb-media-frame-conflict', { bytes: new Uint8Array([8]), mimeType: 'image/png', metadata: exactBinding });
+  const conflicting = createConfiguredMultimodalAdapter({
+    settings: configuredSettings(),
+    handleStore: { get() { return conflictEntry; } },
+    fetchImpl: async () => { fetched = true; throw new Error('must not fetch'); },
+    now: () => 1_000,
+  });
+  const conflict = await conflicting.analyze({
+    id: 'conflicting-video',
+    kind: 'video',
+    source: 'capture',
+    captureBinding: exactBinding,
+    pageFingerprint: 'c'.repeat(64),
+    keyframes: [{ id: 'frame', handle: conflictEntry.handle, kind: 'image', source: 'capture', mimeType: 'image/png', byteLength: 1 }],
+  });
+  assert.equal(conflict.model, 'toolbraid-metadata-only');
+  assert.equal(fetched, false);
+});
+
 test('propagates cancellation before settings, handle resolution, and provider fetch', async () => {
   const controller = new AbortController();
   controller.abort();
@@ -430,6 +576,22 @@ test('propagates an abort raised by the provider fetch instead of claiming metad
   const running = adapter.analyze({ kind: 'image', handle: 'tb-media-shot', mimeType: 'image/png' }, { signal: controller.signal });
   controller.abort();
   await assert.rejects(running, (error) => error.name === 'AbortError');
+});
+
+test('bounds a provider fetch that never settles and clears the resolved bytes', async () => {
+  const entry = volatileEntry('tb-media-timeout');
+  const adapter = createConfiguredMultimodalAdapter({
+    settings: configuredSettings(),
+    handleStore: { get() { return entry; } },
+    fetchImpl: async () => new Promise(() => {}),
+    providerTimeoutMs: 5,
+    now: () => 1_000,
+  });
+
+  const result = await adapter.analyze({ kind: 'image', handle: entry.handle, mimeType: 'image/png', byteLength: 3 });
+
+  assert.equal(result.model, 'toolbraid-metadata-only');
+  assert.deepEqual([...entry.bytes], [0, 0, 0]);
 });
 
 test('metadata-only mode still produces explicit evidence without network authority', async () => {

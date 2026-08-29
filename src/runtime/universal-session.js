@@ -146,6 +146,30 @@ function unknownDispatchRecord({ actionId, dispatchId, approvalFingerprint = nul
   });
 }
 
+function stagedRecord({ actionId, dispatchId, receipt }) {
+  return Object.freeze({
+    dispatchId,
+    actionId,
+    mode: 'stage',
+    status: 'staged',
+    outcome: 'local-stage',
+    postcondition: 'not-applicable',
+    receipt: redactReceipt(receipt),
+  });
+}
+
+function unknownStageRecord({ actionId, dispatchId }) {
+  return Object.freeze({
+    dispatchId,
+    actionId,
+    mode: 'stage',
+    status: 'outcome-unknown',
+    outcome: 'unknown',
+    postcondition: 'not-applicable',
+    receipt: Object.freeze({ operation: 'stage', events: Object.freeze([]) }),
+  });
+}
+
 function pushReceipt(state, receipt) {
   state.receipts.push(clone(receipt));
   if (state.receipts.length > MAX_SESSION_RECEIPTS) state.receipts.splice(0, state.receipts.length - MAX_SESSION_RECEIPTS);
@@ -202,7 +226,7 @@ function withPostconditionTimeout(operation, timeoutMs) {
 
 function receiptRank(record) {
   if (record?.status === 'verified-success' || record?.status === 'verified-failure') return 3;
-  if (record?.status === 'dispatched') return 2;
+  if (record?.status === 'dispatched' || record?.status === 'staged') return 2;
   if (record?.status === 'outcome-unknown') return 1;
   return 0;
 }
@@ -289,16 +313,12 @@ async function rehydrateReceipts(audit) {
       } catch {
         // A malformed postcondition event can never upgrade a known dispatch.
       }
+    } else if (entry.event === 'action.staging') {
+      const dispatchId = boundedString(details.dispatchId, 256) ?? `stage:${actionId}:${entry.sequence}`;
+      upsert(dispatchId, unknownStageRecord({ actionId, dispatchId }));
     } else if (entry.event === 'action.staged') {
-      const id = `stage:${actionId}:${entry.sequence}`;
-      upsert(id, Object.freeze({
-        actionId,
-        mode: 'stage',
-        status: 'staged',
-        outcome: 'local-stage',
-        postcondition: 'not-applicable',
-        receipt: redactReceipt(details.receipt),
-      }));
+      const dispatchId = boundedString(details.dispatchId, 256) ?? `stage:${actionId}:${entry.sequence}`;
+      upsert(dispatchId, stagedRecord({ actionId, dispatchId, receipt: details.receipt }));
     }
   }
   return records.slice(-MAX_SESSION_RECEIPTS).map(clone);
@@ -698,25 +718,55 @@ export function createUniversalSessionRuntime({
       throw error;
     }
     if (descriptor.classification === 'stage') {
-      const receipt = await executePageAction({
-        tabId,
-        frameId,
-        sessionId,
-        preparedAction: clone(prepared),
-        approved: false,
-        mode: 'stage',
-      });
-      const redacted = redactReceipt(receipt);
+      const dispatchId = `stage:${prepared.actionId}`;
+      let stagingRecorded = false;
+      const recordStaging = async () => {
+        if (stagingRecorded) return;
+        await append(state, 'action.staging', {
+          dispatchId,
+          actionId: prepared.actionId,
+          mode: 'stage',
+        });
+        stagingRecorded = true;
+      };
+      let receipt;
+      let redacted;
+      try {
+        if (!dispatchHookAware) await recordStaging();
+        receipt = await executePageAction({
+          tabId,
+          frameId,
+          sessionId,
+          preparedAction: clone(prepared),
+          approved: false,
+          mode: 'stage',
+          ...(dispatchHookAware ? { beforeDispatch: recordStaging } : {}),
+        });
+        if (!stagingRecorded) {
+          throw sessionError('DISPATCH_AUDIT_MISSING', 'The page stage returned without recording durable dispatch intent.');
+        }
+        redacted = redactReceipt(receipt);
+        await append(state, 'action.staged', {
+          dispatchId,
+          actionId: prepared.actionId,
+          mode: 'stage',
+          outcome: 'local-stage',
+          receipt: redacted,
+        });
+      } catch (error) {
+        state.pending.delete(prepared.actionId);
+        if (stagingRecorded) {
+          pushReceipt(state, unknownStageRecord({ actionId: prepared.actionId, dispatchId }));
+          throw sessionError(
+            'ACTION_OUTCOME_UNKNOWN',
+            'The local stage may have been applied, but its durable completion could not be verified.',
+            { actionId: prepared.actionId, dispatchId, causeCode: error?.code ?? 'STAGE_INTERRUPTED' },
+          );
+        }
+        throw error;
+      }
       state.pending.delete(prepared.actionId);
-      pushReceipt(state, {
-        actionId: prepared.actionId,
-        mode: 'stage',
-        status: 'staged',
-        outcome: 'local-stage',
-        postcondition: 'not-applicable',
-        receipt: redacted,
-      });
-      await append(state, 'action.staged', { actionId: prepared.actionId, receipt: redacted });
+      pushReceipt(state, stagedRecord({ actionId: prepared.actionId, dispatchId, receipt: redacted }));
       return Object.freeze({ status: 'staged', preparedAction: clone(prepared), receipt: redacted });
     }
     return Object.freeze({ status: 'approval-required', preparedAction: clone(prepared) });

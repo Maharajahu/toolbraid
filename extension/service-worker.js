@@ -13,6 +13,7 @@ import {
   createGitHubAdapter,
   createSiteAdapterRegistry,
   createVercelAdapter,
+  createXPostAdapter,
 } from '../src/site-adapters/index.js';
 import { HANDOFF_STATES, syntheticUiIntent } from '../src/runtime/handoff-broker.js';
 import {
@@ -28,7 +29,9 @@ import {
   asExtensionRuntimeError,
   createExtensionUniversalRuntime,
   isUiMessageType,
+  UI_MESSAGE_TYPES,
 } from './universal-runtime.js';
+import { clickVisibleCaptchaCheckbox } from './captcha-checkbox.js';
 
 const PAGE_LIFECYCLE_PORT = 'toolbraid:page-lifecycle';
 const HANDOFF_KEY_STORAGE_KEY = 'toolbraid.extension.handoff.key.v1';
@@ -36,7 +39,7 @@ const HANDOFF_SURFACE_KIND = 'toolbraid.sidepanel-created-handoff-surface';
 const HANDOFF_SURFACE_CREATOR = 'sidepanel';
 const SAFE_ERROR_CODE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/;
 const POSTCONDITION_ADAPTERS = createSiteAdapterRegistry({
-  adapters: [createGitHubAdapter(), createVercelAdapter()],
+  adapters: [createXPostAdapter(), createGitHubAdapter(), createVercelAdapter()],
 });
 
 function fail(code, message, details = {}) {
@@ -64,7 +67,8 @@ function safeFailure(error, fallbackCode = 'EXTENSION_RUNTIME_FAILED', fallbackM
 function exactOrigin(value) {
   try {
     const url = new URL(value);
-    return ['http:', 'https:'].includes(url.protocol) ? url.origin : null;
+    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) return null;
+    return url.origin;
   } catch {
     return null;
   }
@@ -181,6 +185,7 @@ export function createServiceWorkerController({
   let handoffPromise = null;
   const surfaceLifecycle = new Map();
   const handoffSurfaces = new Map();
+  const captchaAttemptPromises = new Map();
   const lifecycleForHandoff = Object.freeze({
     get(tabId, frameId = 0) {
       return surfaceLifecycle.get(`${tabId}:${frameId}`) ?? registry.get(tabId, frameId);
@@ -283,7 +288,7 @@ export function createServiceWorkerController({
       throw new ProtocolError('HANDOFF_SURFACE_UNAVAILABLE', 'The human handoff tab is unavailable.');
     }
     const tab = await chromeApi.tabs.get(tabId);
-    if (!validTabId(tab?.id) || !Number.isInteger(tab?.windowId)) {
+    if (!validTabId(tab?.id) || tab.id !== tabId || !Number.isInteger(tab?.windowId)) {
       throw new ProtocolError('HANDOFF_SURFACE_UNAVAILABLE', 'The human handoff tab is unavailable.');
     }
     return tab;
@@ -293,14 +298,18 @@ export function createServiceWorkerController({
     const mission = await ensureMissionRuntime();
     const source = mission.getBinding(state.missionId, state.memberId);
     const session = registry.get(source.tabId, source.frameId);
-    if (!session || session.sessionId !== state.sessionId) {
+    if (!session
+      || session.sessionId !== state.sessionId
+      || source.sessionId !== state.sessionId
+      || source.pageFingerprint !== state.pageFingerprint
+      || source.origin !== state.safeOrigin) {
       throw new ProtocolError('HANDOFF_SOURCE_DRIFT', 'The source page session is no longer current.');
     }
     const [sourceTab, surfaceTab] = await Promise.all([
       browserTab(source.tabId),
       browserTab(surfaceTabId),
     ]);
-    const surfaceOrigin = exactOrigin(surfaceTab.url ?? surfaceTab.pendingUrl);
+    const surfaceOrigin = exactOrigin(surfaceTab.pendingUrl ?? surfaceTab.url);
     if (!surfaceOrigin || surfaceOrigin !== state.safeOrigin) {
       throw new ProtocolError('HANDOFF_SURFACE_ORIGIN_MISMATCH', 'The human handoff tab is not on the exact approved origin.');
     }
@@ -338,7 +347,7 @@ export function createServiceWorkerController({
     const surface = handoffSurfaces.get(handoffId);
     if (!surface) throw new ProtocolError('HANDOFF_SURFACE_REQUIRED', 'Open the human handoff again from the side panel.');
     const tab = await browserTab(surface.tabId);
-    const origin = exactOrigin(tab.url ?? tab.pendingUrl);
+    const origin = exactOrigin(tab.pendingUrl ?? tab.url);
     if (tab.windowId !== surface.windowId || origin !== surface.origin) {
       surfaceLifecycle.delete(`${surface.tabId}:${surface.frameId}`);
       handoffSurfaces.delete(handoffId);
@@ -346,6 +355,30 @@ export function createServiceWorkerController({
     }
     surfaceLifecycle.set(`${surface.tabId}:${surface.frameId}`, Object.freeze({ ...surface, state: 'active' }));
     return surface;
+  }
+
+  async function clickCaptchaCheckbox(surface) {
+    if (!chromeApi.scripting || typeof chromeApi.scripting.executeScript !== 'function') {
+      throw new ProtocolError('CAPTCHA_EXECUTION_UNAVAILABLE', 'The CAPTCHA surface execution API is unavailable.');
+    }
+    let results;
+    try {
+      results = await chromeApi.scripting.executeScript({
+        target: { tabId: surface.tabId, frameIds: [0] },
+        func: clickVisibleCaptchaCheckbox,
+        world: 'ISOLATED',
+      });
+    } catch {
+      throw new ProtocolError('CAPTCHA_EXECUTION_FAILED', 'The bounded CAPTCHA checkbox click could not be dispatched.');
+    }
+    const result = Array.isArray(results) ? results[0]?.result : results?.result;
+    if (result?.ok !== true || result?.clicked !== true) {
+      throw new ProtocolError(
+        result?.error?.code ?? 'CAPTCHA_CHECKBOX_TARGET_INVALID',
+        result?.error?.message ?? 'Exactly one visible top-frame CAPTCHA checkbox is required; no click was dispatched.',
+      );
+    }
+    return result;
   }
 
   async function handleHandoffUiMessage(type, payload = {}) {
@@ -390,8 +423,48 @@ export function createServiceWorkerController({
       }
       return { ok: true, result: state, provenance: PROVENANCE };
     }
+    if (type === HANDOFF_UI_MESSAGE_TYPES.CAPTCHA_ATTEMPT) {
+      const handoffId = payload.handoffId;
+      const state = handoff.state(handoffId);
+      if (state.type !== 'captcha') {
+        throw new ProtocolError('CAPTCHA_TYPE_REQUIRED', 'Checkbox attempts are only valid for CAPTCHA handoffs.');
+      }
+      if (state.state !== HANDOFF_STATES.HUMAN_ACTIVE) {
+        throw new ProtocolError('HANDOFF_STATE_INVALID', 'The CAPTCHA handoff must be active in its exact human surface.');
+      }
+      if (state.captchaCheckboxAttempts >= 1) {
+        throw new ProtocolError('CAPTCHA_ATTEMPT_LIMIT', 'Only one CAPTCHA checkbox attempt is permitted.');
+      }
+      const existing = captchaAttemptPromises.get(handoffId);
+      if (existing) return existing;
+      const attempt = (async () => {
+        const currentSurface = await refreshHandoffSurface(handoffId);
+        // Re-check the source mission binding immediately before the browser
+        // operation; the broker's post-click validation must not be the first
+        // place a source-page drift is discovered.
+        const surface = await canonicalHandoffSurface(state, currentSurface.tabId);
+        // The browser click is deliberately completed before the broker ledger
+        // consumes the one allowed attempt. A missing/ambiguous target leaves
+        // the human handoff active and never burns the attempt.
+        await clickCaptchaCheckbox(surface);
+        const attempted = await handoff.captchaCheckboxAttempt({
+          handoffId,
+          surface,
+          uiIntent: handoffIntent(state, 'captcha-checkbox'),
+        });
+        return { ok: true, result: attempted, provenance: PROVENANCE };
+      })();
+      captchaAttemptPromises.set(handoffId, attempt);
+      try {
+        return await attempt;
+      } finally {
+        captchaAttemptPromises.delete(handoffId);
+      }
+    }
     if (type === HANDOFF_UI_MESSAGE_TYPES.COMPLETE) {
       const handoffId = payload.handoffId;
+      const inFlightCaptcha = captchaAttemptPromises.get(handoffId);
+      if (inFlightCaptcha) await inFlightCaptcha.catch(() => undefined);
       const state = handoff.state(handoffId);
       const surface = await refreshHandoffSurface(handoffId);
       const completed = await handoff.return({
@@ -405,6 +478,75 @@ export function createServiceWorkerController({
       return { ok: true, result: completed, provenance: PROVENANCE };
     }
     throw new ProtocolError('HANDOFF_UI_MESSAGE_INVALID', 'Unsupported handoff side-panel message type.');
+  }
+
+  function actionBinding(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+    const actionId = value.actionId ?? value.id;
+    if (typeof actionId !== 'string') return null;
+    return {
+      actionId,
+      tabId: value.tabId,
+      frameId: value.frameId,
+      sessionId: value.sessionId,
+      origin: value.origin,
+      pageFingerprint: value.pageFingerprint,
+      ...(value.documentId === undefined ? {} : { documentId: value.documentId }),
+      ...(value.pageInstanceId === undefined ? {} : { pageInstanceId: value.pageInstanceId }),
+    };
+  }
+
+  async function bindPreparedActionToMission(preparedAction) {
+    const binding = actionBinding(preparedAction);
+    if (!binding) return { status: 'unbound', reason: 'ACTION_BINDING_INVALID' };
+    let mission;
+    try {
+      mission = await ensureMissionRuntime();
+      const owner = mission.findOwnerByBinding(binding);
+      if (!owner) return { status: 'unbound', reason: 'NO_EXACT_MISSION_OWNER' };
+      await mission.registerPendingAction({
+        missionId: owner.missionId,
+        memberId: owner.memberId,
+        actionId: binding.actionId,
+      });
+      return {
+        status: 'bound',
+        missionId: owner.missionId,
+        memberId: owner.memberId,
+        actionId: binding.actionId,
+      };
+    } catch (error) {
+      return {
+        status: 'unbound',
+        reason: typeof error?.code === 'string' ? error.code : 'MISSION_LINK_FAILED',
+      };
+    }
+  }
+
+  async function resolveMissionAction(value) {
+    const binding = actionBinding(value);
+    if (!binding) return { status: 'unresolved', reason: 'ACTION_BINDING_INVALID' };
+    try {
+      const mission = await ensureMissionRuntime();
+      const owner = mission.findOwnerByBinding(binding);
+      if (!owner) return { status: 'unresolved', reason: 'NO_EXACT_MISSION_OWNER' };
+      const result = await mission.resolvePendingAction({
+        missionId: owner.missionId,
+        memberId: owner.memberId,
+        actionId: binding.actionId,
+      });
+      return {
+        status: result?.resolvedActionIds?.includes(binding.actionId) ? 'resolved' : 'already-resolved',
+        missionId: owner.missionId,
+        memberId: owner.memberId,
+        actionId: binding.actionId,
+      };
+    } catch (error) {
+      return {
+        status: 'unresolved',
+        reason: typeof error?.code === 'string' ? error.code : 'MISSION_RESOLUTION_FAILED',
+      };
+    }
   }
 
   async function handlePageReady(message, sender) {
@@ -481,7 +623,30 @@ export function createServiceWorkerController({
         return await handleHandoffUiMessage(message.type, message.payload ?? {});
       }
       const universal = await ensureUniversalRuntime();
-      const response = await universal.handleUiMessage(message.type, message.payload ?? {});
+      if (message.type === UI_MESSAGE_TYPES.UI_PREPARE_ACTION) {
+        const response = await universal.handleUiMessage(message.type, message.payload ?? {});
+        if (response?.ok === true && response.result?.status === 'approval-required' && response.preparedAction) {
+          const missionBinding = await bindPreparedActionToMission(response.preparedAction);
+          return { ...response, missionBinding };
+        }
+        return response;
+      }
+      const actionForCleanup = (message.type === UI_MESSAGE_TYPES.UI_APPROVE_ACTION && message.payload?.decision === 'deny')
+        || message.type === UI_MESSAGE_TYPES.UI_EXECUTE_ACTION
+        ? actionBinding(message.payload?.action ?? message.payload?.approval?.scope)
+        : null;
+      let response;
+      try {
+        response = await universal.handleUiMessage(message.type, message.payload ?? {});
+      } catch (error) {
+        if (message.type === UI_MESSAGE_TYPES.UI_EXECUTE_ACTION && error?.code === 'ACTION_OUTCOME_UNKNOWN' && actionForCleanup) {
+          await resolveMissionAction(actionForCleanup);
+        }
+        throw error;
+      }
+      let missionBinding = null;
+      if (actionForCleanup) missionBinding = await resolveMissionAction(actionForCleanup);
+      if (missionBinding) return { ...response, missionBinding };
       if (message.type !== 'UI_GET_STATE' || response?.ok !== true) return response;
       const [missionResult, handoffResult] = await Promise.allSettled([
         ensureMissionRuntime().then((mission) => mission.list()),

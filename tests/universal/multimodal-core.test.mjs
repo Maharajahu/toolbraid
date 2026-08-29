@@ -23,6 +23,52 @@ test('normalizes and fingerprints bounded media assets without URL credentials',
   assert.throws(() => normalizeMediaAsset({ kind: 'image', url: 'https://user:pass@example.test/a.png' }), /credentials/i);
 });
 
+test('preserves only extension-owned bound video evidence through normalization', () => {
+  const binding = {
+    pageOrigin: 'https://example.test',
+    frameId: '0',
+    sessionId: 'session-video',
+    pageFingerprint: 'a'.repeat(64),
+    elementRef: 'id:video',
+  };
+  const video = normalizeMediaAsset({
+    id: 'video',
+    kind: 'video',
+    url: 'https://example.test/video.mp4',
+    pageOrigin: binding.pageOrigin,
+    frameId: binding.frameId,
+    elementRef: binding.elementRef,
+    captureBinding: binding,
+    keyframes: [{
+      id: 'frame',
+      kind: 'image',
+      source: 'capture',
+      handle: 'tb-media-frame',
+      mimeType: 'image/png',
+      byteLength: 3,
+      pageOrigin: binding.pageOrigin,
+      frameId: binding.frameId,
+      captureBinding: binding,
+      timeMs: 1_000,
+    }],
+  });
+
+  assert.equal(video.keyframes.length, 1);
+  assert.equal(video.keyframes[0].handle, 'tb-media-frame');
+  assert.equal(video.keyframes[0].timeMs, 1_000);
+  assert.deepEqual(video.captureBinding, binding);
+  assert.throws(() => normalizeMediaAsset({
+    ...video,
+    captureBinding: binding,
+    pageFingerprint: 'b'.repeat(64),
+  }), /conflicts/i);
+  assert.throws(() => normalizeMediaAsset({
+    kind: 'video',
+    url: 'https://example.test/video.mp4',
+    keyframes: [{ kind: 'image', source: 'dom', url: 'https://evil.test/frame.png' }],
+  }), /extension-owned/i);
+});
+
 test('runs a supported adapter and marks model-derived content as untrusted', async () => {
   const pipeline = createMultimodalPipeline({
     adapters: [createDeterministicMultimodalAdapter()],

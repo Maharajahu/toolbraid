@@ -14,9 +14,30 @@ const MAX_MEDIA_BYTES = Object.freeze({
   image: 15 * 1024 * 1024,
   audio: 25 * 1024 * 1024,
 });
+const MAX_VIDEO_FRAMES = 12;
+const MAX_VIDEO_FRAME_BYTES = MAX_MEDIA_BYTES.image;
+const MAX_VIDEO_TOTAL_BYTES = 32 * 1024 * 1024;
+const DEFAULT_PROVIDER_TIMEOUT_MS = 30_000;
+const MAX_PROVIDER_TIMEOUT_MS = 120_000;
 const HANDLE_PATTERN = /^tb-media-[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const MAX_ANALYSIS_TEXT = 32_768;
 const MAX_LIST_ITEMS = 256;
+const BINDING_FIELDS = Object.freeze([
+  'pageOrigin',
+  'frameId',
+  'sessionId',
+  'pageFingerprint',
+  'documentId',
+  'pageInstanceId',
+  'elementRef',
+]);
+const REQUIRED_VIDEO_BINDING_FIELDS = Object.freeze([
+  'pageOrigin',
+  'frameId',
+  'sessionId',
+  'pageFingerprint',
+  'elementRef',
+]);
 
 export class MultimodalProviderError extends Error {
   constructor(code, message, details = {}) {
@@ -431,6 +452,10 @@ function metadataEvidence(asset, warning = null, secret = '') {
     summary,
     text: altText || caption || null,
     transcript: kind === 'audio' || kind === 'video' ? caption : null,
+    labels: [],
+    regions: [],
+    segments: [],
+    keyframes: [],
     confidence: altText || caption ? 0.45 : 0,
     warnings: warning ? [warning] : [],
     model: 'toolbraid-metadata-only',
@@ -517,7 +542,80 @@ function mediaMimeType(asset, entry, kind) {
   return kind === 'image' ? 'image/png' : 'audio/webm';
 }
 
-function safeHandleEntry(asset, entry, now) {
+function bindingValue(source, key) {
+  if (!source || typeof source !== 'object') return undefined;
+  try {
+    return own(source, key) ? source[key] : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function normalizedBindingValue(key, value) {
+  if (key === 'frameId') {
+    if (Number.isInteger(value) && value >= 0) return String(value);
+    if (typeof value === 'string' && /^(?:0|[1-9]\d{0,9})$/.test(value)) return value;
+    return null;
+  }
+  if (typeof value !== 'string' || value.length < 1 || value.length > 2048
+    || /[\u0000-\u001f\u007f]/.test(value)) return null;
+  if (key === 'pageOrigin') {
+    try {
+      const parsed = new URL(value);
+      if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password || parsed.origin !== value) return null;
+    } catch {
+      return null;
+    }
+  }
+  return value;
+}
+
+function expectedBinding(asset, context, { required = false } = {}) {
+  const output = {};
+  const sources = [
+    safeRead(asset, 'captureBinding'),
+    safeRead(asset, 'binding'),
+    asset,
+    safeRead(context, 'captureBinding'),
+    safeRead(context, 'binding'),
+    context,
+  ];
+  for (const key of BINDING_FIELDS) {
+    let selected;
+    for (const source of sources) {
+      if (!source || typeof source !== 'object') continue;
+      const value = bindingValue(source, key);
+      if (value === undefined || value === null) continue;
+      const normalized = normalizedBindingValue(key, value);
+      if (normalized === null || (selected !== undefined && selected !== normalized)) return null;
+      selected = normalized;
+    }
+    if (selected !== undefined) output[key] = selected;
+  }
+  if (required && REQUIRED_VIDEO_BINDING_FIELDS.some((key) => output[key] === undefined)) return null;
+  return output;
+}
+
+function bindingMatches(entry, binding, required = false) {
+  if (!binding || typeof binding !== 'object') return false;
+  const keys = Object.keys(binding);
+  if (!keys.length) return !required;
+  const metadata = safeRead(entry, 'metadata');
+  if (!plainObject(metadata)) return !required;
+  for (const key of keys) {
+    const expected = binding[key];
+    const supplied = bindingValue(metadata, key);
+    const actual = supplied === undefined || supplied === null ? supplied : normalizedBindingValue(key, supplied);
+    if (actual === undefined || actual === null) {
+      if (required) return false;
+      continue;
+    }
+    if (actual !== expected) return false;
+  }
+  return true;
+}
+
+function safeHandleEntry(asset, entry, now, { binding = {}, requireBinding = false } = {}) {
   if (!plainObject(entry)) return null;
   const kind = safeRead(asset, 'kind');
   const maxBytes = MAX_MEDIA_BYTES[kind];
@@ -536,6 +634,16 @@ function safeHandleEntry(asset, entry, now) {
       (!Number.isInteger(assetByteLength) || assetByteLength !== bytes.byteLength)) return null;
   const expiresAt = safeRead(entry, 'expiresAt');
   if (!Number.isFinite(expiresAt) || expiresAt <= now) return null;
+  if (!bindingMatches(entry, binding, requireBinding)) return null;
+  const metadata = safeRead(entry, 'metadata');
+  const entryKind = safeRead(metadata, 'kind');
+  if (entryKind !== undefined && entryKind !== null && entryKind !== kind) return null;
+  const entryMimeType = safeRead(metadata, 'mimeType');
+  const assetMimeType = safeRead(asset, 'mimeType');
+  if (entryMimeType && assetMimeType) {
+    if (typeof entryMimeType !== 'string' || typeof assetMimeType !== 'string'
+      || entryMimeType.toLowerCase().split(';', 1)[0].trim() !== assetMimeType.toLowerCase().split(';', 1)[0].trim()) return null;
+  }
   return { bytes, metadata: safeRead(entry, 'metadata'), byteLength, expiresAt };
 }
 
@@ -578,6 +686,24 @@ function safeRegions(value, secret) {
   }).filter((region) => region && (region.label || region.text));
 }
 
+function safeKeyframes(value, secret) {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, MAX_VIDEO_FRAMES).map((frame, index) => {
+    if (!plainObject(frame)) return null;
+    const timeMs = safeNumber(
+      safeRead(frame, 'timeMs') ?? safeRead(frame, 'timestampMs') ?? safeRead(frame, 'timestamp'),
+      0,
+      86_400_000,
+    );
+    const summary = safeUntrustedText(safeRead(frame, 'summary'), 16_384, secret);
+    const text = safeUntrustedText(safeRead(frame, 'text'), 16_384, secret);
+    const labels = safeStringList(safeRead(frame, 'labels'), secret).slice(0, 64);
+    const warnings = safeStringList(safeRead(frame, 'warnings'), secret).slice(0, 16);
+    if (!summary && !text && labels.length === 0 && warnings.length === 0) return null;
+    return { index, timeMs, timestamp: timeMs, summary, text, labels, warnings };
+  }).filter(Boolean);
+}
+
 function sanitizeAnalysis(value, asset, secret) {
   if (!plainObject(value)) return metadataEvidence(asset, 'The analysis provider returned an invalid result; metadata-only evidence is shown.');
   const summary = safeUntrustedText(safeRead(value, 'summary'), MAX_ANALYSIS_TEXT, secret);
@@ -587,7 +713,8 @@ function sanitizeAnalysis(value, asset, secret) {
   const labels = safeStringList(safeRead(value, 'labels'), secret);
   const segments = safeSegments(safeRead(value, 'segments'), secret);
   const regions = safeRegions(safeRead(value, 'regions'), secret);
-  if (!summary && !text && !transcript && !language && labels.length === 0 && segments.length === 0 && regions.length === 0) {
+  const keyframes = safeKeyframes(safeRead(value, 'keyframes'), secret);
+  if (!summary && !text && !transcript && !language && labels.length === 0 && segments.length === 0 && regions.length === 0 && keyframes.length === 0) {
     return metadataEvidence(asset, 'The analysis provider returned no usable evidence; metadata-only evidence is shown.');
   }
   const warnings = safeStringList(safeRead(value, 'warnings'), secret);
@@ -601,11 +728,117 @@ function sanitizeAnalysis(value, asset, secret) {
     labels,
     segments,
     regions,
+    keyframes,
     confidence,
     warnings,
     model,
     untrustedContent: true,
   };
+}
+
+function videoFrameInputs(asset) {
+  const evidence = safeRead(asset, 'videoEvidence');
+  for (const source of [
+    safeRead(asset, 'keyframes'),
+    safeRead(asset, 'frames'),
+    safeRead(asset, 'videoFrames'),
+    safeRead(asset, 'frameAssets'),
+    safeRead(evidence, 'keyframes'),
+    safeRead(evidence, 'frames'),
+  ]) {
+    if (Array.isArray(source)) return source;
+  }
+  const handles = safeRead(asset, 'frameHandles');
+  return Array.isArray(handles) ? handles : [];
+}
+
+function copyBindingFields(target, ...sources) {
+  for (const key of BINDING_FIELDS) {
+    for (const source of sources) {
+      const value = bindingValue(source, key);
+      if (typeof value === 'string' && value.length > 0 && value.length <= 2048) {
+        target[key] = value;
+        break;
+      }
+    }
+  }
+  return target;
+}
+
+function normalizeVideoFrame(raw, index, videoAsset, context) {
+  const source = typeof raw === 'string' ? { handle: raw } : plainObject(raw) ? raw : null;
+  const nested = plainObject(safeRead(source, 'asset')) ? safeRead(source, 'asset') : source;
+  const handle = safeRead(nested, 'handle');
+  if (typeof handle !== 'string' || !HANDLE_PATTERN.test(handle)) return { invalid: true };
+  const suppliedMimeType = safeRead(nested, 'mimeType');
+  const mimeType = suppliedMimeType === undefined || suppliedMimeType === null || suppliedMimeType === ''
+    ? 'image/png'
+    : typeof suppliedMimeType === 'string' ? suppliedMimeType.trim().toLowerCase() : '';
+  if (!validMimeType(mimeType, 'image')) return { invalid: true };
+  const byteLength = safeRead(nested, 'byteLength');
+  if (byteLength !== undefined && byteLength !== null && (!Number.isInteger(byteLength) || byteLength < 0 || byteLength > MAX_VIDEO_FRAME_BYTES)) {
+    return { invalid: true };
+  }
+  const rawTime = safeRead(source, 'timeMs') ?? safeRead(source, 'timestampMs') ?? safeRead(source, 'timestamp')
+    ?? safeRead(nested, 'timeMs') ?? safeRead(nested, 'timestampMs');
+  const numericTime = rawTime === undefined || rawTime === null || rawTime === ''
+    ? 0
+    : typeof rawTime === 'number' ? rawTime
+      : typeof rawTime === 'string' ? Number(rawTime.trim()) : NaN;
+  if (!Number.isFinite(numericTime) || numericTime < 0 || numericTime > 86_400_000) return { invalid: true };
+  const videoBinding = expectedBinding(videoAsset, context);
+  const frame = copyBindingFields({
+    id: typeof safeRead(nested, 'id') === 'string' && safeRead(nested, 'id').length <= 512
+      ? safeRead(nested, 'id')
+      : `${safeRead(videoAsset, 'id') || 'video'}-frame-${index + 1}`,
+    kind: 'image',
+    source: 'capture',
+    handle,
+    mimeType,
+    ...(byteLength === undefined || byteLength === null ? {} : { byteLength }),
+  }, videoBinding, source, nested, safeRead(nested, 'captureBinding'), safeRead(nested, 'binding'));
+  return { asset: frame, timeMs: Math.round(numericTime) };
+}
+
+function normalizedVideoFrames(asset, context) {
+  const frames = [];
+  let rejected = 0;
+  const seen = new Set();
+  for (const [index, raw] of videoFrameInputs(asset).slice(0, MAX_VIDEO_FRAMES * 2).entries()) {
+    const frame = normalizeVideoFrame(raw, index, asset, context);
+    if (!frame.asset || seen.has(frame.asset.handle)) {
+      rejected += 1;
+      continue;
+    }
+    seen.add(frame.asset.handle);
+    frames.push(frame);
+    if (frames.length >= MAX_VIDEO_FRAMES) break;
+  }
+  return { frames, rejected };
+}
+
+function normalizedVideoAudio(asset, context) {
+  const supplied = safeRead(asset, 'audioAsset') ?? safeRead(asset, 'audio');
+  const source = typeof supplied === 'string' ? { handle: supplied } : plainObject(supplied) ? supplied : null;
+  const nested = plainObject(safeRead(source, 'asset')) ? safeRead(source, 'asset') : source;
+  const fallbackHandle = safeRead(asset, 'audioHandle');
+  const handle = safeRead(nested, 'handle') ?? fallbackHandle;
+  if (typeof handle !== 'string' || !HANDLE_PATTERN.test(handle)) return null;
+  const suppliedMimeType = safeRead(nested, 'mimeType');
+  const mimeType = suppliedMimeType === undefined || suppliedMimeType === null || suppliedMimeType === ''
+    ? 'audio/webm'
+    : typeof suppliedMimeType === 'string' ? suppliedMimeType.trim().toLowerCase() : '';
+  if (!validMimeType(mimeType, 'audio')) return null;
+  const byteLength = safeRead(nested, 'byteLength');
+  if (byteLength !== undefined && byteLength !== null && (!Number.isInteger(byteLength) || byteLength < 0 || byteLength > MAX_MEDIA_BYTES.audio)) return null;
+  return copyBindingFields({
+    id: typeof safeRead(nested, 'id') === 'string' && safeRead(nested, 'id').length <= 512 ? safeRead(nested, 'id') : `${safeRead(asset, 'id') || 'video'}-audio`,
+    kind: 'audio',
+    source: 'capture',
+    handle,
+    mimeType,
+    ...(byteLength === undefined || byteLength === null ? {} : { byteLength }),
+  }, expectedBinding(asset, context), source, nested, safeRead(nested, 'captureBinding'), safeRead(nested, 'binding'));
 }
 
 export function createConfiguredMultimodalAdapter({
@@ -614,13 +847,58 @@ export function createConfiguredMultimodalAdapter({
   fetchImpl = globalThis.fetch?.bind(globalThis),
   priority = 100,
   now = () => Date.now(),
+  providerTimeoutMs = DEFAULT_PROVIDER_TIMEOUT_MS,
+  setTimeoutRef = globalThis.setTimeout?.bind(globalThis),
+  clearTimeoutRef = globalThis.clearTimeout?.bind(globalThis),
 } = {}) {
   if (!settings || typeof settings.read !== 'function') throw new TypeError('settings.read is required.');
   if (!handleStore || typeof handleStore.get !== 'function') throw new TypeError('handleStore.get is required.');
   if (typeof fetchImpl !== 'function') throw new TypeError('fetchImpl is required.');
   if (typeof now !== 'function') throw new TypeError('now is required.');
+  if (!Number.isInteger(providerTimeoutMs) || providerTimeoutMs < 1 || providerTimeoutMs > MAX_PROVIDER_TIMEOUT_MS) {
+    throw new RangeError(`providerTimeoutMs must be an integer between 1 and ${MAX_PROVIDER_TIMEOUT_MS}.`);
+  }
+  if (typeof setTimeoutRef !== 'function' || typeof clearTimeoutRef !== 'function') {
+    throw new TypeError('setTimeoutRef and clearTimeoutRef are required.');
+  }
 
-  async function captured(asset, signal) {
+  function boundedFetch(url, options = {}) {
+    const externalSignal = options?.signal;
+    throwIfAborted(externalSignal);
+    const controller = new AbortController();
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      let timer = null;
+      const finish = (error, value) => {
+        if (settled) return;
+        settled = true;
+        if (timer !== null) clearTimeoutRef(timer);
+        try { externalSignal?.removeEventListener?.('abort', onAbort); } catch { /* best effort */ }
+        if (error) reject(error);
+        else resolve(value);
+      };
+      const onAbort = () => {
+        try { controller.abort(externalSignal?.reason); } catch { /* best effort */ }
+        finish(abortError());
+      };
+      try { externalSignal?.addEventListener?.('abort', onAbort, { once: true }); } catch { /* initial check remains authoritative */ }
+      timer = setTimeoutRef(() => {
+        try { controller.abort(); } catch { /* best effort */ }
+        finish(fail('MULTIMODAL_PROVIDER_TIMEOUT', 'The configured analysis provider exceeded its bounded timeout.'));
+      }, providerTimeoutMs);
+      let request;
+      try {
+        request = fetchImpl(url, { ...options, signal: controller.signal });
+      } catch (error) {
+        finish(error);
+        return;
+      }
+      Promise.resolve(request).then((value) => finish(null, value), (error) => finish(error));
+      if (externalSignal?.aborted) onAbort();
+    });
+  }
+
+  async function captured(asset, signal, context, { requireBinding = false } = {}) {
     const handle = safeRead(asset, 'handle');
     if (typeof handle !== 'string' || !HANDLE_PATTERN.test(handle)) return null;
     const entry = await awaitAbortable(() => handleStore.get(handle), signal);
@@ -631,7 +909,149 @@ export function createConfiguredMultimodalAdapter({
       return null;
     }
     if (!Number.isFinite(currentTime)) return null;
-    return safeHandleEntry(asset, entry, currentTime);
+    const binding = expectedBinding(asset, context, { required: requireBinding });
+    if (requireBinding && !binding) return null;
+    return safeHandleEntry(asset, entry, currentTime, {
+      binding: binding ?? {},
+      requireBinding,
+    });
+  }
+
+  async function analyzeVideo(asset, configuration, signal, context) {
+    const { frames: frameInputs, rejected: rejectedFrames } = normalizedVideoFrames(asset, context);
+    const warnings = [];
+    if (rejectedFrames) warnings.push('VIDEO_FRAMES_REJECTED');
+    const keyframes = [];
+    let totalFrameBytes = 0;
+    for (const frameInput of frameInputs) {
+      throwIfAborted(signal);
+      if (totalFrameBytes >= MAX_VIDEO_TOTAL_BYTES) {
+        warnings.push('VIDEO_FRAME_BYTES_EXCEEDED');
+        break;
+      }
+      let entry = null;
+      try {
+        entry = await captured(frameInput.asset, signal, context, { requireBinding: true });
+      } catch (error) {
+        if (isAbortError(error, signal)) throw abortError();
+      }
+      if (!entry) {
+        warnings.push('VIDEO_FRAME_UNAVAILABLE');
+        continue;
+      }
+      totalFrameBytes += entry.byteLength;
+      try {
+        const mimeType = mediaMimeType(frameInput.asset, entry, 'image');
+        if (!mimeType || totalFrameBytes > MAX_VIDEO_TOTAL_BYTES) {
+          warnings.push('VIDEO_FRAME_BYTES_EXCEEDED');
+          continue;
+        }
+        const vision = createOpenAiCompatibleVisionAdapter({
+          id: 'configured-openai-compatible-video-vision',
+          version: String(MULTIMODAL_PROVIDER_VERSION),
+          baseUrl: configuration.baseUrl,
+          model: configuration.visionModel,
+          fetchImpl: boundedFetch,
+          getApiKey: async () => configuration.apiKey,
+          resolveImage: async () => {
+            throwIfAborted(signal);
+            const bytes = new Uint8Array(entry.bytes);
+            try {
+              return { base64: bytesToBase64(bytes, MAX_VIDEO_FRAME_BYTES), mimeType };
+            } finally {
+              bytes.fill(0);
+            }
+          },
+        });
+        const result = await vision.analyze(frameInput.asset, {
+          signal,
+          context: { ...context, videoAssetId: safeRead(asset, 'id') ?? null, videoFrameTimeMs: frameInput.timeMs },
+        });
+        throwIfAborted(signal);
+        const sanitized = sanitizeAnalysis(result, frameInput.asset, configuration.apiKey);
+        if (sanitized.model === 'toolbraid-metadata-only' && !sanitized.summary && !sanitized.text) {
+          warnings.push('VIDEO_FRAME_ANALYSIS_EMPTY');
+          continue;
+        }
+        keyframes.push({
+          timeMs: frameInput.timeMs,
+          summary: sanitized.summary,
+          text: sanitized.text,
+          labels: sanitized.labels,
+          warnings: sanitized.warnings,
+          confidence: sanitized.confidence,
+        });
+      } catch (error) {
+        if (isAbortError(error, signal)) throw abortError();
+        warnings.push('VIDEO_FRAME_ANALYSIS_FAILED');
+      } finally {
+        try { entry.bytes.fill(0); } catch { /* best effort */ }
+      }
+    }
+
+    let audio = null;
+    const audioAsset = normalizedVideoAudio(asset, context);
+    if (audioAsset) {
+      if (!configuration.audioModel) {
+        warnings.push('NO_AUDIO_TRANSCRIPTION_MODEL');
+      } else {
+        let entry = null;
+        try {
+          entry = await captured(audioAsset, signal, context, { requireBinding: true });
+        } catch (error) {
+          if (isAbortError(error, signal)) throw abortError();
+        }
+        if (!entry) {
+          warnings.push('VIDEO_AUDIO_UNAVAILABLE');
+        } else {
+          try {
+            const mimeType = mediaMimeType(audioAsset, entry, 'audio');
+            if (!mimeType) {
+              warnings.push('VIDEO_AUDIO_INVALID');
+            } else {
+              const transcriber = createOpenAiCompatibleAudioAdapter({
+                id: 'configured-openai-compatible-video-asr',
+                version: String(MULTIMODAL_PROVIDER_VERSION),
+                baseUrl: configuration.baseUrl,
+                model: configuration.audioModel,
+                fetchImpl: boundedFetch,
+                getApiKey: async () => configuration.apiKey,
+                resolveAudio: async () => {
+                  throwIfAborted(signal);
+                  const bytes = new Uint8Array(entry.bytes);
+                  try {
+                    const subtype = mimeType.slice(mimeType.indexOf('/') + 1).replace(/[^a-z0-9]+/gi, '').slice(0, 16) || 'bin';
+                    return { blob: new Blob([bytes], { type: mimeType }), name: `toolbraid-video-audio.${subtype}` };
+                  } finally {
+                    bytes.fill(0);
+                  }
+                },
+              });
+              audio = await transcriber.analyze(audioAsset, { signal, context: { ...context, videoAssetId: safeRead(asset, 'id') ?? null } });
+              throwIfAborted(signal);
+            }
+          } catch (error) {
+            if (isAbortError(error, signal)) throw abortError();
+            warnings.push('VIDEO_AUDIO_ANALYSIS_FAILED');
+          } finally {
+            try { entry.bytes.fill(0); } catch { /* best effort */ }
+          }
+        }
+      }
+    }
+
+    if (!keyframes.length && !audio) {
+      return metadataEvidence(asset, frameInputs.length ? 'Video keyframe or audio analysis was unavailable; metadata-only evidence is shown.' : 'No bounded video keyframes were supplied; metadata-only evidence is shown.', configuration.apiKey);
+    }
+    return sanitizeAnalysis({
+      summary: keyframes.map((frame) => frame.summary).filter(Boolean).join(' ').slice(0, MAX_ANALYSIS_TEXT) || audio?.summary || null,
+      transcript: audio?.transcript ?? null,
+      language: audio?.language ?? null,
+      segments: audio?.segments ?? [],
+      keyframes,
+      warnings,
+      model: 'configured-openai-compatible-video',
+    }, asset, configuration.apiKey);
   }
 
   return Object.freeze({
@@ -651,7 +1071,14 @@ export function createConfiguredMultimodalAdapter({
         return metadataEvidence(asset, 'Provider configuration is invalid; metadata-only evidence is shown.');
       }
       if (!configuration.enabled) return metadataEvidence(asset, 'No analysis provider is enabled; metadata-only evidence is shown.');
-      if (safeRead(asset, 'kind') === 'video') return metadataEvidence(asset, 'Direct video decoding is not enabled; captions and page metadata are shown.');
+      if (safeRead(asset, 'kind') === 'video') {
+        try {
+          return await analyzeVideo(asset, configuration, signal, context);
+        } catch (error) {
+          if (isAbortError(error, signal)) throw abortError();
+          return metadataEvidence(asset, 'Video analysis failed; metadata-only evidence is shown.', configuration.apiKey);
+        }
+      }
 
       let entry;
       try {
@@ -674,7 +1101,7 @@ export function createConfiguredMultimodalAdapter({
             version: String(MULTIMODAL_PROVIDER_VERSION),
             baseUrl: configuration.baseUrl,
             model: configuration.visionModel,
-            fetchImpl,
+            fetchImpl: boundedFetch,
             getApiKey: async () => configuration.apiKey,
             resolveImage: async () => {
               throwIfAborted(signal);
@@ -697,7 +1124,7 @@ export function createConfiguredMultimodalAdapter({
           version: String(MULTIMODAL_PROVIDER_VERSION),
           baseUrl: configuration.baseUrl,
           model: configuration.audioModel,
-          fetchImpl,
+          fetchImpl: boundedFetch,
           getApiKey: async () => configuration.apiKey,
           resolveAudio: async () => {
             throwIfAborted(signal);
@@ -716,6 +1143,8 @@ export function createConfiguredMultimodalAdapter({
       } catch (error) {
         if (isAbortError(error, signal)) throw abortError();
         return metadataEvidence(asset, 'Analysis provider failed; metadata-only evidence is shown.', configuration.apiKey);
+      } finally {
+        try { entry?.bytes?.fill?.(0); } catch { /* best effort */ }
       }
     },
   });

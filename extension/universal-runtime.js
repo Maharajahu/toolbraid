@@ -30,6 +30,7 @@ import {
 
 export const UI_MESSAGE_TYPES = Object.freeze({
   UI_GET_STATE: 'UI_GET_STATE',
+  UI_EXECUTE_READ: 'UI_EXECUTE_READ',
   UI_PREPARE_ACTION: 'UI_PREPARE_ACTION',
   UI_APPROVE_ACTION: 'UI_APPROVE_ACTION',
   UI_EXECUTE_ACTION: 'UI_EXECUTE_ACTION',
@@ -46,9 +47,19 @@ const RENDERED_AUDIO_DURATION_MS = 3_000;
 const RENDERED_CAPTURE_TIMEOUT_MS = 10_000;
 const REANALYZE_VIDEO_FRAMES = 3;
 const VIDEO_FRAME_INTERVAL_MS = 500;
+const MAX_RENDERED_VIDEO_FRAME_BYTES = 2 * 1024 * 1024;
+const MAX_RENDERED_VIDEO_TOTAL_BYTES = 6 * 1024 * 1024;
 const CAPTURE_DRIFT_CODES = new Set(['CAPTURE_TAB_DRIFT', 'CAPTURE_SESSION_DRIFT', 'SESSION_DRIFT', 'CAPTURE_BINDING_MISMATCH']);
 const AUDIT_INDEX_KEY = 'toolbraid.universal.audit-index.v1';
 const DEFAULT_MAX_AUDIT_SESSIONS = 64;
+const MAX_UI_READ_RESULT_BYTES = 96 * 1024;
+const MAX_UI_READ_DATA_BYTES = 88 * 1024;
+const MAX_UI_READ_STRING_BYTES = 16 * 1024;
+const MAX_UI_READ_TOTAL_STRING_BYTES = 48 * 1024;
+const MAX_UI_READ_TOTAL_KEY_BYTES = 16 * 1024;
+const MAX_UI_READ_ENTRIES = 384;
+const MAX_UI_READ_COLLECTION_ENTRIES = 96;
+const MAX_UI_READ_DEPTH = 8;
 
 export class ExtensionUniversalRuntimeError extends Error {
   constructor(code, message, details = {}) {
@@ -71,6 +82,101 @@ function plainObject(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const prototype = Object.getPrototypeOf(value);
   return prototype === Object.prototype || prototype === null;
+}
+
+function boundedUiReadData(raw) {
+  if (!plainObject(raw)) throw runtimeError('UI_READ_RESULT_INVALID', 'The read result must be a plain structured object.');
+  const encoder = new TextEncoder();
+  const decoder = new TextDecoder();
+  const ancestors = new Set();
+  const budget = { entries: 0, keyBytes: 0, stringBytes: 0, truncated: false };
+
+  function boundedString(value) {
+    const encoded = encoder.encode(value);
+    const remaining = Math.max(0, MAX_UI_READ_TOTAL_STRING_BYTES - budget.stringBytes);
+    const allowed = Math.min(MAX_UI_READ_STRING_BYTES, remaining);
+    if (encoded.byteLength <= allowed) {
+      budget.stringBytes += encoded.byteLength;
+      return value;
+    }
+    budget.truncated = true;
+    const truncated = decoder.decode(encoded.slice(0, allowed));
+    budget.stringBytes += encoder.encode(truncated).byteLength;
+    return truncated;
+  }
+
+  function visit(value, depth) {
+    if (value === null || typeof value === 'boolean') return value;
+    if (typeof value === 'number') {
+      if (!Number.isFinite(value)) throw runtimeError('UI_READ_RESULT_INVALID', 'The read result contains a non-finite number.');
+      return Object.is(value, -0) ? 0 : value;
+    }
+    if (typeof value === 'string') return boundedString(value);
+    if (!value || typeof value !== 'object') {
+      throw runtimeError('UI_READ_RESULT_INVALID', 'The read result is not JSON-safe.');
+    }
+    if (depth >= MAX_UI_READ_DEPTH) {
+      budget.truncated = true;
+      return null;
+    }
+    if (ancestors.has(value)) throw runtimeError('UI_READ_RESULT_INVALID', 'The read result contains a cycle.');
+    ancestors.add(value);
+    try {
+      if (Array.isArray(value)) {
+        const output = [];
+        const limit = Math.min(value.length, MAX_UI_READ_COLLECTION_ENTRIES);
+        if (value.length > limit) budget.truncated = true;
+        for (let index = 0; index < limit; index += 1) {
+          if (budget.entries >= MAX_UI_READ_ENTRIES) {
+            budget.truncated = true;
+            break;
+          }
+          budget.entries += 1;
+          output.push(visit(value[index], depth + 1));
+        }
+        return Object.freeze(output);
+      }
+      if (!plainObject(value)) throw runtimeError('UI_READ_RESULT_INVALID', 'The read result contains a non-plain object.');
+      const ownKeys = Reflect.ownKeys(value);
+      if (ownKeys.some((key) => typeof key !== 'string')) {
+        throw runtimeError('UI_READ_RESULT_INVALID', 'The read result contains unsupported property keys.');
+      }
+      const descriptors = Object.getOwnPropertyDescriptors(value);
+      const keys = Object.keys(descriptors).filter((key) => descriptors[key].enumerable).sort();
+      const output = Object.create(null);
+      const limit = Math.min(keys.length, MAX_UI_READ_COLLECTION_ENTRIES);
+      if (keys.length > limit) budget.truncated = true;
+      for (let index = 0; index < limit; index += 1) {
+        if (budget.entries >= MAX_UI_READ_ENTRIES) {
+          budget.truncated = true;
+          break;
+        }
+        const key = keys[index];
+        const descriptor = descriptors[key];
+        if (!Object.hasOwn(descriptor, 'value')) {
+          throw runtimeError('UI_READ_RESULT_INVALID', 'The read result contains an accessor property.');
+        }
+        const keyBytes = encoder.encode(key).byteLength;
+        if (keyBytes > 256 || budget.keyBytes + keyBytes > MAX_UI_READ_TOTAL_KEY_BYTES) {
+          budget.truncated = true;
+          continue;
+        }
+        budget.entries += 1;
+        budget.keyBytes += keyBytes;
+        output[key] = visit(descriptor.value, depth + 1);
+      }
+      return Object.freeze(output);
+    } finally {
+      ancestors.delete(value);
+    }
+  }
+
+  const data = visit(raw, 0);
+  const byteLength = encoder.encode(JSON.stringify(data)).byteLength;
+  if (byteLength > MAX_UI_READ_DATA_BYTES) {
+    throw runtimeError('UI_READ_RESULT_TOO_LARGE', 'The bounded read result exceeds the side-panel transport limit.');
+  }
+  return Object.freeze({ data, byteLength, truncated: budget.truncated });
 }
 
 function boundedSnapshot(raw) {
@@ -141,6 +247,23 @@ function decodeRenderedAudio(value, maxBytes = MAX_RENDERED_AUDIO_BYTES) {
   return bytes;
 }
 
+function decodeRenderedFrame(value, maxBytes = MAX_RENDERED_VIDEO_FRAME_BYTES) {
+  if (typeof value !== 'string' || value.length < 4 || value.length > Math.ceil(maxBytes / 3) * 4 + 4
+    || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)) {
+    throw runtimeError('CAPTURE_ENCODING_INVALID', 'Rendered video frame transport is invalid.');
+  }
+  let binary;
+  try { binary = atob(value); } catch {
+    throw runtimeError('CAPTURE_ENCODING_INVALID', 'Rendered video frame transport is invalid.');
+  }
+  if (binary.length < 1 || binary.length > maxBytes) {
+    throw runtimeError('CAPTURE_FRAME_BYTES_INVALID', 'Rendered video frame bytes exceed their bound.');
+  }
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  return bytes;
+}
+
 function renderedCaptions(result, candidate) {
   const output = [];
   let characters = 0;
@@ -170,6 +293,7 @@ function mediaAssets(mediaInventory, { origin, frameId, captions = [], maxAssets
     const capturedCaption = captionTextFor(entry, captions);
     return {
       id: `dom-${String(entry?.ref ?? index + 1).slice(0, 480)}`,
+      elementRef: typeof entry?.ref === 'string' ? entry.ref : null,
       kind: entry?.kind === 'audio' || entry?.kind === 'video' ? entry.kind : 'image',
       source: 'dom',
       ...(candidate ? { url: candidate } : { handle: `dom:${String(entry?.ref ?? index + 1).slice(0, 480)}` }),
@@ -313,6 +437,7 @@ function uiState(tab, state, { audit = null, capture = null, multimodalProvider 
       origin: state.origin,
       title: tab.title ?? '',
     }),
+    sessionId: state.sessionId,
     snapshot: Object.freeze({ pageFingerprint: state.pageFingerprint, navigationGeneration: state.revision }),
     tools: state.tools,
     actions: Object.freeze(state.tools.filter((tool) => tool.classification !== 'read')),
@@ -534,6 +659,13 @@ export async function createExtensionUniversalRuntime({
       maxTracks: 8,
       maxCues: 256,
       maxCaptionBytes: 256 * 1024,
+      ...(mode === 'frames' ? {
+        maxFrames: REANALYZE_VIDEO_FRAMES,
+        maxFrameBytes: MAX_RENDERED_VIDEO_FRAME_BYTES,
+        maxTotalFrameBytes: MAX_RENDERED_VIDEO_TOTAL_BYTES,
+        frameIntervalMs: VIDEO_FRAME_INTERVAL_MS,
+        frameMimeType: 'image/png',
+      } : {}),
       provenance: PROVENANCE,
     };
     await assertCaptureTab(tabId, windowId);
@@ -585,10 +717,113 @@ export async function createExtensionUniversalRuntime({
       || !plainObject(result.metadata)
       || result.metadata.elementRef !== candidate.elementRef
       || result.metadata.sourceKind !== candidate.kind
-      || result.metadata.pageOrigin !== location.origin) {
+      || (mode !== 'frames' && result.metadata.pageOrigin !== location.origin)
+      || (mode === 'frames' && result.metadata.pageOrigin !== undefined && result.metadata.pageOrigin !== location.origin)
+      || (mode === 'frames' && Object.keys(result.metadata).some((key) => /url/i.test(key)))) {
       throw runtimeError('CAPTURE_BINDING_MISMATCH', 'Rendered media evidence did not match its page target.');
     }
     return result;
+  }
+
+  function storeRenderedVideoFrames({
+    result,
+    candidate,
+    tabId,
+    frameId,
+    sessionId,
+    pageFingerprint,
+    extractorPageFingerprint,
+    sessionBinding,
+    location,
+  }) {
+    if (!plainObject(result) || result.ok !== true || !Array.isArray(result.frames)
+      || result.frames.length < 1 || result.frames.length > REANALYZE_VIDEO_FRAMES) {
+      throw runtimeError('CAPTURE_FRAMES_INVALID', 'Rendered video frames were not returned in the bounded format.');
+    }
+    if (typeof browserCapture.handleStore?.put !== 'function') {
+      throw runtimeError('MEDIA_HANDLE_STORE_UNAVAILABLE', 'Rendered video frame storage is unavailable.');
+    }
+    const assets = [];
+    const handles = [];
+    let totalBytes = 0;
+    try {
+      for (const [index, frame] of result.frames.entries()) {
+        if (!plainObject(frame)
+          || Object.keys(frame).some((key) => /url|origin|authority/i.test(key))
+          || typeof frame.frameBase64 !== 'string'
+          || !Number.isInteger(frame.byteLength)
+          || frame.byteLength < 1
+          || frame.byteLength > MAX_RENDERED_VIDEO_FRAME_BYTES
+          || (frame.mimeType !== undefined && (typeof frame.mimeType !== 'string' || !/^image\/[a-z0-9!#$&^_.+-]+$/i.test(frame.mimeType)))) {
+          throw runtimeError('CAPTURE_FRAME_INVALID', 'Rendered video frame metadata is invalid.');
+        }
+        const bytes = decodeRenderedFrame(frame.frameBase64);
+        try {
+          if (bytes.byteLength !== frame.byteLength) {
+            throw runtimeError('CAPTURE_FRAME_BYTES_INVALID', 'Rendered video frame byte length did not match.');
+          }
+          totalBytes += bytes.byteLength;
+          if (totalBytes > MAX_RENDERED_VIDEO_TOTAL_BYTES) {
+            throw runtimeError('CAPTURE_FRAMES_OVERSIZED', 'Rendered video frames exceeded their total byte bound.');
+          }
+          const timeMs = frame.timeMs === undefined || frame.timeMs === null ? 0 : Number(frame.timeMs);
+          if (!Number.isFinite(timeMs) || timeMs < 0 || timeMs > 86_400_000) {
+            throw runtimeError('CAPTURE_FRAME_INVALID', 'Rendered video frame timing is invalid.');
+          }
+          const mimeType = (frame.mimeType || 'image/png').trim().toLowerCase();
+          const binding = {
+            pageOrigin: location.origin,
+            frameId: String(frameId),
+            sessionId,
+            pageFingerprint,
+            documentId: sessionBinding.documentId ?? null,
+            pageInstanceId: sessionBinding.pageInstanceId ?? null,
+            elementRef: candidate.elementRef,
+          };
+          const stored = browserCapture.handleStore.put(bytes, {
+            kind: 'image',
+            mimeType,
+            source: 'rendered-media',
+            tabId,
+            frameId: String(frameId),
+            sessionId,
+            pageOrigin: location.origin,
+            pageFingerprint,
+            extractorPageFingerprint: extractorPageFingerprint ?? null,
+            documentId: sessionBinding.documentId ?? null,
+            pageInstanceId: sessionBinding.pageInstanceId ?? null,
+            elementRef: candidate.elementRef,
+            frameIndex: index,
+            frameTimeMs: Math.round(timeMs),
+            sensitive: true,
+          });
+          handles.push(stored.handle);
+          assets.push(normalizeMediaAsset({
+            id: `rendered-frame-${candidate.elementRef}-${index + 1}`,
+            kind: 'image',
+            source: 'capture',
+            handle: stored.handle,
+            mimeType,
+            byteLength: stored.byteLength,
+            width: Number.isInteger(frame.width) && frame.width > 0 && frame.width <= 4096 ? frame.width : null,
+            height: Number.isInteger(frame.height) && frame.height > 0 && frame.height <= 4096 ? frame.height : null,
+            pageOrigin: location.origin,
+            frameId: String(frameId),
+            captureBinding: binding,
+            sensitive: true,
+          }, { pageOrigin: location.origin }));
+        } finally {
+          bytes.fill(0);
+        }
+      }
+      if (Number.isInteger(result.metadata?.frameByteLength) && result.metadata.frameByteLength !== totalBytes) {
+        throw runtimeError('CAPTURE_FRAMES_INVALID', 'Rendered video frame totals did not match.');
+      }
+      return Object.freeze(assets);
+    } catch (error) {
+      for (const handle of handles) browserCapture.handleStore?.release?.(handle);
+      throw error;
+    }
   }
 
   async function captureActivationEvidence({
@@ -627,6 +862,7 @@ export async function createExtensionUniversalRuntime({
     const warnings = [];
     const assets = [];
     const captions = [];
+    const videoEvidenceByRef = new Map();
     const tabMonitor = monitorCaptureTab(tabId, windowId);
     let committed = false;
     try {
@@ -665,28 +901,67 @@ export async function createExtensionUniversalRuntime({
     }
 
     if (typeof extractorPageFingerprint === 'string') {
-      const captionResults = await Promise.allSettled(candidates.map((candidate) => requestRenderedCapture({
-        tabId,
-        frameId,
-        sessionId,
-        windowId,
-        location,
-        pageFingerprint,
-        extractorPageFingerprint,
-        candidate,
-        mode: 'captions',
-        tabMonitor,
-      })));
-      const fatalCaption = captionResults.find((outcome) => outcome.status === 'rejected' && CAPTURE_DRIFT_CODES.has(outcome.reason?.code));
-      if (fatalCaption) throw fatalCaption.reason;
-      captionResults.forEach((outcome, index) => {
-        if (outcome.status === 'fulfilled') {
-          captions.push(...renderedCaptions(outcome.value, candidates[index]));
-          if (outcome.value.ok !== true && outcome.value.code) warnings.push(outcome.value.code);
-        } else {
-          warnings.push(outcome.reason?.code ?? 'RENDERED_CAPTION_CAPTURE_FAILED');
+      for (const candidate of candidates) {
+        // A frame capture already returns loaded captions for video. Keep the
+        // video path single-pass and use the lighter caption request for audio.
+        const mode = includeRenderedAudio && candidate.kind === 'video' ? 'frames' : 'captions';
+        try {
+          const rendered = await requestRenderedCapture({
+            tabId,
+            frameId,
+            sessionId,
+            windowId,
+            location,
+            pageFingerprint,
+            extractorPageFingerprint,
+            candidate,
+            mode,
+            tabMonitor,
+          });
+          captions.push(...renderedCaptions(rendered, candidate));
+          if (rendered.ok !== true && rendered.code) warnings.push(rendered.code);
+          if (mode === 'frames' && rendered.ok === true) {
+            const frameAssets = storeRenderedVideoFrames({
+              result: rendered,
+              candidate,
+              tabId,
+              frameId,
+              sessionId,
+              pageFingerprint,
+              extractorPageFingerprint,
+              sessionBinding,
+              location,
+            });
+            assets.push(...frameAssets);
+            videoEvidenceByRef.set(candidate.elementRef, { keyframes: frameAssets, audioAsset: null });
+          }
+        } catch (error) {
+          if (CAPTURE_DRIFT_CODES.has(error?.code)) throw error;
+          warnings.push(error?.code ?? (mode === 'frames' ? 'RENDERED_FRAME_CAPTURE_FAILED' : 'RENDERED_CAPTION_CAPTURE_FAILED'));
+          // If a frame request fails, retain the caption-only path where it is
+          // still safe and useful to do so.
+          if (mode === 'frames' && error?.code !== 'CAPTURE_TIMEOUT') {
+            try {
+              const fallback = await requestRenderedCapture({
+                tabId,
+                frameId,
+                sessionId,
+                windowId,
+                location,
+                pageFingerprint,
+                extractorPageFingerprint,
+                candidate,
+                mode: 'captions',
+                tabMonitor,
+              });
+              captions.push(...renderedCaptions(fallback, candidate));
+            } catch (fallbackError) {
+              if (CAPTURE_DRIFT_CODES.has(fallbackError?.code)) throw fallbackError;
+              warnings.push(fallbackError?.code ?? 'RENDERED_CAPTION_CAPTURE_FAILED');
+            }
+          }
         }
-      });
+      }
     }
 
     if (includeRenderedAudio && typeof extractorPageFingerprint === 'string') {
@@ -721,16 +996,30 @@ export async function createExtensionUniversalRuntime({
           bytes = decodeRenderedAudio(result.audioBase64);
           if (result.metadata.byteLength !== bytes.byteLength) throw runtimeError('CAPTURE_BYTES_INVALID', 'Rendered audio byte length did not match.');
           if (typeof browserCapture.handleStore?.put !== 'function') throw runtimeError('MEDIA_HANDLE_STORE_UNAVAILABLE', 'Rendered audio handle storage is unavailable.');
+          const binding = {
+            pageOrigin: location.origin,
+            frameId: String(frameId),
+            sessionId,
+            pageFingerprint,
+            documentId: sessionBinding.documentId ?? null,
+            pageInstanceId: sessionBinding.pageInstanceId ?? null,
+            elementRef: candidate.elementRef,
+          };
           stored = browserCapture.handleStore.put(bytes, {
             kind: 'audio',
             mimeType,
             source: 'rendered-media',
             pageOrigin: location.origin,
+            frameId: String(frameId),
+            sessionId,
+            pageFingerprint,
+            documentId: sessionBinding.documentId ?? null,
+            pageInstanceId: sessionBinding.pageInstanceId ?? null,
             elementRef: candidate.elementRef,
             sensitive: true,
           });
           const caption = renderedCaptions(result, candidate).map((track) => track.text).join('\n').slice(0, 4096) || null;
-          assets.push(normalizeMediaAsset({
+          const audioAsset = normalizeMediaAsset({
             id: `rendered-audio-${candidate.elementRef}`,
             kind: 'audio',
             source: 'capture',
@@ -741,9 +1030,15 @@ export async function createExtensionUniversalRuntime({
             caption,
             pageOrigin: location.origin,
             frameId: String(frameId),
+            captureBinding: binding,
             crossOrigin: false,
             sensitive: true,
-          }, { pageOrigin: location.origin }));
+          }, { pageOrigin: location.origin });
+          assets.push(audioAsset);
+          const videoEvidence = videoEvidenceByRef.get(candidate.elementRef);
+          if (candidate.kind === 'video' && videoEvidence) {
+            videoEvidence.audioAsset = audioAsset;
+          }
         } catch (error) {
           if (stored?.handle) browserCapture.handleStore?.release?.(stored.handle);
           if (CAPTURE_DRIFT_CODES.has(error?.code)) throw error;
@@ -771,6 +1066,11 @@ export async function createExtensionUniversalRuntime({
       pageFingerprint,
       extractorPageFingerprint: extractorPageFingerprint ?? null,
       assets: Object.freeze(assets),
+      videoEvidence: Object.freeze([...videoEvidenceByRef.entries()].map(([elementRef, evidence]) => Object.freeze({
+        elementRef,
+        keyframes: Object.freeze([...(evidence.keyframes ?? [])]),
+        ...(evidence.audioAsset ? { audioAsset: evidence.audioAsset } : {}),
+      }))),
       captions: Object.freeze(captions),
       warnings: Object.freeze([...new Set(warnings)]),
     });
@@ -1014,14 +1314,34 @@ export async function createExtensionUniversalRuntime({
     }
     cachedEvidence ??= { assets: [], captions: [] };
     const maxAssets = multimodal.limits?.maxAssets ?? 24;
-    const capturedAssets = Array.isArray(cachedEvidence.assets) ? cachedEvidence.assets.slice(0, maxAssets) : [];
+    const videoEvidence = Array.isArray(cachedEvidence.videoEvidence) ? cachedEvidence.videoEvidence : [];
+    const nestedHandles = new Set(videoEvidence.flatMap((entry) => [
+      ...(Array.isArray(entry?.keyframes) ? entry.keyframes : []),
+      entry?.audioAsset,
+    ]).map((asset) => asset?.handle).filter(Boolean));
+    const capturedAssets = Array.isArray(cachedEvidence.assets)
+      ? cachedEvidence.assets.filter((asset) => !nestedHandles.has(asset?.handle)).slice(0, maxAssets)
+      : [];
     const domAssets = mediaAssets(bounded.mediaInventory, {
       origin,
       frameId,
       captions: Array.isArray(cachedEvidence.captions) ? cachedEvidence.captions : [],
       maxAssets: Math.max(0, maxAssets - capturedAssets.length),
     });
-    const pageAssets = [...capturedAssets, ...domAssets];
+    const enrichedDomAssets = domAssets.map((asset) => {
+      if (asset.kind !== 'video' || !asset.elementRef) return asset;
+      const evidence = videoEvidence.find((entry) => entry?.elementRef === asset.elementRef);
+      if (!evidence) return asset;
+      const keyframes = Array.isArray(evidence.keyframes) ? evidence.keyframes.slice(0, REANALYZE_VIDEO_FRAMES) : [];
+      const audioAsset = evidence.audioAsset && typeof evidence.audioAsset === 'object' ? evidence.audioAsset : null;
+      return {
+        ...asset,
+        ...(keyframes.length ? { keyframes } : {}),
+        ...(audioAsset ? { audioAsset } : {}),
+        videoEvidence: { elementRef: asset.elementRef, keyframes, ...(audioAsset ? { audioAsset } : {}) },
+      };
+    });
+    const pageAssets = [...capturedAssets, ...enrichedDomAssets];
     const state = await runtime.ingest({
       tabId,
       frameId,
@@ -1086,8 +1406,21 @@ export async function createExtensionUniversalRuntime({
     return boundedSnapshot(await requestRawSnapshot(tabId, frameId, sessionId)).snapshot;
   }
 
-  async function activeContext() {
-    const tab = await activeTab(chromeApi);
+  async function activeContext(target = {}) {
+    let tab;
+    if (Number.isInteger(target?.targetTabId) && target.targetTabId >= 0) {
+      if (typeof chromeApi.tabs?.get !== 'function') throw runtimeError('ACTIVE_TAB_UNAVAILABLE', 'Chrome target-tab lookup is unavailable.');
+      tab = await chromeApi.tabs.get(target.targetTabId);
+      if (!Number.isInteger(tab?.id)
+          || tab.id !== target.targetTabId
+          || tab.active !== true
+          || (Number.isInteger(target.targetWindowId) && tab.windowId !== target.targetWindowId)
+          || !isInjectableUrl(tab.url ?? '')) {
+        throw runtimeError('ACTIVE_TAB_DRIFT', 'The side-panel target tab is no longer active in its bound window.');
+      }
+    } else {
+      tab = await activeTab(chromeApi);
+    }
     const session = registry.get(tab.id, 0);
     if (!session) throw runtimeError('SESSION_NOT_FOUND', 'Activate ToolBraid on this tab first.');
     const state = runtime.state(tab.id, 0);
@@ -1105,6 +1438,29 @@ export async function createExtensionUniversalRuntime({
       sessionId: context.session.sessionId,
       origin: context.state.origin,
     });
+  }
+
+  function readBinding(context) {
+    return Object.freeze({
+      ...authorityBinding(context),
+      pageFingerprint: context.state.pageFingerprint,
+    });
+  }
+
+  function activeReadTool(context, toolId) {
+    if (typeof toolId !== 'string') throw runtimeError('TOOL_NOT_FOUND', 'The selected read tool is no longer active.');
+    const tool = context.state.tools.find((candidate) => candidate.name === toolId);
+    if (!tool) throw runtimeError('TOOL_NOT_FOUND', 'The selected read tool is no longer active.');
+    if (tool.classification !== 'read'
+      || tool.kind !== 'read'
+      || tool.requiresApproval !== false
+      || tool.annotations?.readOnlyHint !== true
+      || tool.effect?.classification !== 'read'
+      || tool.effect?.externalStateChange !== false
+      || tool.effect?.requiresApproval !== false) {
+      throw runtimeError('TOOL_READ_REQUIRED', 'Only an active read-only tool can run through this side-panel action.');
+    }
+    return tool;
   }
 
   function bindPreparedAction(action, context) {
@@ -1156,7 +1512,7 @@ export async function createExtensionUniversalRuntime({
 
   async function handleUiMessage(type, payload = {}) {
     if (!UI_MESSAGE_SET.has(type)) throw runtimeError('UI_MESSAGE_TYPE_INVALID', 'Unsupported side-panel message type.');
-    const context = await activeContext();
+    const context = await activeContext(payload);
     if (type === UI_MESSAGE_TYPES.UI_GET_STATE) {
       const auditTrail = await auditForSession({ tabId: context.tab.id, frameId: 0, sessionId: context.session.sessionId });
       const [entries, verified] = await Promise.all([auditTrail.entries(), auditTrail.verify()]);
@@ -1195,6 +1551,47 @@ export async function createExtensionUniversalRuntime({
         });
       });
       return { ok: true, result: state, multimodalProvider: await multimodalSettings.publicState() };
+    }
+
+    if (type === UI_MESSAGE_TYPES.UI_EXECUTE_READ) {
+      if (!plainObject(payload.arguments ?? {})) {
+        throw runtimeError('UI_READ_ARGUMENTS_INVALID', 'Read arguments must be a plain object.');
+      }
+      const tool = activeReadTool(context, payload.toolId);
+      const binding = readBinding(context);
+      const rawResult = await runtime.executeTool({
+        tabId: binding.tabId,
+        frameId: binding.frameId,
+        sessionId: binding.sessionId,
+        name: tool.name,
+        input: clone(payload.arguments ?? {}),
+      });
+      const current = await activeContext(payload);
+      const currentTool = activeReadTool(current, tool.name);
+      if (stableStringify(readBinding(current)) !== stableStringify(binding)
+        || stableStringify(currentTool) !== stableStringify(tool)) {
+        throw runtimeError('UI_READ_CONTEXT_DRIFT', 'The active page or read tool changed before its result could be shown.');
+      }
+      const bounded = boundedUiReadData(rawResult);
+      const result = Object.freeze({
+        status: 'read-completed',
+        tool: Object.freeze({
+          id: tool.name,
+          title: typeof tool.title === 'string' ? tool.title.slice(0, 512) : tool.name,
+          sourceType: typeof tool.sourceType === 'string' ? tool.sourceType.slice(0, 128) : 'page',
+          adapterId: typeof tool.adapter?.id === 'string' ? tool.adapter.id.slice(0, 128) : null,
+          adapterVersion: typeof tool.adapter?.version === 'string' ? tool.adapter.version.slice(0, 64) : null,
+        }),
+        binding,
+        data: bounded.data,
+        byteLength: bounded.byteLength,
+        truncated: bounded.truncated,
+        untrustedContent: true,
+      });
+      if (new TextEncoder().encode(JSON.stringify(result)).byteLength > MAX_UI_READ_RESULT_BYTES) {
+        throw runtimeError('UI_READ_RESULT_TOO_LARGE', 'The bounded read response exceeds the side-panel transport limit.');
+      }
+      return { ok: true, result };
     }
 
     if (type === UI_MESSAGE_TYPES.UI_PREPARE_ACTION) {

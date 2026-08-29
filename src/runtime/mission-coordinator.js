@@ -2,6 +2,7 @@ import { sha256Hex, stableStringify } from '../universal/canonical.js';
 
 export const MAX_MISSION_MEMBERS = 16;
 export const MISSION_PERSISTENCE_VERSION = 1;
+export const MAX_MISSION_OBJECTIVE_LENGTH = 512;
 
 export const MISSION_PHASES = Object.freeze({
   RUNNING: 'running',
@@ -28,6 +29,7 @@ const TERMINAL_PHASES = new Set([
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,219}$/;
 const SAFE_CODE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/;
 const HTTP_PROTOCOLS = new Set(['http:', 'https:']);
+const SENSITIVE_OBJECTIVE_VALUE = /((?:password|passcode|secret|token|api[\s_-]*key|otp|cvv|card[\s_-]*(?:number|details)?)\s*[:=]\s*)([^\s,;]+)/gi;
 
 export class MissionCoordinatorError extends Error {
   constructor(code, message, details = {}) {
@@ -74,6 +76,19 @@ function safeCode(value, field, fallback = 'UNSPECIFIED') {
     fail('FIELD_INVALID', `${field} must be a bounded code.`, { field });
   }
   return value;
+}
+
+function normalizeObjective(value) {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== 'string') fail('FIELD_INVALID', 'objective must be a bounded string.', { field: 'objective' });
+  const normalized = value
+    .normalize('NFKC')
+    .replace(/[\u0000-\u001f\u007f]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(SENSITIVE_OBJECTIVE_VALUE, '$1[redacted]');
+  if (!normalized) return null;
+  return normalized.slice(0, MAX_MISSION_OBJECTIVE_LENGTH).trim();
 }
 
 function nonNegativeInteger(value, field, { optional = false } = {}) {
@@ -283,6 +298,7 @@ function publicPendingAction(action) {
 function publicState(mission) {
   return {
     missionId: mission.missionId,
+    objective: mission.objective,
     phase: mission.phase,
     revision: mission.revision,
     activeMemberId: mission.activeMemberId,
@@ -318,6 +334,7 @@ function persistenceMission(mission) {
   const active = mission.members.get(mission.activeMemberId);
   return {
     missionId: mission.missionId,
+    objective: mission.objective,
     phase: mission.phase,
     revision: mission.revision,
     activeMemberId: active && active.status !== MEMBER_STATUS.DETACHED ? active.memberId : null,
@@ -346,9 +363,10 @@ function parsePersistence(input) {
   return value;
 }
 
-function createMissionRecord(missionId, now) {
+function createMissionRecord(missionId, now, objective = null) {
   return {
     missionId,
+    objective,
     phase: MISSION_PHASES.RUNNING,
     revision: 0,
     activeMemberId: null,
@@ -391,7 +409,7 @@ export class MissionCoordinator {
     const proposed = input.missionId ?? this.idFactory('mission');
     const missionId = safeId(proposed, 'missionId');
     if (this.missions.has(missionId)) fail('MISSION_ALREADY_EXISTS', 'Mission already exists.', { missionId });
-    const mission = createMissionRecord(missionId, clockNow(this.now));
+    const mission = createMissionRecord(missionId, clockNow(this.now), normalizeObjective(input.objective));
     this.missions.set(missionId, mission);
     return publicState(mission);
   }
@@ -518,6 +536,31 @@ export class MissionCoordinator {
     mission.lastInvalidatedActionIds = [];
     mission.revision += 1;
     return publicState(mission);
+  }
+
+  resolvePendingAction(input = {}) {
+    requiredObject(input, 'pendingActionResolution');
+    const mission = this.#mission(input.missionId);
+    this.#assertMutableMission(mission);
+    const memberId = safeId(input.memberId, 'memberId');
+    const member = this.#member(mission, memberId);
+    if (member.status !== MEMBER_STATUS.ATTACHED) {
+      fail('MEMBER_REBIND_REQUIRED', 'Member requires an exact rebind before resolving an action.', { memberId });
+    }
+    requireCurrentDigest(input, member);
+    const actionId = safeId(input.actionId, 'actionId');
+    const pending = mission.pendingActions.get(actionId);
+    if (!pending) return operationResult(mission, { resolvedActionIds: [] });
+    if (pending.memberId !== memberId) {
+      fail('ACTION_MEMBER_MISMATCH', 'The pending action belongs to a different mission member.', { actionId });
+    }
+    if (pending.bindingDigest !== member.bindingDigest) {
+      fail('BINDING_DIGEST_MISMATCH', 'The pending action binding is stale or incorrect.');
+    }
+    this.#beginMutation(mission);
+    mission.pendingActions.delete(actionId);
+    mission.revision += 1;
+    return operationResult(mission, { resolvedActionIds: [actionId] });
   }
 
   pendingActions(missionId) {
@@ -814,6 +857,7 @@ export class MissionCoordinator {
       fail('PERSISTENCE_INVALID', 'Persisted mission members exceed the configured limit.');
     }
     const mission = createMissionRecord(missionId, clockNow(this.now));
+    mission.objective = normalizeObjective(input.objective);
     mission.phase = phase;
     mission.revision = revision;
     this.missions.set(missionId, mission);

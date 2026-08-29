@@ -134,12 +134,50 @@ def main() -> int:
             page.wait_for_function("document.activeElement?.matches('[data-action=\"open-command\"]')")
             assert_equal(page.evaluate("document.activeElement?.matches('[data-action=\"open-command\"]')"), True, "command focus return")
 
+            page.locator('[data-view="live"]').click()
+            assert_equal(page.locator('[data-universal-view]').is_visible(), True, "live universal view")
+            assert_equal(page.locator('[data-walkthrough-view]').is_hidden(), True, "walkthrough hidden in live view")
+            assert_equal(page.locator('[data-view="live"]').get_attribute("aria-current"), "page", "live view current state")
+            page.wait_for_function("document.activeElement?.matches('[data-universal-view]')")
+            assert_equal(page.locator('[data-view][aria-current="page"]').count(), 1, "single current product view")
+            if "does not read, mirror or simulate" not in page.locator('[data-universal-view]').inner_text():
+                raise AssertionError("live universal view does not state its extension boundary")
+            assert_desktop_viewport_stable(page, "live universal")
+            page.locator('[data-view="evidence"]').click()
+            assert_equal(page.locator('.evidence-panel').is_visible(), True, "evidence view")
+            assert_equal(page.locator('[data-panel-content="evidence"]').is_visible(), True, "evidence content")
+            assert_equal(page.locator('[data-view="evidence"]').get_attribute("aria-current"), "page", "evidence view current state")
+            page.wait_for_function("document.activeElement?.matches('.evidence-panel')")
+            page.locator('[data-view="audit"]').click()
+            assert_equal(page.locator('.evidence-panel').is_visible(), True, "audit view")
+            assert_equal(page.locator('[data-panel-content="audit"]').is_visible(), True, "audit content")
+            assert_equal(page.locator('[data-view="audit"]').get_attribute("aria-current"), "page", "audit view current state")
+            page.locator('[data-view="approvals"]').click()
+            assert_equal(page.locator('[data-approvals-view]').is_visible(), True, "approvals view")
+            assert_equal(page.locator('[data-approval-count]').is_hidden(), True, "idle approval badge hidden")
+            assert_equal(page.locator('[data-view="approvals"]').get_attribute("aria-current"), "page", "approvals view current state")
+            page.wait_for_function("document.activeElement?.matches('[data-approvals-view]')")
+            page.locator('[data-view="help"]').click()
+            assert_equal(page.locator('[data-help-drawer]').is_visible(), True, "help drawer")
+            assert_equal(page.locator('[data-view="help"]').get_attribute("aria-current"), None, "help is a dialog, not a product view")
+            assert_equal(page.locator('[data-view="help"]').get_attribute("aria-expanded"), "true", "help expanded state")
+            assert_equal(page.locator('[data-view][aria-current="page"]').count(), 1, "single current view behind help dialog")
+            page.wait_for_function("document.activeElement?.matches('[data-action=\"close-help\"]')")
+            page.keyboard.press("Tab")
+            assert_equal(page.evaluate("document.activeElement?.matches('[data-action=\"close-help\"]')"), True, "help focus trap")
+            page.locator('[data-action="close-help"]').click()
+            assert_equal(page.locator('[data-help-drawer]').is_hidden(), True, "help drawer close")
+            assert_equal(page.locator('[data-view="help"]').get_attribute("aria-expanded"), "false", "help collapsed state")
+            page.locator('[data-view="topology"]').click()
+            assert_equal(page.locator('[data-walkthrough-view]').is_visible(), True, "walkthrough view restored")
+            assert_equal(page.locator('[data-view="topology"]').get_attribute("aria-current"), "page", "walkthrough current state")
+
             first_tab = page.locator('[data-panel-tab]').first
             first_tab.focus()
             first_tab.press("ArrowRight")
             assert_equal(page.evaluate("document.activeElement?.getAttribute('data-panel-tab')"), "mapping", "tab arrow navigation")
 
-            page.get_by_role("button", name="Start mission", exact=True).click()
+            page.locator('[data-context-action]').click()
             page.wait_for_function("window.__TOOLBRAID_V2__.getState().phase === 'mapping'", timeout=10_000)
             discovered = page.evaluate("window.__TOOLBRAID_V2__.getEngineSnapshot()")
             assert_equal(discovered["mode"], "test", "local runtime mode")
@@ -179,6 +217,14 @@ def main() -> int:
 
             page.wait_for_timeout(4_300)
             assert_desktop_viewport_stable(page, "approval")
+            page.locator('[data-view="approvals"]').click()
+            assert_equal(page.locator('[data-approvals-view]').is_visible(), True, "review approvals view")
+            assert_equal(page.locator('[data-approval-count]').is_visible(), True, "actionable approval badge")
+            page.locator('[data-approvals-view] [data-action="review-approval"]').first.click()
+            assert_equal(page.locator('[data-approval-dialog]').is_visible(), True, "approval dialog from approvals view")
+            page.keyboard.press("Escape")
+            assert_equal(page.locator('[data-approval-dialog]').is_hidden(), True, "approval view dialog close")
+            page.locator('[data-view="topology"]').click()
             page.screenshot(path=str(SCREENSHOTS / "toolbraid-recovery-approval.png"), full_page=True)
             page.locator('[data-approval-dock] [data-action="review-approval"]').click()
             if not page.locator('[data-approval-dialog]').is_visible():
@@ -192,6 +238,7 @@ def main() -> int:
             page.wait_for_function("document.activeElement?.matches('[data-approval-dock] [data-action=\"review-approval\"]')")
             assert_equal(page.evaluate("document.activeElement?.matches('[data-approval-dock] [data-action=\"review-approval\"]')"), True, "approval focus return")
             page.locator('[data-approval-dock] [data-action="review-approval"]').click()
+            page.locator('[data-approval-review="apply"] .technical-details summary').click()
             if "recovery-option-checkout-r3" not in page.locator('[data-review-apply-arguments]').inner_text():
                 raise AssertionError("exact recovery arguments are not visible")
             if "release-1842" not in page.locator('[data-review-publish-body]').inner_text():
@@ -245,6 +292,27 @@ def main() -> int:
 
             page.wait_for_timeout(4_300)
             assert_desktop_viewport_stable(page, "completed")
+            dock_layout = page.evaluate(
+                """() => {
+                  const workspace = document.querySelector('.workspace').getBoundingClientRect();
+                  const topology = document.querySelector('.topology-stage').getBoundingClientRect();
+                  const inspector = document.querySelector('.evidence-panel').getBoundingClientRect();
+                  const dock = document.querySelector('[data-approval-dock]').getBoundingClientRect();
+                  return {
+                    workspaceRight: workspace.right,
+                    topologyRight: topology.right,
+                    inspectorLeft: inspector.left,
+                    dockLeft: dock.left,
+                    dockRight: dock.right,
+                  };
+                }"""
+            )
+            if dock_layout["dockRight"] < dock_layout["workspaceRight"] - 20:
+                raise AssertionError(f"approval dock does not reach the workspace edge: {dock_layout}")
+            if dock_layout["dockRight"] <= dock_layout["inspectorLeft"] + 24:
+                raise AssertionError(f"approval dock does not use the inspector-side space: {dock_layout}")
+            if dock_layout["dockLeft"] >= dock_layout["topologyRight"]:
+                raise AssertionError(f"approval dock lost its topology-side span: {dock_layout}")
             page.screenshot(path=str(SCREENSHOTS / "toolbraid-recovery-completed.png"), full_page=True)
 
             mobile_context = browser.new_context(

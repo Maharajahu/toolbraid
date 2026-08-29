@@ -29,5 +29,11 @@ jobs:
           python -m playwright install --with-deps chromium
       - name: Validate source, contracts, tests, smoke, and build
         run: npm run validate
+      - name: Validate Universal runtime and extension build
+        run: |
+          node --test tests/universal/*.test.mjs
+          node --test tests/v2/*.test.mjs
+          node scripts/check-project.mjs
+          node scripts/build-universal-extension.mjs
       - name: Validate the real desktop and mobile mission
         run: npm run test:e2e

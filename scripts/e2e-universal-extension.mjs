@@ -10,7 +10,7 @@
 
 import { createRequire } from 'node:module';
 import { existsSync } from 'node:fs';
-import { cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -93,7 +93,7 @@ function usage() {
     '  --headed       Launch headed Chrome (default is headless Chrome).',
     '  --headless     Force headless Chrome.',
     '  --skip-build   Use the existing dist/toolbraid-universal-extension.',
-    '  --live-read-only  Test real GitHub/Vercel pages without external mutations.',
+    '  --live-read-only  Test real GitHub/Vercel/X pages without external mutations.',
     '  --keep-profile Keep the temporary Chrome profile for diagnosis.',
     '  --json         Emit only the final JSON report.',
     '  --timeout-ms N Override bounded wait timeout.',
@@ -106,6 +106,7 @@ function usage() {
     '  E2E_WEBMCP_ARGS                 Additional WebMCP flags, separated by spaces.',
     '  E2E_GITHUB_URL                  Required exact GitHub HTTPS URL for --live-read-only.',
     '  E2E_VERCEL_URL                  Optional exact Vercel dashboard HTTPS URL.',
+    '  E2E_X_URL                       Optional exact X/Twitter post HTTPS URL.',
   ].join('\n');
 }
 
@@ -324,6 +325,7 @@ async function waitForWorker(context, timeoutMs) {
 
 async function activeFixtureTab(extPage, fixturePage, expectedOrigin) {
   await fixturePage.bringToFront();
+  const expectedUrl = fixturePage.url();
   const result = await extPage.evaluate(() => new Promise((resolve) => {
     try {
       chrome.tabs.query({}, (tabs) => {
@@ -344,7 +346,10 @@ async function activeFixtureTab(extPage, fixturePage, expectedOrigin) {
     }
   }));
   if (result.error) fail('E2E_ACTIVE_TAB_UNAVAILABLE', 'The extension could not query the active fixture tab.', result);
-  const fixtureTabs = result.tabs.filter((candidate) => candidate.url.startsWith(expectedOrigin));
+  const exactFixtureTabs = result.tabs.filter((candidate) => candidate.url === expectedUrl);
+  const fixtureTabs = exactFixtureTabs.length > 0
+    ? exactFixtureTabs
+    : result.tabs.filter((candidate) => candidate.url.startsWith(expectedOrigin));
   const tab = fixtureTabs.find((candidate) => candidate.active) ?? fixtureTabs[0];
   if (!Number.isInteger(tab?.id)) {
     fail('E2E_ACTIVE_TAB_UNAVAILABLE', 'The active Chrome tab is not the local fixture page.', {
@@ -432,6 +437,7 @@ async function createDebuggerExtensionPage(worker, target, expectedUrl) {
       fail('E2E_SIDEPANEL_EVALUATION_FAILED', 'Code execution in the authentic side panel failed.', {
         text: response.exceptionDetails.text ?? null,
         description: response.exceptionDetails.exception?.description ?? null,
+        expression,
       });
     }
     return response?.result?.value;
@@ -481,6 +487,41 @@ async function createDebuggerExtensionPage(worker, target, expectedUrl) {
     await clickRect(rect);
   }
 
+  async function fillSelector(selector, value) {
+    const result = await evaluate(({ selector, value }) => {
+      const element = document.querySelector(selector);
+      if (!(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement)) return false;
+      element.focus();
+      element.value = String(value);
+      element.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+      element.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
+      return element.value;
+    }, { selector, value });
+    if (result !== String(value)) {
+      fail('E2E_SIDEPANEL_FIELD_MISSING', 'The authentic side-panel field could not be filled.', { selector });
+    }
+  }
+
+  async function captureScreenshot(filePath) {
+    const absolutePath = path.resolve(filePath);
+    await evaluate(() => new Promise((resolve) => {
+      globalThis.scrollTo(0, 0);
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve(globalThis.scrollY)));
+    }));
+    await debuggerCommand(worker, debuggee, 'Page.enable');
+    const response = await debuggerCommand(worker, debuggee, 'Page.captureScreenshot', {
+      format: 'png',
+      fromSurface: true,
+      captureBeyondViewport: true,
+    });
+    if (typeof response?.data !== 'string' || response.data.length === 0) {
+      fail('E2E_SIDEPANEL_SCREENSHOT_FAILED', 'Chrome returned no side-panel screenshot bytes.');
+    }
+    await mkdir(path.dirname(absolutePath), { recursive: true });
+    await writeFile(absolutePath, Buffer.from(response.data, 'base64'));
+    return absolutePath;
+  }
+
   async function fillActionCard(cardIndex, argumentsValue) {
     const result = await evaluate(({ cardIndex, argumentsValue }) => {
       const card = [...document.querySelectorAll('article.item-card')][cardIndex];
@@ -515,7 +556,9 @@ async function createDebuggerExtensionPage(worker, target, expectedUrl) {
     clickSelector,
     countButtons,
     clickButton,
+    fillSelector,
     fillActionCard,
+    captureScreenshot,
     close,
     url: () => expectedUrl,
     target,
@@ -557,6 +600,10 @@ async function openTrustedSidePanel({ context, worker, launcherPage, tabId, exte
   }, { timeoutMs });
   assert(openResult === true, 'E2E_SIDEPANEL_OPEN_FAILED', 'Chrome did not acknowledge the trusted side-panel open request.');
 
+  return attachTrustedSidePanel({ context, worker, extensionId, timeoutMs });
+}
+
+async function attachTrustedSidePanel({ context, worker, extensionId, timeoutMs }) {
   const expectedUrl = `chrome-extension://${extensionId}/sidepanel.html`;
   const deadline = Date.now() + timeoutMs;
   let contexts = [];
@@ -589,7 +636,7 @@ async function openTrustedSidePanel({ context, worker, launcherPage, tabId, exte
 }
 
 async function sendUi(extPage, fixturePage, type, payload, expectedOrigin) {
-  await activeFixtureTab(extPage, fixturePage, expectedOrigin);
+  const target = await activeFixtureTab(extPage, fixturePage, expectedOrigin);
   return extPage.evaluate(({ type, payload }) => new Promise((resolve) => {
     try {
       chrome.runtime.sendMessage({ type, payload }, (response) => {
@@ -603,7 +650,10 @@ async function sendUi(extPage, fixturePage, type, payload, expectedOrigin) {
     } catch (error) {
       resolve({ ok: false, error: { code: 'CHROME_RUNTIME_MESSAGE', message: error?.message ?? String(error) } });
     }
-  }), { type, payload });
+  }), {
+    type,
+    payload: { ...payload, targetTabId: target.id, targetWindowId: target.windowId },
+  });
 }
 
 async function waitFor(label, operation, { timeoutMs, intervalMs = 100 } = {}) {
@@ -618,7 +668,10 @@ async function waitFor(label, operation, { timeoutMs, intervalMs = 100 } = {}) {
     }
     await new Promise((resolve) => setTimeout(resolve, intervalMs));
   }
-  fail('E2E_WAIT_TIMEOUT', `Timed out waiting for ${label}.`, { lastError: lastError?.message ?? null });
+  fail('E2E_WAIT_TIMEOUT', `Timed out waiting for ${label}.`, {
+    lastError: lastError?.message ?? null,
+    lastErrorDetails: lastError?.details ?? null,
+  });
 }
 
 function assert(condition, code, message, details = {}) {
@@ -858,7 +911,27 @@ async function sidepanelApproveAndExecute(extPage, fixturePage, expectedOrigin, 
     response: approvedState,
   });
 
-  await waitFor('side-panel exact Dispatch approved action button', async () => (await extPage.countButtons('Dispatch approved action', { containsText: exactTarget })) > 0 ? true : null, { timeoutMs });
+  await waitFor('side-panel exact Dispatch approved action button', async () => {
+    if ((await extPage.countButtons('Dispatch approved action', { containsText: exactTarget })) > 0) return true;
+    const [uiResponse, diagnostic] = await Promise.all([
+      sendUi(extPage, fixturePage, 'UI_GET_STATE', {}, expectedOrigin),
+      extPage.evaluate(() => ({
+        toast: document.querySelector('#toast')?.textContent?.trim() ?? '',
+        approvalCards: [...document.querySelectorAll('.approval-card')].slice(0, 8).map((card) => card.textContent.trim().slice(0, 800)),
+      })),
+    ]);
+    const bindingSummary = (value) => value && ({
+      actionId: value.actionId ?? null,
+      toolName: value.toolName ?? value.tool?.name ?? null,
+      tabId: value.tabId ?? null,
+      frameId: value.frameId ?? null,
+      sessionId: value.sessionId ?? null,
+      origin: value.origin ?? null,
+      pageFingerprint: value.pageFingerprint ?? null,
+    });
+    const pending = uiResponse?.state?.pendingActions?.find((action) => action?.actionId === prepared.actionId) ?? null;
+    throw new Error(`DISPATCH_CONTROL_PENDING: session=${uiResponse?.state?.sessionId ?? 'missing'} pending=${JSON.stringify(bindingSummary(pending))} scope=${JSON.stringify(bindingSummary(persisted.record?.scope))} ui=${JSON.stringify(diagnostic)}`);
+  }, { timeoutMs });
   await extPage.clickButton('Dispatch approved action', { containsText: exactTarget });
   const consumed = await waitFor('extension-owned approval consumption record', async () => {
     const storage = await readExtensionStorage(extPage);
@@ -959,10 +1032,40 @@ async function installDeterministicRenderedAudio(page) {
     audio.volume = 0.01;
     await audio.play();
     const video = document.querySelector('video');
+    video.querySelectorAll('source').forEach((source) => source.remove());
+    const canvas = document.createElement('canvas');
+    canvas.width = 480;
+    canvas.height = 270;
+    const context = canvas.getContext('2d', { alpha: false });
+    let frame = 0;
+    const draw = () => {
+      frame += 1;
+      context.fillStyle = '#08141f';
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      context.fillStyle = '#77e1ff';
+      context.font = '32px system-ui';
+      context.fillText(`Recovery frame ${frame}`, 52, 142);
+    };
+    draw();
+    globalThis.__toolbraidE2eVideoTimer = setInterval(draw, 100);
+    video.srcObject = canvas.captureStream(10);
+    video.muted = true;
+    await video.play();
+    await new Promise((resolve) => {
+      if (typeof video.requestVideoFrameCallback === 'function') video.requestVideoFrameCallback(() => resolve());
+      else setTimeout(resolve, 100);
+    });
     const track = video.addTextTrack('captions', 'E2E rendered captions', 'en');
     track.mode = 'hidden';
     track.addCue(new VTTCue(0, 3, 'The checkout recovery completed successfully.'));
-    return { playing: !audio.paused, duration: audio.duration, tracks: video.textTracks.length };
+    return {
+      playing: !audio.paused,
+      videoPlaying: !video.paused,
+      videoWidth: video.videoWidth,
+      videoHeight: video.videoHeight,
+      duration: audio.duration,
+      tracks: video.textTracks.length,
+    };
   });
 }
 
@@ -976,9 +1079,16 @@ function liveTarget(rawUrl, kind) {
   try { url = new URL(rawUrl); } catch {
     fail('E2E_LIVE_URL_INVALID', `The ${kind} live URL is invalid.`, { rawUrl });
   }
-  const allowedHosts = kind === 'github' ? new Set(['github.com']) : new Set(['vercel.com', 'www.vercel.com']);
-  if (url.protocol !== 'https:' || !allowedHosts.has(url.hostname) || url.username || url.password || url.port) {
+  const allowedHosts = {
+    github: new Set(['github.com']),
+    vercel: new Set(['vercel.com', 'www.vercel.com']),
+    x: new Set(['x.com', 'twitter.com']),
+  }[kind];
+  if (!allowedHosts || url.protocol !== 'https:' || !allowedHosts.has(url.hostname) || url.username || url.password || url.port) {
     fail('E2E_LIVE_URL_INVALID', `The ${kind} live URL must use an exact supported HTTPS origin.`, { url: url.href });
+  }
+  if (kind === 'x' && !/^\/[^/]+\/status\/\d+\/?$/.test(url.pathname)) {
+    fail('E2E_LIVE_URL_INVALID', 'The x live URL must target one exact post route: /<user>/status/<digits>.', { url: url.href });
   }
   return Object.freeze({ kind, url: url.href, origin: url.origin });
 }
@@ -993,7 +1103,10 @@ async function verifyLiveReadOnlyTarget({ options, report, page, extensionPage, 
   await page.goto(target.url, { waitUntil: 'domcontentloaded', timeout: options.timeoutMs });
   await page.bringToFront();
   const finalUrl = new URL(page.url());
-  if (finalUrl.pathname === '/login' || finalUrl.pathname.startsWith('/login/')) {
+  const loginRedirect = finalUrl.pathname === '/login'
+    || finalUrl.pathname.startsWith('/login/')
+    || (target.kind === 'x' && (finalUrl.pathname === '/i/flow/login' || finalUrl.pathname.startsWith('/i/flow/login/')));
+  if (loginRedirect) {
     report.checks.push({ name: `live.${target.kind}.login-required`, ok: false, blocked: true, requestedUrl: target.url, finalUrl: finalUrl.href });
     return { status: 'blocked', reason: 'LOGIN_REQUIRED' };
   }
@@ -1058,7 +1171,7 @@ async function verifyLiveReadOnlyTarget({ options, report, page, extensionPage, 
       && mutation.effect?.externalStateChange === true
       && typeof mutation.target?.ref === 'string'
       && mutation.pageFingerprint === state.snapshot.pageFingerprint
-      && mutation.postcondition?.adapterId === target.kind,
+      && mutation.postcondition?.adapterId === ({ github: 'github', vercel: 'vercel', x: 'x-post' }[target.kind] ?? target.kind),
     'E2E_LIVE_MUTATION_UNBOUND', 'A live mutation descriptor was not exact, approval-gated, and postcondition-bound.', { mutation });
     const prepared = await callRegisteredTool(page, mutation.name, {});
     assert(prepared?.ok === true && prepared.result?.status === 'approval-required' && prepared.result?.preparedAction,
@@ -1104,6 +1217,7 @@ async function liveReadOnlyMain(options) {
   if (!githubRaw) fail('E2E_LIVE_URL_REQUIRED', 'E2E_GITHUB_URL is required for --live-read-only.');
   const targets = [liveTarget(githubRaw, 'github')];
   if (process.env.E2E_VERCEL_URL) targets.push(liveTarget(process.env.E2E_VERCEL_URL, 'vercel'));
+  if (process.env.E2E_X_URL) targets.push(liveTarget(process.env.E2E_X_URL, 'x'));
   const report = { ok: false, mode: 'live-read-only', checks: [], config: { targets: targets.map((entry) => entry.url) } };
   let context = null;
   let profile = null;
@@ -1334,6 +1448,207 @@ async function main(options) {
       webmcpToolCount: registrationState.webmcp.webTools.length,
     });
 
+    const missionObjective = 'Inspect the active form, stage evidence safely, and verify the approved outcome.';
+    await extensionPage.clickSelector('#refresh-button');
+    await waitFor('enabled side-panel mission start control', async () => extensionPage.evaluate(() => {
+      const button = document.querySelector('#mission-start');
+      return button && !button.disabled ? true : null;
+    }), { timeoutMs: options.timeoutMs });
+    await extensionPage.fillSelector('#mission-objective', missionObjective);
+    await extensionPage.clickSelector('#mission-start');
+    const mission = await waitFor('side-panel mission objective and exact member binding', async () => {
+      const response = await sendUi(extensionPage, fixturePage, 'UI_GET_STATE', {}, fixture.origin);
+      const candidate = response?.state?.missions?.find((entry) => entry?.objective === missionObjective);
+      const member = candidate?.members?.find((entry) => entry?.tabId === tab.id
+        && entry?.frameId === 0
+        && entry?.status === 'attached');
+      return response?.ok === true && candidate && member ? { ...candidate, member } : null;
+    }, { timeoutMs: options.timeoutMs });
+    report.checks.push({
+      name: 'mission.ui-create-attach-objective',
+      ok: true,
+      missionId: mission.missionId,
+      objective: mission.objective,
+      memberId: mission.member.memberId,
+      tabId: mission.member.tabId,
+    });
+
+    await waitFor('side-panel mission inspection control', async () => extensionPage.evaluate(() => (
+      document.querySelector('[data-action="inspect-mission"]') ? true : null
+    )), { timeoutMs: options.timeoutMs });
+    await extensionPage.clickSelector('[data-action="inspect-mission"]');
+    const missionInspection = await waitFor('rendered live mission inspection', async () => extensionPage.evaluate(() => {
+      const card = document.querySelector('#mission-inspect-result [data-mission-id]');
+      return card ? { missionId: card.dataset.missionId, text: card.textContent.trim().slice(0, 1200) } : null;
+    }), { timeoutMs: options.timeoutMs });
+    assert(missionInspection.missionId === mission.missionId
+      && missionInspection.text.includes('Verified binding'), 'E2E_MISSION_INSPECTION_MISSING', 'Inspect live did not render the exact mission result in the authentic side panel.', {
+      expectedMissionId: mission.missionId,
+      missionInspection,
+    });
+    report.checks.push({ name: 'mission.ui-inspect-live-result', ok: true, ...missionInspection });
+
+    // Exercise the real side-panel CAPTCHA handoff boundary against a
+    // disposable same-origin surface.  The surface is intentionally created
+    // by the side panel, then given one visible CAPTCHA-labelled checkbox;
+    // the worker may only click that exact top-frame target once.
+    await waitFor('human handoff request form', async () => extensionPage.evaluate(() => {
+      const form = document.querySelector('#handoff-request form.handoff-request-form');
+      const type = form?.querySelector('select[name="handoffType"]');
+      const submit = form?.querySelector('[data-action="request-human-step"]');
+      return form && type && submit && !submit.disabled ? true : null;
+    }), { timeoutMs: options.timeoutMs });
+    await extensionPage.evaluate(() => {
+      const type = document.querySelector('#handoff-request select[name="handoffType"]');
+      if (!type) return;
+      type.value = 'captcha';
+      type.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
+    });
+    await extensionPage.clickSelector('#handoff-request [data-action="request-human-step"]');
+    const captchaHandoff = await waitFor('CAPTCHA handoff request with exact mission binding', async () => {
+      const response = await sendUi(extensionPage, fixturePage, 'UI_GET_STATE', {}, fixture.origin);
+      const handoff = response?.ok === true
+        ? response.state?.handoffs?.find((entry) => entry?.type === 'captcha' && entry?.state === 'awaiting-ui-gesture')
+        : null;
+      return handoff?.missionId === mission.missionId && handoff?.memberId === mission.member.memberId ? handoff : null;
+    }, { timeoutMs: options.timeoutMs });
+    report.checks.push({
+      name: 'handoff.captcha-request-bound',
+      ok: true,
+      handoffId: captchaHandoff.handoffId,
+      missionId: captchaHandoff.missionId,
+      memberId: captchaHandoff.memberId,
+      origin: captchaHandoff.safeOrigin,
+    });
+    let detectedSurface = null;
+    const focusSourceWhenSurfaceOpens = (candidate) => {
+      if (candidate === fixturePage || candidate === sidepanelLauncher) return;
+      // Chrome focuses the popup as soon as it is created. Return focus to
+      // the source window immediately so the side-panel refresh that follows
+      // OPEN_SURFACE still resolves its bound source session.
+      void fixturePage.bringToFront();
+      void candidate.waitForURL((url) => url.startsWith(fixture.origin), { timeout: options.timeoutMs })
+        .then(() => { detectedSurface = candidate; return fixturePage.bringToFront(); })
+        .catch(() => undefined);
+    };
+    context.on('page', focusSourceWhenSurfaceOpens);
+    await extensionPage.clickSelector(`[data-action="open-human-window"][data-handoff-id="${captchaHandoff.handoffId}"]`);
+    const humanSurface = await waitFor('same-origin human CAPTCHA surface', async () => {
+      const candidate = detectedSurface ?? context.pages().find((entry) => entry !== fixturePage
+        && entry !== sidepanelLauncher
+        && entry.url().startsWith(fixture.origin));
+      if (candidate) void fixturePage.bringToFront();
+      return candidate ?? null;
+    }, { timeoutMs: options.timeoutMs });
+    context.off('page', focusSourceWhenSurfaceOpens);
+    assert(new URL(humanSurface.url()).origin === fixture.origin, 'E2E_CAPTCHA_SURFACE_ORIGIN_INVALID', 'The CAPTCHA handoff surface was not opened on the exact fixture origin.', { url: humanSurface.url(), expectedOrigin: fixture.origin });
+    await humanSurface.evaluate(() => {
+      document.body.innerHTML = `
+        <main style="padding: 48px; font: 20px system-ui, sans-serif">
+          <h1>Human verification</h1>
+          <label for="toolbraid-e2e-captcha-checkbox">CAPTCHA verification</label>
+          <input id="toolbraid-e2e-captcha-checkbox" type="checkbox" aria-label="CAPTCHA verification">
+        </main>`;
+      const checkbox = document.querySelector('#toolbraid-e2e-captcha-checkbox');
+      checkbox.dataset.clicks = '0';
+      checkbox.addEventListener('click', () => {
+        checkbox.dataset.clicks = String(Number(checkbox.dataset.clicks ?? '0') + 1);
+      });
+    });
+    const surfaceBeforeCaptcha = await humanSurface.evaluate(() => ({
+      checkboxCount: document.querySelectorAll('input[type="checkbox"], [role="checkbox"]').length,
+      clicks: Number(document.querySelector('#toolbraid-e2e-captcha-checkbox')?.dataset.clicks ?? '-1'),
+    }));
+    assert(surfaceBeforeCaptcha.checkboxCount === 1 && surfaceBeforeCaptcha.clicks === 0, 'E2E_CAPTCHA_SURFACE_INVALID', 'The disposable CAPTCHA surface did not contain exactly one untouched checkbox.', { surfaceBeforeCaptcha });
+    // Chrome hides the source tab's side panel while the popup surface is
+    // focused. Bring the source tab back to the front so the next operation
+    // is still an authentic debugger-input click on the side-panel control;
+    // the worker continues to target the exact, now background, surface tab.
+    await fixturePage.bringToFront();
+    await worker.evaluate(async ({ tabId }) => {
+      const tab = await chrome.tabs.get(tabId);
+      if (!Number.isInteger(tab?.windowId)) throw new Error('SOURCE_WINDOW_UNAVAILABLE');
+      await chrome.windows.update(tab.windowId, { focused: true });
+      await chrome.tabs.update(tabId, { active: true });
+    }, { tabId: tab.id });
+    // Opening a popup replaces Chrome's SIDE_PANEL document. Reattach to the
+    // fresh authentic side-panel target before issuing the trusted CAPTCHA
+    // gesture; keeping the stale debugger target would only exercise dead UI.
+    await extensionPage.close();
+    extensionPage = await attachTrustedSidePanel({
+      context,
+      worker,
+      extensionId,
+      timeoutMs: options.timeoutMs,
+    });
+    await fixturePage.bringToFront();
+    await worker.evaluate(async ({ tabId }) => {
+      const tab = await chrome.tabs.get(tabId);
+      await chrome.windows.update(tab.windowId, { focused: true });
+      await chrome.tabs.update(tabId, { active: true });
+    }, { tabId: tab.id });
+    await extensionPage.clickSelector('#refresh-button');
+    await waitFor('side-panel CAPTCHA attempt control', async () => extensionPage.evaluate(async (handoffId) => {
+      const buttons = [...document.querySelectorAll('button')].map((button) => ({
+        text: button.textContent.trim(),
+        action: button.dataset.action ?? null,
+        handoffId: button.dataset.handoffId ?? null,
+        disabled: button.disabled,
+      }));
+      const button = buttons.find((entry) => entry.action === 'attempt-captcha-checkbox' && entry.handoffId === handoffId);
+      if (!button || button.disabled) {
+        const [activeTabs, currentWindow, workerState, handoffWorkerState] = await Promise.all([
+          new Promise((resolve) => chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => resolve((tabs || []).map((tab) => ({ id: tab.id ?? null, active: tab.active === true, windowId: tab.windowId ?? null, url: tab.url ?? '' }))))),
+          new Promise((resolve) => chrome.windows.getCurrent((window) => resolve({ id: window?.id ?? null, focused: window?.focused === true }))),
+          new Promise((resolve) => chrome.runtime.sendMessage({ type: 'UI_GET_STATE', payload: {} }, (response) => resolve(response ?? null))),
+          new Promise((resolve) => chrome.runtime.sendMessage({ type: 'UI_HANDOFF_GET_STATE', payload: {} }, (response) => resolve(response ?? null))),
+        ]);
+        throw new Error(`CAPTCHA_BUTTON_PENDING: ${JSON.stringify({ buttons, activeTabs, currentWindow, workerState: {
+          ok: workerState?.ok ?? null,
+          error: workerState?.error ?? null,
+          sessionId: workerState?.state?.sessionId ?? null,
+          handoffs: workerState?.state?.handoffs ?? null,
+        }, handoffWorkerState })}`);
+      }
+      return button;
+    }, captchaHandoff.handoffId), { timeoutMs: options.timeoutMs });
+    await extensionPage.clickSelector(`[data-action="attempt-captcha-checkbox"][data-handoff-id="${captchaHandoff.handoffId}"]`);
+    const surfaceAfterCaptcha = await waitFor('actual CAPTCHA checkbox click in human surface', async () => {
+      const result = await humanSurface.evaluate(() => ({
+        checkboxCount: document.querySelectorAll('input[type="checkbox"], [role="checkbox"]').length,
+        clicks: Number(document.querySelector('#toolbraid-e2e-captcha-checkbox')?.dataset.clicks ?? '-1'),
+        checked: document.querySelector('#toolbraid-e2e-captcha-checkbox')?.checked === true,
+      }));
+      return result.clicks === 1 ? result : null;
+    }, { timeoutMs: options.timeoutMs });
+    assert(surfaceAfterCaptcha.checkboxCount === 1 && surfaceAfterCaptcha.clicks === 1 && surfaceAfterCaptcha.checked === true,
+      'E2E_CAPTCHA_CLICK_INVALID', 'The bounded CAPTCHA path did not dispatch exactly one click to the visible checkbox.', { surfaceAfterCaptcha });
+    const captchaAfterAttempt = await waitFor('CAPTCHA broker attempt ledger', async () => {
+      const response = await sendUi(extensionPage, fixturePage, 'UI_GET_STATE', {}, fixture.origin);
+      const handoff = response?.ok === true
+        ? response.state?.handoffs?.find((entry) => entry?.handoffId === captchaHandoff.handoffId)
+        : null;
+      return handoff?.state === 'human-active' && handoff?.captchaCheckboxAttempts === 1 ? handoff : null;
+    }, { timeoutMs: options.timeoutMs });
+    report.checks.push({
+      name: 'handoff.captcha-one-real-click',
+      ok: true,
+      handoffId: captchaAfterAttempt.handoffId,
+      state: captchaAfterAttempt.state,
+      captchaCheckboxAttempts: captchaAfterAttempt.captchaCheckboxAttempts,
+      surface: surfaceAfterCaptcha,
+    });
+    await extensionPage.clickSelector(`[data-action="complete-human-step"][data-handoff-id="${captchaHandoff.handoffId}"]`);
+    await waitFor('CAPTCHA handoff terminal completion', async () => {
+      const response = await sendUi(extensionPage, fixturePage, 'UI_GET_STATE', {}, fixture.origin);
+      return response?.ok === true
+        && response.state?.handoffs?.some((entry) => entry?.handoffId === captchaHandoff.handoffId && entry?.state === 'completed')
+        ? true
+        : null;
+    }, { timeoutMs: options.timeoutMs });
+    await humanSurface.close();
+    await fixturePage.bringToFront();
+
     const readTool = chooseTool(initialPageTools, (tool) => tool.classification === 'read', 'read');
     const readAttempt = await callRegisteredTool(fixturePage, readTool.name, {});
     assert(readAttempt.ok === true && readAttempt.result?.untrustedContent === true, 'E2E_READ_FAILED', 'A generated read tool did not execute through the actual WebMCP page surface.', { readTool, readAttempt });
@@ -1348,6 +1663,31 @@ async function main(options) {
         && Object.keys(tool.inputSchema?.properties ?? {}).length > 0
       )) ? response.state : null;
     }, { timeoutMs: options.timeoutMs });
+    await extensionPage.clickSelector('#refresh-button');
+    await waitFor('mission rebind control after page fingerprint drift', async () => extensionPage.evaluate(({ missionId, memberId }) => {
+      const selector = `[data-action="rebind-mission-member"][data-mission-id="${CSS.escape(missionId)}"][data-member-id="${CSS.escape(memberId)}"]`;
+      const button = document.querySelector(selector);
+      return button && !button.disabled ? true : null;
+    }, { missionId: mission.missionId, memberId: mission.member.memberId }), { timeoutMs: options.timeoutMs });
+    await extensionPage.clickSelector(`[data-action="rebind-mission-member"][data-mission-id="${mission.missionId}"][data-member-id="${mission.member.memberId}"]`);
+    const reboundMember = await waitFor('mission member rebound to fresh page fingerprint', async () => {
+      const response = await sendUi(extensionPage, fixturePage, 'UI_GET_STATE', {}, fixture.origin);
+      const currentMission = response?.state?.missions?.find((entry) => entry?.missionId === mission.missionId);
+      const member = currentMission?.members?.find((entry) => entry?.memberId === mission.member.memberId);
+      return response?.ok === true
+        && member?.status === 'attached'
+        && member.rebindRequired !== true
+        && member.pageFingerprint === valueState.snapshot.pageFingerprint
+        ? member
+        : null;
+    }, { timeoutMs: options.timeoutMs });
+    report.checks.push({
+      name: 'mission.ui-explicit-rebind-after-page-drift',
+      ok: true,
+      missionId: mission.missionId,
+      memberId: reboundMember.memberId,
+      pageFingerprint: reboundMember.pageFingerprint,
+    });
     const valueTool = chooseTool(valueState.tools, (tool) => (
       tool.classification === 'mutate'
       && tool.sourceType === 'control'
@@ -1362,12 +1702,104 @@ async function main(options) {
 
     const valuePreparedByPanel = await sidepanelPrepareAction(extensionPage, fixturePage, fixture.origin, valueTool, valueArguments, options.timeoutMs);
     assert(valuePreparedByPanel.actionId === valuePrepared.actionId, 'E2E_PREPARED_ACTION_MISMATCH', 'The side-panel prepare click produced a different exact value-set action.', { webmcp: valuePrepared, sidepanel: valuePreparedByPanel });
+    const missionPending = await waitFor('exact pending action in mission state', async () => {
+      const response = await sendUi(extensionPage, fixturePage, 'UI_GET_STATE', {}, fixture.origin);
+      const currentMission = response?.state?.missions?.find((entry) => entry?.missionId === mission.missionId);
+      const pending = currentMission?.pendingActions?.find((entry) => entry?.actionId === valuePreparedByPanel.actionId);
+      return response?.ok === true && pending ? { mission: currentMission, pending } : null;
+    }, { timeoutMs: options.timeoutMs });
+    assert(missionPending.pending.memberId === mission.member.memberId, 'E2E_MISSION_PENDING_OWNER_MISMATCH', 'The prepared action was not bound to the exact attached mission member.', {
+      missionId: mission.missionId,
+      expectedMemberId: mission.member.memberId,
+      pending: missionPending.pending,
+    });
+    report.checks.push({
+      name: 'mission.prepare-registers-pending-action',
+      ok: true,
+      missionId: mission.missionId,
+      memberId: missionPending.pending.memberId,
+      actionId: missionPending.pending.actionId,
+    });
     const valueExecution = await sidepanelApproveAndExecute(extensionPage, fixturePage, fixture.origin, valuePreparedByPanel, options.timeoutMs);
     const valueNow = await fixturePage.locator('#e2e-value-control').inputValue();
     assert(valueNow === 'after-value', 'E2E_VALUE_SET_FAILED', 'The approved value-set did not update the exact live control.', { valueNow });
     const valueChanged = valueExecution.receipt?.changed;
     assert(valueChanged?.redacted === true || !Object.hasOwn(valueChanged ?? {}, 'value') || valueChanged?.value === '[redacted]', 'E2E_VALUE_RECEIPT_LEAK', 'The value-set receipt exposed the changed value instead of a redacted change marker.', { receipt: valueExecution.receipt });
     report.checks.push({ name: 'mutation.value-set-approved-receipt', ok: true, tool: valueTool.name, approval: { id: valueExecution.approval.id, state: valueExecution.approval.state }, receipt: valueExecution.receipt, value: valueNow });
+
+    await waitFor('resolved mission pending action', async () => {
+      const response = await sendUi(extensionPage, fixturePage, 'UI_GET_STATE', {}, fixture.origin);
+      const currentMission = response?.state?.missions?.find((entry) => entry?.missionId === mission.missionId);
+      return response?.ok === true
+        && currentMission
+        && !currentMission.pendingActions?.some((entry) => entry?.actionId === valuePreparedByPanel.actionId)
+        ? currentMission
+        : null;
+    }, { timeoutMs: options.timeoutMs });
+    report.checks.push({
+      name: 'mission.dispatch-resolves-pending-action',
+      ok: true,
+      missionId: mission.missionId,
+      actionId: valuePreparedByPanel.actionId,
+    });
+
+    await waitFor('fresh completed-mission control', async () => extensionPage.evaluate((missionId) => {
+      const button = document.querySelector(`[data-action="complete-mission"][data-mission-id="${CSS.escape(missionId)}"]`);
+      return button && !button.disabled ? true : null;
+    }, mission.missionId), { timeoutMs: options.timeoutMs });
+    await extensionPage.clickSelector(`[data-action="complete-mission"][data-mission-id="${mission.missionId}"]`);
+    const completedMission = await waitFor('mission completion through authentic side panel', async () => {
+      const response = await sendUi(extensionPage, fixturePage, 'UI_GET_STATE', {}, fixture.origin);
+      const currentMission = response?.state?.missions?.find((entry) => entry?.missionId === mission.missionId);
+      return response?.ok === true && currentMission?.phase === 'completed' ? currentMission : null;
+    }, { timeoutMs: options.timeoutMs });
+    report.checks.push({
+      name: 'mission.ui-complete-terminal-phase',
+      ok: true,
+      missionId: completedMission.missionId,
+      phase: completedMission.phase,
+      revision: completedMission.revision,
+    });
+    const cancelledObjective = 'Confirm a completed mission releases the page for the next bounded mission.';
+    await waitFor('new mission control after terminal completion', async () => extensionPage.evaluate(() => {
+      const button = document.querySelector('#mission-start');
+      return button && !button.disabled ? true : null;
+    }), { timeoutMs: options.timeoutMs });
+    await extensionPage.fillSelector('#mission-objective', cancelledObjective);
+    await extensionPage.clickSelector('#mission-start');
+    const cancellableMission = await waitFor('second exact mission after terminal release', async () => {
+      const response = await sendUi(extensionPage, fixturePage, 'UI_GET_STATE', {}, fixture.origin);
+      const candidate = response?.state?.missions?.find((entry) => entry?.objective === cancelledObjective && entry?.phase === 'running');
+      return response?.ok === true && candidate ? candidate : null;
+    }, { timeoutMs: options.timeoutMs });
+    await extensionPage.evaluate(() => { globalThis.confirm = () => true; });
+    await waitFor('cancel mission control', async () => extensionPage.evaluate((missionId) => (
+      [...document.querySelectorAll('[data-action="cancel-mission"]')]
+        .some((button) => button.dataset.missionId === missionId && !button.disabled) ? true : null
+    ), cancellableMission.missionId), { timeoutMs: options.timeoutMs });
+    await extensionPage.clickSelector(`[data-action="cancel-mission"][data-mission-id="${cancellableMission.missionId}"]`);
+    const cancelledMission = await waitFor('mission cancellation through authentic side panel', async () => {
+      const response = await sendUi(extensionPage, fixturePage, 'UI_GET_STATE', {}, fixture.origin);
+      const candidate = response?.state?.missions?.find((entry) => entry?.missionId === cancellableMission.missionId);
+      return response?.ok === true && candidate?.phase === 'cancelled' ? candidate : null;
+    }, { timeoutMs: options.timeoutMs });
+    report.checks.push({
+      name: 'mission.ui-terminal-release-and-cancel',
+      ok: true,
+      missionId: cancelledMission.missionId,
+      phase: cancelledMission.phase,
+    });
+    await waitFor('side-panel transient notification to appear', async () => extensionPage.evaluate(() => (
+      document.querySelector('#toast')?.classList.contains('toast-visible') ? true : null
+    )), { timeoutMs: options.timeoutMs });
+    await waitFor('side-panel transient notification to settle', async () => extensionPage.evaluate(() => (
+      document.querySelector('#toast')?.classList.contains('toast-visible') ? null : true
+    )), { timeoutMs: options.timeoutMs });
+    const sidepanelScreenshot = await extensionPage.captureScreenshot(
+      process.env.E2E_SIDEPANEL_SCREENSHOT_PATH
+        || path.join(PROJECT_ROOT, 'docs', 'screenshots', 'toolbraid-universal-sidepanel.png'),
+    );
+    report.checks.push({ name: 'sidepanel.visual-capture', ok: true, path: sidepanelScreenshot });
 
     // The dispatched value mutation schedules a fresh semantic snapshot. Wait
     // for that exact post-action snapshot before preparing another mutation;
@@ -1516,7 +1948,12 @@ async function main(options) {
 
     await fixturePage.goto(`${fixture.origin}/media`, { waitUntil: 'domcontentloaded' });
     const mediaSetup = await installDeterministicRenderedAudio(fixturePage);
-    assert(mediaSetup.playing === true && mediaSetup.tracks >= 2, 'E2E_MEDIA_SETUP_FAILED', 'The deterministic rendered-media fixture did not start.', { mediaSetup });
+    assert(mediaSetup.playing === true
+      && mediaSetup.videoPlaying === true
+      && mediaSetup.videoWidth > 0
+      && mediaSetup.videoHeight > 0
+      && mediaSetup.tracks >= 2,
+    'E2E_MEDIA_SETUP_FAILED', 'The deterministic rendered-media fixture did not start.', { mediaSetup });
     await fixturePage.bringToFront();
     const mediaTab = await activeFixtureTab(extensionPage, fixturePage, fixture.origin);
     await injectProductionScripts(worker, mediaTab.id);
@@ -1529,6 +1966,7 @@ async function main(options) {
     const mediaStateResponse = await sendUi(extensionPage, fixturePage, 'UI_GET_STATE', {}, fixture.origin);
     const mediaState = mediaStateResponse?.state;
     const renderedAudio = mediaState?.capture?.assets?.find((asset) => asset?.kind === 'audio' && asset?.source === 'capture');
+    const renderedVideo = mediaState?.capture?.videoEvidence?.find((entry) => Array.isArray(entry?.keyframes) && entry.keyframes.length > 0);
     const captionText = mediaState?.capture?.captions?.map((entry) => entry?.text).filter(Boolean) ?? [];
     assert(mediaStateResponse?.ok === true
       && renderedAudio?.sensitive === true
@@ -1539,18 +1977,23 @@ async function main(options) {
     'E2E_RENDERED_AUDIO_MISSING', 'Real Chrome did not return a bounded volatile rendered-audio handle.', { capture: mediaState?.capture });
     assert(captionText.some((text) => text.includes('The checkout recovery completed successfully.')),
       'E2E_RENDERED_CAPTION_MISSING', 'Loaded rendered captions were not captured from the real media element.', { captions: mediaState?.capture?.captions });
+    assert(renderedVideo?.keyframes?.length > 0
+      && renderedVideo.keyframes.every((frame) => typeof frame?.handle === 'string' && frame.handle.startsWith('tb-media-') && frame.byteLength > 0),
+    'E2E_RENDERED_VIDEO_MISSING', 'Real Chrome did not return bounded volatile rendered-video keyframe handles.', { capture: mediaState?.capture, mediaSetup });
     const mediaStorage = await readExtensionStorage(extensionPage);
     const mediaStorageJson = JSON.stringify(mediaStorage.value);
     const mediaAuditEvents = mediaState.audit?.entries?.map((entry) => entry.event) ?? [];
     assert(!mediaStorageJson.includes('audioBase64')
+      && !mediaStorageJson.includes('frameBase64')
       && !mediaStorageJson.includes('data:audio/wav')
       && !mediaAuditEvents.includes('action.dispatching')
       && !mediaAuditEvents.includes('action.dispatched'),
     'E2E_MEDIA_PERSISTENCE_INVALID', 'Rendered media leaked into durable storage or triggered a mutation.', { mediaAuditEvents });
     report.checks.push({
-      name: 'multimodal.rendered-audio-captions',
+      name: 'multimodal.rendered-video-audio-captions',
       ok: true,
       asset: { handle: renderedAudio.handle, byteLength: renderedAudio.byteLength, mimeType: renderedAudio.mimeType },
+      keyframes: renderedVideo.keyframes.map((frame) => ({ handle: frame.handle, byteLength: frame.byteLength, mimeType: frame.mimeType })),
       captionMatches: captionText.filter((text) => text.includes('The checkout recovery completed successfully.')).length,
       warnings: mediaState.capture.warnings,
       auditEvents: mediaAuditEvents,
@@ -1625,5 +2068,6 @@ export {
   E2EFailure,
   main,
   parseArgs,
+  liveTarget,
   validateBundleImports,
 };

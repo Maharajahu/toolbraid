@@ -35,6 +35,23 @@ function xSnapshot(overrides = {}) {
   });
 }
 
+function verify(registry, tool, beforeSnapshot, afterSnapshot) {
+  return registry.verifyPostcondition(tool, {
+    tabId: 7,
+    frameId: 0,
+    sessionId: 'x-postcondition-session',
+    beforeSnapshot,
+    afterSnapshot,
+  });
+}
+
+function mutationTool(registry, snapshot, name) {
+  const tool = registry.generateTools(snapshot).find((entry) => entry.name === name);
+  assert.ok(tool, `expected ${name} to be generated`);
+  assert.ok(tool.postcondition, `${name} must declare a postcondition`);
+  return tool;
+}
+
 test('verified X adapter exposes a direct like but does not mislabel the closed repost menu button as completion', () => {
   const registry = createSiteAdapterRegistry({ adapters: [createXPostAdapter()] });
   const snapshot = xSnapshot();
@@ -60,6 +77,125 @@ test('verified X repost mutation requires the exact positive live confirmation m
   assert.ok(repost);
   assert.equal(repost.target.ref, 'repost-confirm');
   assert.equal(repost.requiresApproval, true);
+});
+
+test('verified X like postcondition requires the exact post to transition from like to unlike', () => {
+  const registry = createSiteAdapterRegistry({ adapters: [createXPostAdapter()] });
+  const before = xSnapshot({
+    accessibleControls: [
+      { ref: 'like', role: 'button', name: 'Like', type: 'button', pressed: false },
+    ],
+  });
+  const after = xSnapshot({
+    accessibleControls: [
+      { ref: 'unlike', role: 'button', name: 'Unlike', type: 'button', attributes: { 'data-testid': 'unlike' } },
+    ],
+  });
+  const like = mutationTool(registry, before, 'like_x_post');
+  assert.equal(like.postcondition.id, 'x.post.like.v1');
+
+  const result = verify(registry, like, before, after);
+  assert.equal(result.status, 'verified-success');
+  assert.equal(result.reasonCode, 'X_LIKE_STATE_CONFIRMED');
+  assert.equal(result.afterPageFingerprint, after.pageFingerprint);
+});
+
+test('verified X like postcondition stays unverified when the control remains like or only a decoy changes', () => {
+  const registry = createSiteAdapterRegistry({ adapters: [createXPostAdapter()] });
+  const before = xSnapshot({
+    accessibleControls: [
+      { ref: 'like', role: 'button', name: 'Like', type: 'button' },
+    ],
+  });
+  const like = mutationTool(registry, before, 'like_x_post');
+
+  const unchanged = verify(registry, like, before, xSnapshot({
+    accessibleControls: [
+      { ref: 'like', role: 'button', name: 'Like', type: 'button' },
+    ],
+  }));
+  assert.equal(unchanged.status, 'unverified');
+  assert.equal(unchanged.reasonCode, 'X_LIKE_STATE_NOT_CONFIRMED');
+
+  const decoyOnly = verify(registry, like, before, xSnapshot({
+    accessibleControls: [
+      { ref: 'like', role: 'button', name: 'Like', type: 'button' },
+      { ref: 'unlike-decoy', role: 'button', name: 'Unlike', type: 'button' },
+    ],
+  }));
+  assert.equal(decoyOnly.status, 'unverified');
+  assert.equal(decoyOnly.reasonCode, 'X_LIKE_STATE_NOT_CONFIRMED');
+});
+
+test('verified X repost postcondition requires the confirmation item to become an active repost state', () => {
+  const registry = createSiteAdapterRegistry({ adapters: [createXPostAdapter()] });
+  const before = xSnapshot({
+    accessibleControls: [
+      { ref: 'repost-toolbar', role: 'button', name: 'Repost', type: 'button' },
+      { ref: 'repost-confirm', role: 'menuitem', name: 'Repost', type: 'button', attributes: { 'data-testid': 'retweetConfirm' } },
+    ],
+  });
+  const after = xSnapshot({
+    accessibleControls: [
+      { ref: 'unretweet', role: 'button', name: 'Undo repost', type: 'button', attributes: { 'data-testid': 'unretweet' } },
+    ],
+  });
+  const repost = mutationTool(registry, before, 'repost_x_post');
+  assert.equal(repost.postcondition.id, 'x.post.repost.v1');
+
+  const result = verify(registry, repost, before, after);
+  assert.equal(result.status, 'verified-success');
+  assert.equal(result.reasonCode, 'X_REPOST_STATE_CONFIRMED');
+  assert.equal(result.afterPageFingerprint, after.pageFingerprint);
+
+  const unchanged = verify(registry, repost, before, xSnapshot({
+    accessibleControls: [
+      { ref: 'repost-toolbar', role: 'button', name: 'Repost', type: 'button' },
+      { ref: 'repost-confirm', role: 'menuitem', name: 'Repost', type: 'button', attributes: { 'data-testid': 'retweetConfirm' } },
+    ],
+  }));
+  assert.equal(unchanged.status, 'unverified');
+  assert.equal(unchanged.reasonCode, 'X_REPOST_STATE_NOT_CONFIRMED');
+});
+
+test('verified X mutation postconditions reject route drift and a forged target binding', () => {
+  const registry = createSiteAdapterRegistry({ adapters: [createXPostAdapter()] });
+  const before = xSnapshot({
+    accessibleControls: [
+      { ref: 'like', role: 'button', name: 'Like', type: 'button' },
+    ],
+  });
+  const like = mutationTool(registry, before, 'like_x_post');
+  const drifted = xSnapshot({
+    metadata: {
+      url: 'https://x.com/Maharajahu/status/43',
+      origin: 'https://x.com',
+      pageType: 'x-post',
+    },
+    links: [
+      { ref: 'author', href: 'https://x.com/Maharajahu', text: 'Maharajahu @Maharajahu' },
+      { ref: 'permalink', href: 'https://x.com/Maharajahu/status/43', text: '12:00 AM · Aug 29, 2026' },
+    ],
+    accessibleControls: [
+      { ref: 'unlike', role: 'button', name: 'Unlike', type: 'button', attributes: { 'data-testid': 'unlike' } },
+    ],
+  });
+  const routeDrift = verify(registry, like, before, drifted);
+  assert.equal(routeDrift.status, 'unverified');
+  assert.equal(routeDrift.reasonCode, 'X_POST_ROUTE_DRIFT');
+
+  const forged = {
+    ...like,
+    target: { ...like.target, targetFingerprint: '0'.repeat(64) },
+    provenance: { ...like.provenance, targetFingerprint: '0'.repeat(64) },
+  };
+  const forgedResult = verify(registry, forged, before, xSnapshot({
+    accessibleControls: [
+      { ref: 'unlike', role: 'button', name: 'Unlike', type: 'button', attributes: { 'data-testid': 'unlike' } },
+    ],
+  }));
+  assert.equal(forgedResult.status, 'unverified');
+  assert.equal(forgedResult.reasonCode, 'X_LIKE_PRECONDITION_NOT_CONFIRMED');
 });
 
 test('verified X mutations reject unlike, undo repost, and already-active controls', () => {

@@ -2,7 +2,9 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  HANDOFF_UI_MESSAGE_TYPES,
   createExtensionHandoffRuntime,
+  isHandoffUiMessageType,
 } from '../../extension/handoff-runtime.js';
 import {
   HANDOFF_STATES,
@@ -14,6 +16,11 @@ const ORIGIN = 'https://example.test';
 const RAW_PAGE_URL = 'https://example.test/login?next=%2Fdashboard#fragment-secret';
 const RAW_CREDENTIAL_URL = 'https://alice:password-secret@example.test/login?otp=otp-secret#fragment-secret';
 let requestSequence = 0;
+
+test('recognizes the single side-panel CAPTCHA attempt message', () => {
+  assert.equal(HANDOFF_UI_MESSAGE_TYPES.CAPTCHA_ATTEMPT, 'UI_HANDOFF_CAPTCHA_ATTEMPT');
+  assert.equal(isHandoffUiMessageType(HANDOFF_UI_MESSAGE_TYPES.CAPTCHA_ATTEMPT), true);
+});
 
 const BINDING = Object.freeze({
   missionId: 'mission-handoff',

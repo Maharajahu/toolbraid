@@ -112,6 +112,54 @@ function harness({ onSend = null } = {}) {
   };
 }
 
+test('uses the side-panel bound tab across windows and rejects a mismatched bound window', async () => {
+  const h = harness();
+  const tabGets = [];
+  let activeQueries = 0;
+  h.chromeApi.tabs = {
+    async query() {
+      activeQueries += 1;
+      return [{ id: 101, windowId: 99, active: true, url: 'chrome-extension://toolbraid/sidepanel.html' }];
+    },
+    async get(tabId) {
+      tabGets.push(tabId);
+      return { id: 7, windowId: 42, active: true, url: 'https://example.test/form', title: 'Universal form' };
+    },
+  };
+  const integration = await createExtensionUniversalRuntime({
+    chromeApi: h.chromeApi,
+    registry: h.registry,
+    bridge: h.bridge,
+    sendToContentScript: h.sendToContentScript,
+    store: createMemoryKeyValueStore(),
+    localApprovalStore: h.localApprovalStore,
+  });
+  await integration.ingestPageSnapshot(
+    { sessionId: h.session.sessionId, snapshot: rawSnapshot() },
+    { tab: { id: 7 }, frameId: 0 },
+  );
+
+  const response = await integration.handleUiMessage(UI_MESSAGE_TYPES.UI_GET_STATE, {
+    targetTabId: 7,
+    targetWindowId: 42,
+  });
+
+  assert.equal(response.ok, true);
+  assert.equal(response.state.tab.id, 7);
+  assert.deepEqual(tabGets, [7]);
+  assert.equal(activeQueries, 0, 'the global active popup must not replace the side-panel bound page tab');
+
+  await assert.rejects(
+    () => integration.handleUiMessage(UI_MESSAGE_TYPES.UI_GET_STATE, {
+      targetTabId: 7,
+      targetWindowId: 99,
+    }),
+    (error) => error?.code === 'ACTIVE_TAB_DRIFT',
+  );
+  assert.deepEqual(tabGets, [7, 7]);
+  assert.equal(activeQueries, 0);
+});
+
 test('wires snapshot discovery, WebMCP execution, approval, exact refresh, and live mutation', async () => {
   const h = harness();
   const clock = new Date('2026-08-29T12:00:00.000Z');
@@ -176,6 +224,122 @@ test('wires snapshot discovery, WebMCP execution, approval, exact refresh, and l
   assert.equal(executed.result.outcome, 'postcondition-unverified');
   assert.equal(h.pageExecutions.length, 1);
   assert.equal(h.pageExecutions[0].approved, true);
+});
+
+test('executes a verified reversible stage and leaves no pending mission-equivalent action', async () => {
+  const h = harness();
+  const stageRaw = rawSnapshot();
+  delete stageRaw.pageFingerprint;
+  const page = createPageSnapshot(stageRaw);
+  const generic = generateWebMcpToolDescriptors(page, { includePageRead: true })
+    .find((tool) => tool.classification === 'mutate');
+  const stageDescriptor = {
+    ...generic,
+    name: 'fixture_stage_preview',
+    title: 'Prepare local preview',
+    description: 'Stage the exact page draft locally for review without changing external state.',
+    classification: 'stage',
+    kind: 'stage',
+    risk: 'reversible',
+    requiresApproval: false,
+    annotations: { ...generic.annotations, readOnlyHint: false },
+    effect: {
+      classification: 'stage',
+      summary: 'Prepare the exact page draft locally for review without changing external state.',
+      externalStateChange: false,
+      requiresApproval: false,
+    },
+  };
+  const siteAdapters = createSiteAdapterRegistry({
+    adapters: [{
+      id: 'fixture-stage',
+      version: '1',
+      matches: () => true,
+      generateTools: () => [stageDescriptor],
+    }],
+  });
+  const integration = await createExtensionUniversalRuntime({
+    chromeApi: h.chromeApi,
+    registry: h.registry,
+    bridge: h.bridge,
+    sendToContentScript: h.sendToContentScript,
+    siteAdapterRegistry: siteAdapters,
+    store: createMemoryKeyValueStore(),
+    localApprovalStore: h.localApprovalStore,
+    now: () => new Date('2026-08-29T12:00:00.000Z'),
+  });
+  const state = await integration.ingestRaw({
+    tabId: 7,
+    frameId: 0,
+    sessionId: h.session.sessionId,
+    rawSnapshot: rawSnapshot(),
+  });
+  const stage = state.tools.find((tool) => tool.name === stageDescriptor.name);
+  assert.ok(stage);
+  const property = Object.keys(stage.inputSchema.properties)[0];
+  const prepared = await integration.handleUiMessage(UI_MESSAGE_TYPES.UI_PREPARE_ACTION, {
+    actionId: stage.name,
+    arguments: { [property]: 'Local draft' },
+  });
+  assert.equal(prepared.ok, true);
+  assert.equal(prepared.result.status, 'staged');
+  assert.equal(prepared.result.receipt.operation, 'dispatch');
+  assert.deepEqual(integration.runtime.state(7, 0).pendingActions, []);
+  assert.equal(integration.runtime.state(7, 0).receipts.at(-1).status, 'staged');
+});
+
+test('runs only the active exact read tool through the side-panel and bounds its untrusted result', async () => {
+  const h = harness();
+  const integration = await createExtensionUniversalRuntime({
+    chromeApi: h.chromeApi,
+    registry: h.registry,
+    bridge: h.bridge,
+    sendToContentScript: h.sendToContentScript,
+    store: createMemoryKeyValueStore(),
+    localApprovalStore: h.localApprovalStore,
+  });
+  const snapshot = rawSnapshot();
+  snapshot.mainText = `Visible evidence ${'x'.repeat(180_000)}`;
+  const state = await integration.ingestPageSnapshot(
+    { sessionId: h.session.sessionId, snapshot },
+    { tab: { id: 7 }, frameId: 0 },
+  );
+  const read = state.tools.find((tool) => tool.classification === 'read' && tool.sourceType === 'page');
+  const mutation = state.tools.find((tool) => tool.classification === 'mutate');
+
+  const response = await integration.handleUiMessage(UI_MESSAGE_TYPES.UI_EXECUTE_READ, {
+    toolId: read.name,
+    arguments: {},
+  });
+  assert.equal(response.ok, true);
+  assert.equal(response.result.status, 'read-completed');
+  assert.equal(response.result.tool.id, read.name);
+  assert.equal(response.result.tool.sourceType, 'page');
+  assert.equal(response.result.binding.tabId, 7);
+  assert.equal(response.result.binding.frameId, 0);
+  assert.equal(response.result.binding.sessionId, h.session.sessionId);
+  assert.equal(response.result.binding.origin, 'https://example.test');
+  assert.equal(response.result.binding.pageFingerprint, state.pageFingerprint);
+  assert.equal(response.result.data.type, 'page');
+  assert.equal(response.result.data.untrustedContent, true);
+  assert.equal(response.result.untrustedContent, true);
+  assert.equal(response.result.truncated, true);
+  assert.ok(new TextEncoder().encode(JSON.stringify(response.result)).byteLength <= 96 * 1024);
+
+  await assert.rejects(
+    () => integration.handleUiMessage(UI_MESSAGE_TYPES.UI_EXECUTE_READ, {
+      toolId: mutation.name,
+      arguments: {},
+    }),
+    (error) => error?.code === 'TOOL_READ_REQUIRED',
+  );
+  await assert.rejects(
+    () => integration.handleUiMessage(UI_MESSAGE_TYPES.UI_EXECUTE_READ, {
+      toolId: 'not-an-active-tool',
+      arguments: {},
+    }),
+    (error) => error?.code === 'TOOL_NOT_FOUND',
+  );
 });
 
 test('falls back to a local DOM handle for oversized media URLs', async () => {
@@ -769,6 +933,20 @@ test('explicit multimodal reanalysis captures rendered audio, loaded captions, a
           captions: [{ kind: 'captions', language: 'en', label: 'English', text: 'A real rendered demonstration.' }],
         },
       };
+      if (message.mode === 'frames') return {
+        ok: true,
+        ...responseBinding,
+        result: {
+          ok: true,
+          code: 'CAPTURE_FRAMES_OK',
+          metadata: { elementRef: metadata.elementRef, sourceKind: metadata.sourceKind, captureKind: 'frames', frameByteLength: 6 },
+          captions: [{ kind: 'captions', language: 'en', label: 'English', text: 'A real rendered demonstration.' }],
+          frames: [
+            { index: 0, timeMs: 0, mimeType: 'image/png', width: 640, height: 360, byteLength: 3, frameBase64: 'AQID' },
+            { index: 1, timeMs: 500, mimeType: 'image/png', width: 640, height: 360, byteLength: 3, frameBase64: 'BAUG' },
+          ],
+        },
+      };
       return {
         ok: true,
         ...responseBinding,
@@ -822,8 +1000,10 @@ test('explicit multimodal reanalysis captures rendered audio, loaded captions, a
 
   assert.equal(response.ok, true);
   assert.equal(screenshots, 3);
-  assert.deepEqual(renderedCalls.map((message) => message.mode), ['captions', 'audio']);
-  assert.equal(capture.assets.length, 4);
+  assert.deepEqual(renderedCalls.map((message) => message.mode), ['frames', 'audio']);
+  assert.equal(capture.assets.length, 6);
+  assert.equal(capture.videoEvidence.length, 1);
+  assert.equal(capture.videoEvidence[0].keyframes.length, 2);
   assert.equal(capture.assets.filter((asset) => asset.kind === 'audio').length, 1);
   assert.equal(capture.captions[0].text, 'A real rendered demonstration.');
   assert.ok(capture.warnings.includes('IFRAME_MEDIA_NOT_CAPTURED'));
@@ -832,6 +1012,82 @@ test('explicit multimodal reanalysis captures rendered audio, loaded captions, a
 
   await integration.closeSession(h.session, 'test-complete');
   assert.equal(handleStore.stats().handles, 0);
+});
+
+test('releases rendered video frame handles when the session drifts after a partial frame commit', async () => {
+  const videoSnapshot = rawSnapshot();
+  videoSnapshot.pageFingerprint = 'e'.repeat(64);
+  videoSnapshot.mediaInventory = [{ ref: 'id:drifting-video', kind: 'video', src: 'https://example.test/drifting.mp4' }];
+  videoSnapshot.elementRefs.push({ ref: 'id:drifting-video', tagName: 'video', role: null, name: '' });
+  const h = harness({
+    onSend: async ({ message, defaultSendToContentScript }) => {
+      if (message.type === MESSAGE_TYPES.PAGE_EXTRACT_SNAPSHOT) return { ok: true, snapshot: videoSnapshot };
+      if (message.type !== MESSAGE_TYPES.PAGE_CAPTURE_RENDERED_MEDIA) return defaultSendToContentScript(7, message);
+      assert.equal(message.mode, 'frames');
+      return {
+        ok: true,
+        provenance: PROVENANCE,
+        requestId: message.requestId,
+        tabId: message.tabId,
+        frameId: message.frameId,
+        sessionId: message.sessionId,
+        nonce: message.nonce,
+        documentId: message.documentId,
+        pageInstanceId: message.pageInstanceId,
+        pageFingerprint: message.pageFingerprint,
+        extractorPageFingerprint: message.extractorPageFingerprint,
+        result: {
+          ok: true,
+          code: 'CAPTURE_FRAMES_OK',
+          metadata: { elementRef: 'id:drifting-video', sourceKind: 'video', captureKind: 'frames', frameByteLength: 3 },
+          captions: [],
+          frames: [{ index: 0, timeMs: 0, mimeType: 'image/png', width: 320, height: 180, byteLength: 3, frameBase64: 'AQID' }],
+        },
+      };
+    },
+  });
+  const backingStore = createMediaHandleStore();
+  const released = [];
+  let puts = 0;
+  const handleStore = {
+    get: (handle) => backingStore.get(handle),
+    put(bytes, metadata) {
+      const stored = backingStore.put(bytes, metadata);
+      puts += 1;
+      if (puts === 1) h.setSession({
+        ...h.session,
+        sessionId: 'tab-7-drifted-video-session',
+        nonce: 'abcdef12-3456-4789-8abc-def123456789',
+      });
+      return stored;
+    },
+    release(handle) {
+      released.push(handle);
+      return backingStore.release(handle);
+    },
+  };
+  const integration = await createExtensionUniversalRuntime({
+    chromeApi: h.chromeApi,
+    registry: h.registry,
+    bridge: h.bridge,
+    sendToContentScript: h.sendToContentScript,
+    store: createMemoryKeyValueStore(),
+    localApprovalStore: h.localApprovalStore,
+    browserCapture: {
+      handleStore,
+      async captureVisibleScreenshot() { return null; },
+      async readCaptionTracks() { return []; },
+    },
+  });
+  await integration.ingestRaw({ tabId: 7, frameId: 0, sessionId: h.session.sessionId, rawSnapshot: videoSnapshot });
+
+  await assert.rejects(
+    integration.handleUiMessage(UI_MESSAGE_TYPES.UI_REANALYZE_MULTIMODAL),
+    (error) => error.code === 'SESSION_DRIFT' || error.code === 'CAPTURE_SESSION_DRIFT',
+  );
+  assert.equal(puts, 1);
+  assert.equal(released.length, 1);
+  assert.equal(backingStore.stats().handles, 0);
 });
 
 test('times out and cancels hung rendered-media requests without retaining evidence', async () => {

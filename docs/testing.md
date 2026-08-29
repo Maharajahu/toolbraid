@@ -13,6 +13,14 @@ This command runs:
 3. static-server dependency and security-header smoke checks;
 4. the generated standalone verification-harness build.
 
+The complete Universal extension gate is separate so it cannot be mistaken for the smaller recovery-harness validation:
+
+```bash
+npm run validate:universal
+```
+
+It runs all Universal and v2 tests, rebuilds the MV3 extension, and checks repository integrity.
+
 ## Test coverage
 
 - native-style registration, explicit `exposedTo`, origin filtering, opaque tool execution, cancellation, and tool-change events;
@@ -40,6 +48,7 @@ npm run test:e2e
 Playwright drives the actual mission-control interface in desktop and mobile viewports. It verifies:
 
 - six origins, nine discovered tools, one quarantine, seven mappings, and nine graph nodes;
+- the functional Walkthrough, Live Workspace, Evidence, Approvals, and Audit views plus the modal Help drawer;
 - the primary health read fails and the fallback completes;
 - seven safe-stage results and finalized exact mutation arguments;
 - synthetic DOM approval is rejected;
@@ -51,6 +60,16 @@ Playwright drives the actual mission-control interface in desktop and mobile vie
 - no material console or page errors.
 
 The report is stored at `docs/e2e-validation.json`; current screenshots are in `docs/screenshots/`.
+
+## Universal MV3 E2E
+
+```bash
+npm run test:universal:e2e
+```
+
+This gate loads the built production extension and native `document.modelContext` surface in Chrome, then drives the authentic side panel through trusted browser input. It verifies mission objective create/attach, live inspection, explicit rebind after page-fingerprint drift, exact pending-action ownership, approval dispatch and pending cleanup, terminal complete/cancel release, safe reads, value and form mutations, redacted receipts, SPA invalidation, bounded rendered-video keyframes with optional audio and loaded captions, one exact user-authorized top-frame CAPTCHA checkbox attempt, and adversarial argument rejection. The complete side-panel state is captured at [toolbraid-universal-sidepanel.png](screenshots/toolbraid-universal-sidepanel.png).
+
+The fixture-origin and `debugger` grants exist only in the disposable E2E copy. The production manifest is checked before launch and retains neither permission.
 
 ## Native compliance gate
 

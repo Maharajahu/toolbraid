@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { createExtensionMissionRuntime } from '../../extension/mission-runtime.js';
+import { MISSION_UI_MESSAGE_TYPES } from '../../extension/mission-runtime.js';
+import { MISSION_PHASES } from '../../src/runtime/mission-coordinator.js';
 
 const BASE_TIME = new Date('2026-08-29T12:00:00.000Z');
 
@@ -636,4 +638,36 @@ test('exposes the exact live binding to the handoff facade without requiring a c
     pageFingerprint: binding.pageFingerprint,
   }), true);
   assert.equal(runtime.validateBinding({ ...binding, pageFingerprint: 'drifted' }), false);
+});
+
+test('preserves the mission objective and exposes fail-closed terminal UI transitions', async () => {
+  const harness = makeHarness();
+  const runtime = await harness.open();
+  const created = await runtime.handleUiMessage(MISSION_UI_MESSAGE_TYPES.CREATE, {
+    missionId: 'mission-terminal-ui',
+    objective: '  Review the release   token=secret-token  ',
+  });
+  assert.equal(created.ok, true);
+  assert.equal(created.result.objective, 'Review the release token=[redacted]');
+  const attached = await attach(runtime, harness, 'mission-terminal-ui', 'member-terminal-ui', 7);
+  assert.equal(attached.objective, created.result.objective);
+
+  const completed = await runtime.handleUiMessage(MISSION_UI_MESSAGE_TYPES.SET_PHASE, {
+    missionId: 'mission-terminal-ui',
+    phase: MISSION_PHASES.COMPLETED,
+    expectedRevision: attached.revision,
+  });
+  assert.equal(completed.ok, true);
+  assert.equal(completed.result.phase, MISSION_PHASES.COMPLETED);
+  assert.equal(completed.result.objective, created.result.objective);
+  await assert.rejects(
+    () => runtime.handleUiMessage(MISSION_UI_MESSAGE_TYPES.SET_PHASE, {
+      missionId: 'mission-terminal-ui',
+      phase: MISSION_PHASES.RUNNING,
+    }),
+    (error) => error?.code === 'MISSION_PHASE_NOT_ALLOWED',
+  );
+  const persisted = JSON.stringify(harness.storage.lastSet);
+  assert.equal(persisted.includes('secret-token'), false);
+  assert.equal(persisted.includes('token=[redacted]'), true);
 });

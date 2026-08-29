@@ -14,6 +14,8 @@ The judge deployment targets a disposable recovery lab: GitHub commit/incident d
 
 *The implemented product after a deterministic recovery mission. Open the image for the full-resolution evidence view.*
 
+The judge-facing interface has five functional views — Walkthrough, Live Workspace, Evidence, Approvals, and Audit — plus a persistent Help drawer. Each view projects the same live mission state rather than presenting decorative panels: provider substitutions, exact approval scope, receipts, and audit proof remain inspectable throughout the run.
+
 **Judge path:** [Judge Guide](docs/JUDGING.md) · [Start Here](START-HERE.md) · [Live mutation receipt](docs/live-mutation-validation.json) · [Architecture](docs/architecture.md) · [Threat Model](docs/threat-model.md) · [Testing](docs/testing.md)
 
 **Live demo:** [toolbraid-webmcp.vercel.app](https://toolbraid-webmcp.vercel.app)
@@ -30,22 +32,24 @@ ToolBraid is the orchestration and safety layer above those tools. It discovers 
 
 The Universal extension extends that control plane to ordinary websites that have not implemented WebMCP. It observes the current page, builds a bounded DOM/ARIA snapshot, and registers a transparent local WebMCP surface inside the browser. Every generated tool is labelled `generated-by-toolbraid`; it is never presented as a native capability supplied by the website.
 
-The generated surface includes a bounded read tool plus target-specific tools for the exact live links, controls, and forms that ToolBraid can identify unambiguously. Known GitHub, Vercel, and X page shapes can be recognized by versioned, fail-closed adapters. When their exact controls or forms are present, the built-in packs can expose GitHub repository star/unstar, issue or pull-request comment, and close/reopen actions; Vercel deployment redeploy/cancel; and X like/repost actions plus reply staging. These are browser UI dispatches, not direct provider API calls. GitHub and Vercel have service-worker postcondition verifiers; X and generic interactions remain dispatch-unverified. All generic interactions require an exact approval in extension-owned UI before the isolated runtime can change the page. Approval is bound to the tab, session, origin, page and target fingerprints, normalized arguments, predicted effect, expiry, and a one-time nonce.
+The generated surface includes a bounded read tool plus target-specific tools for the exact live links, controls, and forms that ToolBraid can identify unambiguously. Known GitHub, Vercel, and X page shapes can be recognized by versioned, fail-closed adapters. When their exact controls or forms are present, the built-in packs can expose GitHub repository star/unstar, issue or pull-request comment, and close/reopen actions; Vercel deployment redeploy/cancel; and X like/repost actions plus reply staging. These are browser UI dispatches, not direct provider API calls. GitHub and Vercel mutations and X like/repost actions carry browser-observable postcondition contracts whose verifiers are wired in the service worker; generic interactions remain dispatch-unverified, and X reply remains stage-only. All generic interactions require an exact approval in extension-owned UI before the isolated runtime can change the page. Approval is bound to the tab, session, origin, page and target fingerprints, normalized arguments, predicted effect, expiry, and a one-time nonce.
 
-Optional screenshot-vision and rendered-audio analysis can enrich page evidence through an OpenAI-compatible endpoint configured by the user. Activation captures a bounded visible-tab screenshot and eligible same-origin caption tracks; explicit reanalysis can capture bounded rendered audio. The shipped provider leaves video at metadata/caption-only and does not decode or upload video bytes. The endpoint receives no authority: media stays behind short-lived extension-owned handles, credentials never enter the page context, and model output cannot approve or execute an action. Without a configured provider, Universal remains fully usable with deterministic DOM/ARIA and media metadata.
+A verified adapter may separately expose a narrowly scoped reversible `stage` operation for local review. Stage may set an exact live control but cannot click, submit, navigate, or claim an external result; any page-side reaction remains explicitly unverified.
 
-A generic receipt proves that the exact browser action was dispatched. It does not claim that a remote service completed the operation. Only a verified adapter with an observed postcondition may make that stronger claim. The MV3 service worker wires the built-in GitHub and Vercel verifiers; generic and X actions remain postcondition-unverified.
+Optional screenshot, rendered-video, and rendered-audio analysis can enrich page evidence through an OpenAI-compatible endpoint configured by the user. Activation captures a bounded visible-tab screenshot and eligible same-origin caption tracks; explicit reanalysis can capture bounded keyframe images from a visibly rendered top-frame video, optional rendered audio, and loaded captions. Raw video streams and URLs are not sent to the provider. The endpoint receives no authority: captured bytes stay behind short-lived extension-owned handles, credentials never enter the page context, and model output cannot approve or execute an action. Without a configured provider, Universal remains fully usable with deterministic DOM/ARIA and media metadata.
+
+A generic receipt proves that the exact browser action was dispatched. It does not claim that a remote service completed the operation. Only a verified adapter with an observed postcondition may make that stronger claim. The MV3 service worker wires the built-in GitHub, Vercel, and X like/repost verifiers; generic actions remain postcondition-unverified.
 
 ### Verified X surface
 
 On an exact `x.com/.../status/...` or `twitter.com/.../status/...` page, the fail-closed X adapter can expose:
 
 - `read_x_post` for the visible post's author, handle, timestamp, text, URL, and media metadata;
-- `like_x_post` for the exact unliked post, gated by a fresh human approval;
+- `like_x_post` for the exact unliked post, gated by a fresh human approval and verified only after the same post exposes its unlike state;
 - `prepare_x_reply` only while a matching reply textbox/editor is present; it stages text for review and does not invoke publish (page-side reactions remain unverified);
-- `repost_x_post` only while X exposes a matching positive repost confirmation item, also gated by approval.
+- `repost_x_post` only while X exposes a matching positive repost confirmation item, also gated by approval and verified only after the same post exposes its undo-repost state.
 
-The adapter attempts exact article scoping for post reads and likes. Reply and repost controls remain heuristic live-control matches; known opposite and already-completed controls are suppressed. It does not currently claim a verified new-post publishing tool.
+The adapter attempts exact article scoping for post reads and likes. Reply and repost controls remain heuristic live-control matches; known opposite and already-completed controls are suppressed. A like or repost receipt is upgraded to verified success only when the exact status-permalink snapshot confirms the declared state transition. It does not currently claim a new-post publishing tool, and reply remains a reversible local stage for human review.
 
 The MV3 content runtime keeps a validated lifecycle Port and heartbeat with the service worker. If the side panel closes or the worker disconnects, it re-establishes the page binding and submits a fresh snapshot before the next call. An interrupted mutation is never replayed automatically.
 
@@ -53,9 +57,11 @@ The MV3 content runtime keeps a validated lifecycle Port and heartbeat with the 
 
 The shipped MV3 runtime selects three statically trusted, lazily loaded capability packs — `site.x`, `site.github`, and `site.vercel` — by exact HTTPS host/path and objective hints. Page snapshots cannot add or replace loaders; invalid, duplicate, overflow, and policy-failed descriptors are quarantined. The core combined registry allows up to 128 tools, while the shipped MV3 runtime limits active and registered tools to 32.
 
-Universal also supports bounded multi-page missions with up to 16 exact tab/frame members. Page drift invalidates pending actions and a worker restart requires rebind; pending actions are not restored. The handoff broker supports login, 2FA, and CAPTCHA steps with a five-minute default and fifteen-minute maximum TTL, exact-origin side-panel-created surfaces, and separate trusted open/complete proof. Credentials are not stored.
+Universal also supports bounded multi-page missions with up to 16 exact tab/frame members and one sanitized objective carried across those pages. An approval-required action is linked to a mission only when one active member exactly owns its tab, frame, session, origin, and page fingerprint; execute, deny, and reversible stage paths clear that pending link. Page drift requires an explicit trusted rebind, terminal complete/cancel transitions release the page for a new mission, and pending actions are never restored after a worker restart. The authentic side panel exposes live inspection, mission lifecycle, human handoffs, current-context approvals versus history, multimodal evidence, receipts, and the verified audit chain. [Open the full side-panel E2E capture.](docs/screenshots/toolbraid-universal-sidepanel.png)
 
-Activation injects only top-level frame 0 and does not traverse child iframe documents. Rendered capture is audio-track/caption-only and rejects encrypted media (`mediaKeys`) with `DRM_MEDIA_UNSUPPORTED`.
+The handoff broker supports login, 2FA, and CAPTCHA steps with a five-minute default and fifteen-minute maximum TTL, exact-origin side-panel-created surfaces, and separate trusted open/complete proof. Credentials are not stored. For CAPTCHA, ToolBraid can make exactly one user-authorized attempt only when one unchecked, visible, top-frame checkbox has explicit CAPTCHA markers. It does not traverse CAPTCHA iframes or solve challenges; missing or ambiguous markers, iframe widgets, challenge flows, and site rejection remain with the user in the active handoff surface.
+
+Activation injects only top-level frame 0 and does not traverse child iframe documents. Rendered capture supports bounded visible video keyframes, optional rendered audio, and loaded captions. It fails closed for encrypted media (`mediaKeys`), invisible targets, invalid bounds, binding drift, page drift, or target drift.
 
 Build the load-unpacked extension with:
 
@@ -72,7 +78,7 @@ npm run validate:universal
 npm run test:universal:e2e
 ```
 
-The gate launches Chromium with the native `document.modelContext` surface, loads a temporary copy of the production bundle, and proves real read, exact approval, value change, form POST, redacted receipt, audit persistence, SPA invalidation, rendered-audio/caption capture, and adversarial rejection paths. Its fixture-origin and debugger grants exist only in that disposable test copy; the production manifest is asserted to contain neither permanent host access nor debugger authority. A separate `--live-read-only` mode has passed real GitHub repository and issue reads without external dispatch; no live-site mutation is claimed.
+The gate launches Chromium with the native `document.modelContext` surface, loads a temporary copy of the production bundle, and drives the authentic side panel with trusted browser input. It exercises objective creation, exact member attach and live inspection, explicit rebind after fingerprint drift, pending-action ownership and resolution, complete/cancel terminal release, real read, exact approval, value change, form POST, redacted receipt, audit persistence, SPA invalidation, bounded rendered-video keyframes, optional rendered audio, loaded captions, one narrowly scoped CAPTCHA checkbox click, and adversarial rejection paths. Its fixture-origin and debugger grants exist only in that disposable test copy; the production manifest is asserted to contain neither permanent host access nor debugger authority. A separate `--live-read-only` mode has passed real GitHub repository and issue reads without external dispatch; the fixture gate does not claim arbitrary authenticated-SaaS completion or a live-site mutation.
 
 Universal E2E requires a Node Playwright module plus Chrome/Chromium. A non-standard installation can be supplied through `E2E_PLAYWRIGHT_MODULE` and `E2E_CHROME_PATH`; Python is needed only by the existing recovery-browser E2E commands.
 
@@ -177,7 +183,7 @@ Latest checked E2E outcome:
 6 origins · 9 tools · 1 quarantined · 9 plan nodes
 recovery release-1841 · notice notice-r9 · 54 audit entries
 Universal: real GitHub repository + issue reads passed (read-only)
-Universal: real Chrome rendered audio + captions passed (no mutation)
+Universal fixture gate: real Chrome rendered video keyframes + audio + captions + bounded CAPTCHA click
 ```
 
 ## Repository map

@@ -53,6 +53,10 @@
   const MAX_RENDERED_CAPTURE_TRACKS = 8;
   const MAX_RENDERED_CAPTURE_CUES = 256;
   const MAX_RENDERED_CAPTION_BYTES = 256 * 1024;
+  const MAX_RENDERED_VIDEO_FRAMES = 3;
+  const MAX_RENDERED_VIDEO_FRAME_BYTES = 2 * 1024 * 1024;
+  const MAX_RENDERED_VIDEO_TOTAL_BYTES = 6 * 1024 * 1024;
+  const MAX_RENDERED_VIDEO_FRAME_INTERVAL_MS = 30_000;
   const PAGE_FINGERPRINT = /^[a-f0-9]{64}$/i;
 
   function sameBinding(left, right) {
@@ -144,6 +148,9 @@
 
   function clearCaptureBytes(result) {
     try { result?.bytes?.fill?.(0); } catch { /* best-effort zeroization */ }
+    for (const frame of result?.frames ?? []) {
+      try { frame?.bytes?.fill?.(0); } catch { /* best-effort zeroization */ }
+    }
   }
 
   function abortRenderedCaptures() {
@@ -171,12 +178,50 @@
 
   function captureTransport(result, mode) {
     if (!result || typeof result !== 'object' || Array.isArray(result)) return null;
-    const { bytes, ...safe } = result;
+    const { bytes, frames, metadata, ...safe } = result;
+    if (metadata && typeof metadata === 'object' && !Array.isArray(metadata)) {
+      const safeMetadata = { ...metadata };
+      for (const key of Object.keys(safeMetadata)) {
+        if (/url/i.test(key) || (mode === 'frames' && key === 'pageOrigin')) delete safeMetadata[key];
+      }
+      safe.metadata = safeMetadata;
+    }
     if (mode !== 'audio' || result.ok !== true) return safe;
     const audioBase64 = base64Bytes(bytes);
     try { bytes?.fill?.(0); } catch { /* best-effort zeroization after encoding */ }
     if (!audioBase64) return null;
     return { ...safe, audioBase64 };
+  }
+
+  function captureFrameTransport(result) {
+    if (!Array.isArray(result?.frames) || result.frames.length > MAX_RENDERED_VIDEO_FRAMES) return null;
+    const transported = [];
+    let totalBytes = 0;
+    try {
+      for (const frame of result.frames) {
+        if (!frame || typeof frame !== 'object' || !(frame.bytes instanceof Uint8Array)
+          || !boundedInteger(frame.byteLength, 1, MAX_RENDERED_VIDEO_FRAME_BYTES)
+          || frame.byteLength !== frame.bytes.byteLength) return null;
+        totalBytes += frame.byteLength;
+        if (totalBytes > MAX_RENDERED_VIDEO_TOTAL_BYTES) return null;
+        const frameBase64 = base64Bytes(frame.bytes);
+        if (!frameBase64) return null;
+        transported.push({
+          index: boundedInteger(frame.index, 0, MAX_RENDERED_VIDEO_FRAMES - 1) ? frame.index : transported.length,
+          timeMs: Number.isFinite(frame.timeMs) && frame.timeMs >= 0 ? Math.min(Math.round(frame.timeMs), 86_400_000) : 0,
+          mimeType: typeof frame.mimeType === 'string' ? frame.mimeType.slice(0, 128) : 'image/png',
+          width: boundedInteger(frame.width, 1, 4096) ? frame.width : null,
+          height: boundedInteger(frame.height, 1, 4096) ? frame.height : null,
+          byteLength: frame.byteLength,
+          frameBase64,
+        });
+      }
+      return { frames: transported, totalBytes };
+    } finally {
+      for (const frame of result.frames) {
+        try { frame?.bytes?.fill?.(0); } catch { /* best-effort zeroization */ }
+      }
+    }
   }
 
   function handleRenderedMediaCapture(message, sendResponse) {
@@ -185,24 +230,36 @@
       return false;
     }
     const api = global.ToolBraidRenderedMediaCapture;
-    if (!api || typeof api.captureRenderedMedia !== 'function' || typeof api.readLoadedCaptions !== 'function') {
+    if (!api
+      || (message.mode === 'audio' && typeof api.captureRenderedMedia !== 'function')
+      || (message.mode === 'captions' && typeof api.readLoadedCaptions !== 'function')
+      || (message.mode === 'frames' && typeof api.captureRenderedFrames !== 'function')) {
       sendResponse?.(captureError('CAPTURE_UNSUPPORTED', 'The isolated rendered-media capture runtime is unavailable.'));
       return false;
     }
     const mode = message.mode;
     const requestId = message.requestId;
-    if (!['audio', 'captions'].includes(mode)
+    if (!['audio', 'captions', 'frames'].includes(mode)
       || typeof requestId !== 'string' || requestId.length < 8 || requestId.length > 256
       || state.renderedCaptureControllers.has(requestId)
       || message.provenance !== protocol.PROVENANCE
       || message.pageInstanceId !== state.pageInstanceId
+      || typeof message.elementRef !== 'string' || !message.elementRef || message.elementRef.length > 256
+      || /[\u0000-\u001f\u007f]/.test(message.elementRef)
+      || (mode === 'frames' && message.kind !== 'video')
       || !PAGE_FINGERPRINT.test(message.pageFingerprint ?? '')
       || !PAGE_FINGERPRINT.test(message.extractorPageFingerprint ?? '')
       || !boundedInteger(message.durationMs, 1, MAX_RENDERED_CAPTURE_DURATION_MS)
       || !boundedInteger(message.maxBytes, 1, MAX_RENDERED_CAPTURE_BYTES)
       || !boundedInteger(message.maxTracks, 1, MAX_RENDERED_CAPTURE_TRACKS)
       || !boundedInteger(message.maxCues, 1, MAX_RENDERED_CAPTURE_CUES)
-      || !boundedInteger(message.maxCaptionBytes, 1, MAX_RENDERED_CAPTION_BYTES)) {
+      || !boundedInteger(message.maxCaptionBytes, 1, MAX_RENDERED_CAPTION_BYTES)
+      || (mode === 'frames' && (!boundedInteger(message.maxFrames, 1, MAX_RENDERED_VIDEO_FRAMES)
+        || !boundedInteger(message.maxFrameBytes, 1, MAX_RENDERED_VIDEO_FRAME_BYTES)
+        || !boundedInteger(message.maxTotalFrameBytes, 1, MAX_RENDERED_VIDEO_TOTAL_BYTES)
+        || !boundedInteger(message.frameIntervalMs, 1, MAX_RENDERED_VIDEO_FRAME_INTERVAL_MS)
+        || typeof message.frameMimeType !== 'string'
+        || !/^image\/[a-z0-9!#$&^_.+-]+$/i.test(message.frameMimeType)))) {
       sendResponse?.(captureError('CAPTURE_REQUEST_INVALID', 'The rendered media capture request is invalid.'));
       return false;
     }
@@ -230,11 +287,20 @@
       maxTracks: message.maxTracks,
       maxCues: message.maxCues,
       maxCaptionBytes: message.maxCaptionBytes,
+      maxFrames: message.maxFrames,
+      maxFrameBytes: message.maxFrameBytes,
+      maxTotalFrameBytes: message.maxTotalFrameBytes,
+      frameIntervalMs: message.frameIntervalMs,
+      frameMimeType: message.frameMimeType,
+      pageFingerprint: message.pageFingerprint,
+      extractorPageFingerprint: message.extractorPageFingerprint,
       signal: controller.signal,
     };
     const operation = mode === 'audio'
       ? api.captureRenderedMedia(request)
-      : api.readLoadedCaptions(request);
+      : mode === 'frames'
+        ? api.captureRenderedFrames(request)
+        : api.readLoadedCaptions(request);
     Promise.resolve(operation).then((result) => {
       if (state.renderedCaptureControllers.get(requestId) !== controller || !boundExtensionMessage(message)) {
         clearCaptureBytes(result);
@@ -255,7 +321,16 @@
         sendResponse?.(captureError('CAPTURE_PAGE_DRIFT', 'The page or media target changed during rendered media capture.'));
         return;
       }
-      const transport = captureTransport(result, mode);
+      let transport = captureTransport(result, mode);
+      if (mode === 'frames' && result?.ok === true) {
+        const frameTransport = captureFrameTransport(result);
+        if (!frameTransport) {
+          clearCaptureBytes(result);
+          sendResponse?.(captureError('CAPTURE_ENCODING_FAILED', 'Rendered video frames could not be encoded safely.'));
+          return;
+        }
+        transport = { ...transport, ...frameTransport };
+      }
       if (!transport) {
         clearCaptureBytes(result);
         sendResponse?.(captureError('CAPTURE_ENCODING_FAILED', 'Rendered media bytes could not be encoded safely.'));

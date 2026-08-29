@@ -1,5 +1,6 @@
 import {
   createMissionCoordinator,
+  MISSION_PHASES,
   rehydrateMissionCoordinator,
 } from '../src/runtime/mission-coordinator.js';
 
@@ -13,6 +14,7 @@ export const MISSION_UI_MESSAGE_TYPES = Object.freeze({
   SELECT: 'UI_MISSION_SELECT',
   DETACH: 'UI_MISSION_DETACH',
   ROUTE: 'UI_MISSION_ROUTE',
+  SET_PHASE: 'UI_MISSION_SET_PHASE',
 });
 
 const MISSION_UI_MESSAGE_SET = new Set(Object.values(MISSION_UI_MESSAGE_TYPES));
@@ -476,9 +478,50 @@ export async function createExtensionMissionRuntime({
     }
   }
 
+  function findOwnerByBinding(input = {}) {
+    if (!isPlainObject(input)) return null;
+    let binding;
+    try {
+      binding = {
+        tabId: validIndex(input.tabId, 'tabId'),
+        frameId: validIndex(input.frameId ?? 0, 'frameId'),
+        sessionId: validId(input.sessionId, 'sessionId'),
+        origin: canonicalOrigin(input.origin, 'origin'),
+        pageFingerprint: validId(input.pageFingerprint, 'pageFingerprint'),
+      };
+      if (input.documentId !== undefined) binding.documentId = validId(input.documentId, 'documentId', { optional: true });
+      if (input.pageInstanceId !== undefined) binding.pageInstanceId = validId(input.pageInstanceId, 'pageInstanceId', { optional: true });
+    } catch {
+      return null;
+    }
+    const candidates = [];
+    for (const mission of coordinator.list()) {
+      if ([MISSION_PHASES.COMPLETED, MISSION_PHASES.FAILED, MISSION_PHASES.CANCELLED].includes(mission.phase)) continue;
+      for (const member of mission.members) {
+        if (member.status !== 'attached' || member.rebindRequired) continue;
+        if (member.tabId !== binding.tabId
+          || member.frameId !== binding.frameId
+          || member.sessionId !== binding.sessionId
+          || member.origin !== binding.origin
+          || member.pageFingerprint !== binding.pageFingerprint) continue;
+        if (binding.documentId !== undefined && member.documentId !== binding.documentId) continue;
+        if (binding.pageInstanceId !== undefined && member.pageInstanceId !== binding.pageInstanceId) continue;
+        candidates.push({
+          missionId: mission.missionId,
+          memberId: member.memberId,
+          bindingDigest: member.bindingDigest,
+        });
+      }
+    }
+    if (candidates.length > 1) {
+      throw missionError('MISSION_OWNER_AMBIGUOUS', 'The action matches more than one active mission owner.');
+    }
+    return candidates[0] ? clone(candidates[0]) : null;
+  }
+
   const runtime = {
     createMission(input = {}) {
-      return mutate((active) => active.createMission(operationInput(input, ['missionId'])));
+      return mutate((active) => active.createMission(operationInput(input, ['missionId', 'objective'])));
     },
 
     attachMember(input = {}) {
@@ -548,6 +591,18 @@ export async function createExtensionMissionRuntime({
       });
     },
 
+    resolvePendingAction(input = {}) {
+      return mutate((active) => {
+        if (!isPlainObject(input)) throw missionError('INPUT_INVALID', 'Pending action resolution input must be a plain object.');
+        const missionId = validId(input.missionId, 'missionId');
+        const memberId = inputMemberId(input);
+        const { member } = memberFor(missionId, memberId);
+        const value = operationInput(input, ['missionId', 'memberId', 'actionId']);
+        if (member.status === 'attached') value.bindingDigest = member.bindingDigest;
+        return active.resolvePendingAction(value);
+      });
+    },
+
     invalidateMember(input = {}) {
       return mutate((active) => {
         if (!isPlainObject(input)) throw missionError('INPUT_INVALID', 'Mission invalidation input must be a plain object.');
@@ -568,6 +623,8 @@ export async function createExtensionMissionRuntime({
       return mutate((active) => active.setPhase(operationInput(input, ['missionId', 'phase', 'expectedRevision'])));
     },
 
+    findOwnerByBinding,
+
     target,
     read,
 
@@ -579,6 +636,13 @@ export async function createExtensionMissionRuntime({
         return { ok: true, state: { missions: runtime.list() } };
       }
       if (type === MISSION_UI_MESSAGE_TYPES.CREATE) return { ok: true, result: await runtime.createMission(payload) };
+      if (type === MISSION_UI_MESSAGE_TYPES.SET_PHASE) {
+        if (!isPlainObject(payload)
+          || ![MISSION_PHASES.COMPLETED, MISSION_PHASES.CANCELLED].includes(payload.phase)) {
+          throw missionError('MISSION_PHASE_NOT_ALLOWED', 'The side-panel may only complete or cancel a mission.');
+        }
+        return { ok: true, result: await runtime.setPhase(payload) };
+      }
       if (type === MISSION_UI_MESSAGE_TYPES.ATTACH) return { ok: true, result: await runtime.attachMember(payload) };
       if (type === MISSION_UI_MESSAGE_TYPES.REBIND) return { ok: true, result: await runtime.rebindMember(payload) };
       if (type === MISSION_UI_MESSAGE_TYPES.SELECT) return { ok: true, result: await runtime.selectMember(payload) };

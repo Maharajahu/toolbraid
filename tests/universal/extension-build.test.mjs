@@ -23,6 +23,7 @@ test('builds a load-unpacked MV3 extension with runtime source dependencies', as
 
   const worker = await readFile(path.join(OUTPUT, 'service-worker.js'), 'utf8');
   assert.doesNotMatch(worker, /from ['"]\.\.\/src\//);
+  assert.match(worker, /createXPostAdapter\(\)/, 'production worker must register X postcondition verification');
   const universalRuntime = await readFile(path.join(OUTPUT, 'universal-runtime.js'), 'utf8');
   const multimodalProvider = await readFile(path.join(OUTPUT, 'multimodal-provider.js'), 'utf8');
   assert.doesNotMatch(universalRuntime, /from ['"]\.\.\/src\//);

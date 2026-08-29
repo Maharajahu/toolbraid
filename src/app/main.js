@@ -187,6 +187,7 @@ const FOCUSABLE_SELECTOR = [
   'input:not([disabled])',
   'select:not([disabled])',
   'textarea:not([disabled])',
+  'summary',
   '[tabindex]:not([tabindex="-1"])',
 ].join(',');
 
@@ -317,8 +318,11 @@ let graphZoom = 1;
 let mobileGraphCentered = false;
 let approvalDialogOpen = false;
 let commandMenuOpen = false;
+let helpDrawerOpen = false;
 let overlayReturnFocus = null;
 let editingObjective = false;
+let primaryView = 'topology';
+let pendingApprovalScope = null;
 let providerSwapRequested = false;
 let guidedTourActive = false;
 let auditTimes = new Map();
@@ -904,6 +908,21 @@ function formatAuditTime(date) {
   }).format(date);
 }
 
+function approvalExpiryText(nodeId) {
+  const expiresAt = controllerSnapshot.approvals?.[nodeId]?.expiresAt;
+  if (!expiresAt) return 'Not issued · timer starts on approval';
+  const date = new Date(expiresAt);
+  if (Number.isNaN(date.getTime())) return expiresAt;
+  return new Intl.DateTimeFormat('en-GB', {
+    day: '2-digit',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).format(date);
+}
+
 function auditPhaseId(entry) {
   if (AUDIT_EVENT_PHASE.has(entry.type)) return AUDIT_EVENT_PHASE.get(entry.type);
   if (entry.type !== EVENT.NODE_SELECTED) return 'system';
@@ -1093,48 +1112,145 @@ function renderGuidedControl() {
   control.setAttribute('aria-pressed', String(guidedTourActive));
 }
 
+function missionContextState() {
+  if (operationRunning) {
+    if (bridgeMode === 'discovery') return {
+      current: 'Verifying allowed provider origins',
+      next: 'Normalize their capabilities',
+      requires: 'Nothing while read-only discovery runs',
+      label: 'Connecting origins…',
+      action: 'start-mission',
+      disabled: true,
+      loading: true,
+    };
+    if (bridgeMode === 'safe') return {
+      current: state.phase === PHASE.PREPARING ? 'Preparing the recovery plan' : 'Reading evidence without mutation',
+      next: 'Present two exact changes for review',
+      requires: 'Nothing while safe reads settle',
+      label: state.phase === PHASE.PREPARING ? 'Preparing recovery…' : 'Reading evidence…',
+      action: 'start-mission',
+      disabled: true,
+      loading: true,
+    };
+    if (bridgeMode === 'approval') return {
+      current: `Binding the ${pendingApprovalScope === 'publish' ? 'customer update' : 'recovery'} approval`,
+      next: 'Keep each approval separate and single-use',
+      requires: 'Wait for the approval receipt',
+      label: 'Binding exact approval…',
+      action: 'review-approval',
+      disabled: true,
+      loading: true,
+    };
+    if (bridgeMode === 'execution') return {
+      current: 'Executing only the approved effects',
+      next: 'Verify receipts and postconditions',
+      requires: 'Nothing while execution settles',
+      label: 'Executing approved actions…',
+      action: 'review-approval',
+      disabled: true,
+      loading: true,
+    };
+  }
+
+  const mappingsReady = Object.keys(state.mappings).length === mappableNodeIds.length;
+  if (state.phase === PHASE.IDLE) return {
+    current: 'Objective ready',
+    next: 'Discover verified provider origins',
+    requires: 'Start the judge walkthrough',
+    label: 'Start judge walkthrough',
+    action: 'start-mission',
+    disabled: false,
+  };
+  if (state.phase === PHASE.MAPPING) return {
+    current: mappingsReady ? 'Capabilities normalized' : 'Capability mapping incomplete',
+    next: 'Run four read-only evidence checks',
+    requires: mappingsReady ? 'Start the safe evidence batch' : 'Reset and retry discovery',
+    label: mappingsReady ? 'Run 4 safe reads' : 'Reset walkthrough',
+    action: mappingsReady ? 'start-mission' : 'reset',
+    disabled: false,
+  };
+  if ([PHASE.READING, PHASE.PREPARING].includes(state.phase)) return {
+    current: 'Safe evidence stopped before review',
+    next: 'Return to a clean objective',
+    requires: 'Reset the walkthrough',
+    label: 'Reset walkthrough',
+    action: 'reset',
+    disabled: false,
+  };
+  if (state.phase === PHASE.REVIEW) return {
+    current: 'Evidence complete; both changes remain locked',
+    next: 'Review each exact effect separately',
+    requires: 'Approve or leave each change locked',
+    label: 'Review 2 exact changes',
+    action: 'review-approval',
+    disabled: false,
+  };
+  if (state.phase === PHASE.APPROVED) return {
+    current: 'Both exact effects approved',
+    next: 'Execute the bound pair once',
+    requires: 'Review once more, then execute',
+    label: 'Review approved actions',
+    action: 'review-approval',
+    disabled: false,
+  };
+  if (state.phase === PHASE.EXECUTING) return {
+    current: 'Execution stopped before a verified seal',
+    next: 'Return to a clean objective',
+    requires: 'Reset after reviewing the audit',
+    label: 'View audit trail',
+    action: 'open-audit',
+    disabled: false,
+  };
+  return {
+    current: 'Recovery complete; audit chain sealed',
+    next: 'Inspect receipts and proof',
+    requires: 'No further action required',
+    label: 'View sealed audit',
+    action: 'open-audit',
+    disabled: false,
+  };
+}
+
+function renderMissionContext() {
+  const context = missionContextState();
+  q('[data-context-current]').textContent = context.current;
+  q('[data-context-next]').textContent = context.next;
+  q('[data-context-requires]').textContent = context.requires;
+  const action = q('[data-context-action]');
+  action.dataset.action = context.action;
+  action.disabled = context.disabled;
+  action.toggleAttribute('aria-busy', Boolean(context.loading));
+  action.classList.toggle('is-loading', Boolean(context.loading));
+  q('[data-context-action-label]').textContent = context.label;
+}
+
 function renderMissionBrief() {
   const copy = q('[data-objective-copy]');
+  const input = q('[data-objective-input]');
   const complete = state.phase === PHASE.COMPLETE;
   const applyReceipt = controllerSnapshot.results['apply-recovery-option'];
   const publishReceipt = controllerSnapshot.results['publish-status-update'];
-  q('[data-mission-kicker]').textContent = complete ? 'Verified outcome' : 'Human objective';
+  q('[data-mission-kicker]').textContent = complete ? 'Verified outcome' : 'Recovery demo brief';
   q('[data-mission-title]').textContent = complete ? 'Checkout restored' : 'Restore checkout safely';
   q('[data-constraint="environment"]').textContent = complete ? formatMissionTime(missionCompletedIn ?? 0) : 'Production';
   q('[data-constraint="mode"]').textContent = complete
     ? `${new Set(runtimeTools.map(({ origin }) => origin)).size} origins consulted`
     : 'Read first';
   q('[data-constraint="authority"]').textContent = complete ? '2 explicit approvals' : 'Exact approval';
-  if (!editingObjective) {
-    copy.textContent = complete
-      ? `${applyReceipt?.activeReleaseId ?? 'Verified release'} restored; ${publishReceipt?.noticeRevision ?? 'customer update'} published; audit chain sealed.`
-      : objective;
-  }
-  const button = q('[data-action="start-mission"]', q('[data-mission-brief]'));
-  const label = q('[data-start-label]');
-  const icon = q('[data-start-icon]', button);
+  copy.hidden = editingObjective;
+  input.hidden = !editingObjective;
+  if (!editingObjective) copy.textContent = complete
+    ? `${applyReceipt?.activeReleaseId ?? 'Verified release'} restored; ${publishReceipt?.noticeRevision ?? 'customer update'} published; audit chain sealed.`
+    : objective;
   const editButton = q('[data-action="edit-objective"]');
-  const mappingsReady = Object.keys(state.mappings).length === mappableNodeIds.length;
-  if (state.phase === PHASE.IDLE) {
-    label.textContent = 'Start mission';
-    button.disabled = false;
-  } else if (state.phase === PHASE.MAPPING && mappingsReady) {
-    label.textContent = 'Run 4 safe reads';
-    button.disabled = false;
-  } else if (state.phase === PHASE.REVIEW || state.phase === PHASE.APPROVED) {
-    label.textContent = 'Review approvals';
-    button.disabled = false;
-  } else if (complete) {
-    label.textContent = 'Verified · audit sealed';
-    button.disabled = true;
-  } else {
-    label.textContent = PHASE_COPY[state.phase];
-    button.disabled = true;
-  }
-  icon.innerHTML = complete ? iconMarkup('check') : '→';
-  editButton.hidden = complete;
-  editButton.textContent = editingObjective ? 'Save' : 'Edit';
+  const saveButton = q('[data-action="save-objective"]');
+  const cancelButton = q('[data-action="cancel-objective"]');
+  editButton.hidden = complete || editingObjective;
+  saveButton.hidden = !editingObjective;
+  cancelButton.hidden = !editingObjective;
   editButton.disabled = state.phase !== PHASE.IDLE;
+  saveButton.disabled = state.phase !== PHASE.IDLE;
+  cancelButton.disabled = state.phase !== PHASE.IDLE;
 }
 
 function renderProviderLegend() {
@@ -1147,13 +1263,11 @@ function renderProviderLegend() {
   q('[data-quarantine-count]').textContent = String(quarantineCount);
   const swapButton = q('[data-action="swap-provider"]');
   const swapStatus = q('[data-swap-status]');
-  swapButton.hidden = providerSwapRequested;
+  swapButton.hidden = false;
   swapStatus.hidden = !providerSwapRequested;
   swapButton.dataset.ready = healthFailed ? 'true' : 'false';
-  swapButton.disabled = !healthFailed;
-  swapButton.innerHTML = healthFailed
-    ? `Automatic fallback ready <span>${iconMarkup('swap')}</span>`
-    : `Fallback armed <span>${iconMarkup('swap')}</span>`;
+  swapButton.disabled = false;
+  swapButton.innerHTML = `Explain automatic fallback <span>${iconMarkup('swap')}</span>`;
 }
 
 function renderConstellation() {
@@ -1363,9 +1477,60 @@ function renderApprovals() {
   const publishPlan = controllerSnapshot.plan?.nodes.find(({ id }) => id === 'publish-status-update');
   const applyReceipt = controllerSnapshot.results['apply-recovery-option'];
   const publishReceipt = controllerSnapshot.results['publish-status-update'];
-  const pendingApprovals = Number(!applyApproved) + Number(!publishApproved);
+  const deployment = controllerSnapshot.results['read-deployment-history']?.deployments?.[0];
+  const currentNotice = controllerSnapshot.results['read-status-notice'];
+  const preparedRecovery = controllerSnapshot.results['prepare-recovery-option'];
+  const approvalReviewReady = state.phase === PHASE.REVIEW;
+  const pendingApprovals = approvalReviewReady
+    ? Number(!applyApproved) + Number(!publishApproved)
+    : 0;
   q('[data-approval-count]').textContent = String(pendingApprovals);
   q('[data-approval-count]').hidden = pendingApprovals === 0;
+
+  const approvalView = q('[data-approvals-view]');
+  if (approvalView) {
+    const approvalViewReady = [PHASE.REVIEW, PHASE.APPROVED].includes(state.phase);
+    const approvalViewComplete = state.phase === PHASE.COMPLETE;
+    const status = approvalViewComplete
+      ? 'Sealed locally'
+      : state.phase === PHASE.APPROVED
+        ? 'Ready to execute'
+        : approvalViewReady
+          ? 'Review required'
+          : 'Waiting for evidence';
+    q('[data-approval-view-status]', approvalView).textContent = status;
+    q('[data-approval-view-count]', approvalView).textContent = approvalViewComplete
+      ? '2 of 2 executed · sealed'
+      : state.phase === PHASE.APPROVED
+        ? '2 of 2 approved'
+        : `${approvalReviewReady ? pendingApprovals : 0} of 2 actionable`;
+    q('[data-approval-view-phase]', approvalView).textContent = approvalViewComplete
+      ? 'Receipts verified'
+      : state.phase === PHASE.APPROVED
+        ? 'Exact scopes approved'
+        : approvalViewReady
+          ? 'Human checkpoint'
+          : 'Evidence first';
+    const applyTarget = applyPlan?.mapping ? `${applyPlan.mapping.origin} · ${applyPlan.mapping.name}` : 'Awaiting verified evidence';
+    const publishTarget = publishPlan?.mapping ? `${publishPlan.mapping.origin} · ${publishPlan.mapping.name}` : 'Awaiting verified evidence';
+    q('[data-approval-view-target="apply"]', approvalView).textContent = applyTarget;
+    q('[data-approval-view-target="publish"]', approvalView).textContent = publishTarget;
+    q('[data-approval-view-effect="apply"]', approvalView).textContent = applyPlan?.effectSummary ?? (applyReceipt ? `${applyReceipt.activeReleaseId} restored` : 'No action prepared');
+    q('[data-approval-view-effect="publish"]', approvalView).textContent = publishPlan?.effectSummary ?? (publishReceipt ? `${publishReceipt.noticeRevision} published` : 'No action prepared');
+    for (const scope of ['apply', 'publish']) {
+      const granted = state.approvals[scope].granted;
+      const receipt = scope === 'apply' ? applyReceipt : publishReceipt;
+      const card = q(`[data-approval-view-card="${scope}"]`, approvalView);
+      const stateLabel = q(`[data-approval-view-state="${scope}"]`, approvalView);
+      const action = q('[data-action="review-approval"]', card);
+      card.classList.toggle('approved', granted);
+      card.classList.toggle('sealed', Boolean(receipt));
+      stateLabel.textContent = receipt ? 'Executed' : granted ? 'Approved' : approvalViewReady ? 'Ready to review' : 'Locked';
+      action.disabled = !approvalViewReady && !approvalViewComplete;
+      action.innerHTML = approvalViewComplete ? 'View sealed audit <span aria-hidden="true">→</span>' : 'Open exact review <span aria-hidden="true">→</span>';
+    }
+    q('[data-approval-view-empty]', approvalView).hidden = approvalViewReady || approvalViewComplete;
+  }
 
   const applyCard = q('[data-node-target="apply-recovery"]');
   const publishCard = q('[data-node-target="publish-update"]');
@@ -1409,7 +1574,7 @@ function renderApprovals() {
   reviewButton.innerHTML = complete
     ? `View sealed audit <span>${iconMarkup('check')}</span>`
     : state.phase === PHASE.APPROVED
-      ? 'Execute approved <span>→</span>'
+      ? 'Inspect approved effects <span>→</span>'
       : 'Review exact effects <span>→</span>';
 
   q('.rail-button[data-view="audit"]').hidden = false;
@@ -1422,10 +1587,27 @@ function renderApprovals() {
   publishReview.classList.toggle('approved', publishApproved);
   q('[data-review-apply-state]').textContent = applyApproved ? 'Approved' : 'Locked';
   q('[data-review-publish-state]').textContent = publishApproved ? 'Approved' : 'Locked';
+  q('[data-review-apply-before]').textContent = deployment?.releaseId
+    ? `${deployment.releaseId} active in production`
+    : 'Awaiting verified deployment state';
+  q('[data-review-apply-after]').textContent = preparedRecovery?.targetReleaseId
+    ? `${preparedRecovery.targetReleaseId} restored`
+    : 'Awaiting prepared recovery target';
+  q('[data-review-apply-target]').textContent = applyPlan?.mapping
+    ? `${applyPlan.mapping.origin} · ${applyPlan.mapping.name}`
+    : 'Awaiting mapping';
+  q('[data-review-apply-expiry]').textContent = approvalExpiryText('apply-recovery-option');
   q('[data-review-apply-origin]').textContent = applyPlan?.mapping?.origin ?? 'Awaiting mapping';
   q('[data-review-apply-tool]').textContent = applyPlan?.mapping?.name ?? '—';
   q('[data-review-apply-effect]').textContent = applyPlan?.effectSummary ?? 'Awaiting verified evidence';
   q('[data-review-apply-arguments]').textContent = JSON.stringify(applyPlan?.arguments ?? {}, null, 2);
+  q('[data-review-publish-before]').textContent = currentNotice?.noticeRevision
+    ? `${currentNotice.noticeRevision} · current public notice`
+    : 'Awaiting current customer notice';
+  q('[data-review-publish-target]').textContent = publishPlan?.mapping
+    ? `${publishPlan.mapping.origin} · ${publishPlan.mapping.name}`
+    : 'Awaiting mapping';
+  q('[data-review-publish-expiry]').textContent = approvalExpiryText('publish-status-update');
   q('[data-review-publish-origin]').textContent = publishPlan?.mapping?.origin ?? 'Awaiting mapping';
   q('[data-review-publish-tool]').textContent = publishPlan?.mapping?.name ?? '—';
   q('[data-review-publish-effect]').textContent = publishPlan?.effectSummary ?? 'Awaiting verified evidence';
@@ -1436,27 +1618,46 @@ function renderApprovals() {
   const approvePublish = q('[data-action="approve-publish"]');
   approveApply.disabled = applyApproved || operationRunning || state.phase !== PHASE.REVIEW;
   approvePublish.disabled = publishApproved || operationRunning || state.phase !== PHASE.REVIEW;
-  approveApply.textContent = applyApproved ? 'Approved ✓' : 'Approve apply recovery';
-  approvePublish.textContent = publishApproved ? 'Approved ✓' : 'Approve publish update';
+  approveApply.textContent = applyApproved
+    ? 'Approved ✓'
+    : pendingApprovalScope === 'apply'
+      ? 'Binding exact approval…'
+      : bridgeMode === 'approval'
+        ? 'Waiting for other approval…'
+        : 'Approve apply recovery';
+  approvePublish.textContent = publishApproved
+    ? 'Approved ✓'
+    : pendingApprovalScope === 'publish'
+      ? 'Binding exact approval…'
+      : bridgeMode === 'approval'
+        ? 'Waiting for other approval…'
+        : 'Approve publish update';
   q('[data-approval-summary]').textContent = `${Number(applyApproved) + Number(publishApproved)} of 2 approved`;
-  q('[data-action="execute-approved"]').disabled = state.phase !== PHASE.APPROVED || operationRunning;
+  const executeButton = q('[data-action="execute-approved"]');
+  executeButton.disabled = state.phase !== PHASE.APPROVED || operationRunning;
+  executeButton.toggleAttribute('aria-busy', bridgeMode === 'execution');
+  q('[data-execute-label]').textContent = bridgeMode === 'execution'
+    ? 'Executing approved actions…'
+    : 'Execute approved actions';
 
   q('[data-approval-dialog]').hidden = !approvalDialogOpen;
-  q('[data-dialog-backdrop]').hidden = !(approvalDialogOpen || commandMenuOpen);
+  q('[data-dialog-backdrop]').hidden = !(approvalDialogOpen || commandMenuOpen || helpDrawerOpen);
   q('[data-command-menu]').hidden = !commandMenuOpen;
-  q('.app-frame').toggleAttribute('inert', approvalDialogOpen || commandMenuOpen);
+  q('.app-frame').toggleAttribute('inert', approvalDialogOpen || commandMenuOpen || helpDrawerOpen);
 }
 
 function render() {
   renderHeader();
   renderTrajectory();
   renderGuidedControl();
+  renderMissionContext();
   renderMissionBrief();
   renderProviderLegend();
   renderConstellation();
   renderReads();
   renderInspector();
   renderApprovals();
+  renderPrimaryView();
 }
 
 function showToast(title, detail, tone = 'info') {
@@ -1474,8 +1675,8 @@ async function discoverySequence() {
   if (state.phase !== PHASE.IDLE || operationRunning) return;
   const epoch = missionEpoch;
   operationRunning = true;
-  renderHeader();
   bridgeMode = 'discovery';
+  render();
   missionStartedAt = Date.now();
   providerSwapRequested = false;
   showToast('Connecting provider runtime', 'Loading the explicitly allowed WebMCP origins.', 'info');
@@ -1543,12 +1744,47 @@ async function safeReadSequence() {
 
 function swapProvider() {
   showToast(
-    providerSwapRequested ? 'Fallback verified' : 'Fallback armed',
+    providerSwapRequested ? 'Fallback verified' : 'Fallback is automatic',
     providerSwapRequested
       ? 'The engine already substituted the compatible read-only provider and recorded both identities.'
-      : 'Read-only failover runs automatically after a primary provider fails closed.',
+      : 'Read-only failover is selected only after a primary provider fails closed; no provider is changed by this control.',
     providerSwapRequested ? 'success' : 'info',
   );
+}
+
+async function copySelectedOrigin() {
+  const value = q('[data-origin-value]').textContent;
+  try {
+    if (!navigator.clipboard?.writeText) throw new Error('Clipboard unavailable');
+    await navigator.clipboard.writeText(value);
+    showToast('Origin copied', value, 'info');
+  } catch {
+    showToast('Copy unavailable', 'Select the origin in the inspector and copy it manually.', 'warning');
+  }
+}
+
+function openHelpDrawer() {
+  if (!helpDrawerOpen && !overlayReturnFocus) overlayReturnFocus = document.activeElement;
+  helpDrawerOpen = true;
+  renderPrimaryView();
+  schedule(0, () => q('[data-action="close-help"]')?.focus());
+}
+
+function closeHelpDrawer({ restoreFocus = true } = {}) {
+  if (!helpDrawerOpen) return;
+  const returnTarget = overlayReturnFocus;
+  helpDrawerOpen = false;
+  overlayReturnFocus = null;
+  renderPrimaryView();
+  if (restoreFocus) {
+    schedule(0, () => {
+      const usableTarget = returnTarget?.isConnected
+        && !returnTarget.disabled
+        && !returnTarget.closest('[hidden]')
+        && returnTarget.getClientRects().length > 0;
+      (usableTarget ? returnTarget : q('[data-view="topology"]'))?.focus();
+    });
+  }
 }
 
 function openApprovalDialog() {
@@ -1565,12 +1801,14 @@ function openApprovalDialog() {
 }
 
 function closeOverlays({ restoreFocus = true } = {}) {
-  const wasOpen = approvalDialogOpen || commandMenuOpen;
+  const wasOpen = approvalDialogOpen || commandMenuOpen || helpDrawerOpen;
   const returnTarget = overlayReturnFocus;
   approvalDialogOpen = false;
   commandMenuOpen = false;
+  helpDrawerOpen = false;
   overlayReturnFocus = null;
   renderApprovals();
+  renderPrimaryView();
   if (wasOpen && restoreFocus) {
     schedule(0, () => {
       const usableTarget = returnTarget?.isConnected
@@ -1586,8 +1824,9 @@ async function approveScope(scope) {
   if (state.phase !== PHASE.REVIEW || operationRunning) return;
   const epoch = missionEpoch;
   operationRunning = true;
-  renderHeader();
+  pendingApprovalScope = scope;
   bridgeMode = 'approval';
+  render();
   const isApply = scope === 'apply';
   try {
     const approved = await missionController.approve(scope);
@@ -1604,6 +1843,7 @@ async function approveScope(scope) {
   } finally {
     if (epoch === missionEpoch) {
       bridgeMode = 'idle';
+      pendingApprovalScope = null;
       operationRunning = false;
       render();
     }
@@ -1686,6 +1926,7 @@ async function resetMission() {
   }
   missionEpoch += 1;
   bridgeMode = 'idle';
+  pendingApprovalScope = null;
   safeUiStarted = false;
   executionUiStarted = false;
   executionUiFailed = false;
@@ -1743,6 +1984,50 @@ function focusGraphNode(nodeId) {
   });
 }
 
+function renderPrimaryView() {
+  const live = primaryView === 'live';
+  const inspector = primaryView === 'evidence' || primaryView === 'audit';
+  const approvals = primaryView === 'approvals';
+  document.body.dataset.appView = primaryView;
+  q('[data-walkthrough-view]').hidden = primaryView !== 'topology';
+  q('[data-approval-dock]').hidden = primaryView !== 'topology';
+  q('[data-universal-view]').hidden = !live;
+  q('[data-approvals-view]').hidden = !approvals;
+  q('.evidence-panel').hidden = !(primaryView === 'topology' || inspector);
+  q('.activity-ticker').hidden = live;
+  for (const button of qa('[data-view]')) {
+    const isHelp = button.dataset.view === 'help';
+    const current = !isHelp && button.dataset.view === primaryView;
+    button.classList.toggle('active', current || (isHelp && helpDrawerOpen));
+    if (current) button.setAttribute('aria-current', 'page');
+    else button.removeAttribute('aria-current');
+    if (isHelp) button.setAttribute('aria-expanded', String(helpDrawerOpen));
+  }
+  q('[data-help-drawer]').hidden = !helpDrawerOpen;
+  q('[data-dialog-backdrop]').hidden = !(approvalDialogOpen || commandMenuOpen || helpDrawerOpen);
+  q('.app-frame').toggleAttribute('inert', approvalDialogOpen || commandMenuOpen || helpDrawerOpen);
+  document.body.dataset.help = helpDrawerOpen ? 'open' : 'closed';
+}
+
+function setPrimaryView(view, { moveFocus = false } = {}) {
+  if (!['topology', 'live', 'evidence', 'approvals', 'audit'].includes(view)) return;
+  primaryView = view;
+  if (view === 'evidence') setPanel('evidence');
+  if (view === 'audit') setPanel('audit');
+  if (helpDrawerOpen) closeHelpDrawer({ restoreFocus: false });
+  renderPrimaryView();
+  if (moveFocus) {
+    const target = view === 'live'
+      ? q('[data-universal-view]')
+      : view === 'approvals'
+        ? q('[data-approvals-view]')
+        : view === 'evidence' || view === 'audit'
+          ? q('.evidence-panel')
+          : q('[data-walkthrough-view]');
+    schedule(0, () => target?.focus({ preventScroll: true }));
+  }
+}
+
 function setPanel(panelName) {
   document.body.dataset.inspectorPanel = panelName;
   for (const button of qa('[data-panel-tab]')) {
@@ -1767,11 +2052,11 @@ function handleAction(action, source, { trusted = false } = {}) {
     case 'reset': resetMission(); break;
     case 'swap-provider': swapProvider(); break;
     case 'review-approval':
-      if (state.phase === PHASE.COMPLETE) setPanel('audit');
-      else if (state.phase === PHASE.APPROVED && source?.closest('[data-approval-dock]')) executeApproved();
+      if (state.phase === PHASE.COMPLETE) setPrimaryView('audit', { moveFocus: true });
       else openApprovalDialog();
       break;
     case 'close-approval': closeOverlays(); break;
+    case 'close-help': closeHelpDrawer(); break;
     case 'approve-apply':
       if (trusted) approveScope('apply');
       else showToast('Human interaction required', 'Approval creation rejects synthetic DOM activation.', 'warning');
@@ -1804,38 +2089,54 @@ function handleAction(action, source, { trusted = false } = {}) {
     case 'zoom-in': graphZoom = Math.min(1.25, graphZoom + .08); renderConstellation(); q('[data-zoom-level]').textContent = `${Math.round(graphZoom * 100)}%`; break;
     case 'zoom-out': graphZoom = Math.max(.78, graphZoom - .08); renderConstellation(); q('[data-zoom-level]').textContent = `${Math.round(graphZoom * 100)}%`; break;
     case 'fit-graph': graphZoom = 1; renderConstellation(); q('[data-zoom-level]').textContent = '100%'; break;
-    case 'copy-origin': {
-      const value = q('[data-origin-value]').textContent;
-      navigator.clipboard?.writeText(value);
-      showToast('Origin copied', value, 'info');
+    case 'copy-origin': void copySelectedOrigin(); break;
+    case 'open-audit': setPrimaryView('audit', { moveFocus: true }); break;
+    case 'edit-objective': beginObjectiveEditing(); break;
+    case 'save-objective': saveObjectiveEditing(); break;
+    case 'cancel-objective': cancelObjectiveEditing(); break;
+    case 'sidepanel-guide': {
+      const entry = q('[data-universal-entry]');
+      const instructions = q('details', entry);
+      instructions.open = true;
+      schedule(0, () => entry.focus({ preventScroll: true }));
+      showToast('Continue in the Chrome side panel', 'Open ToolBraid from Chrome on the live page you want to work with.', 'info');
       break;
     }
-    case 'open-audit': setPanel('audit'); break;
-    case 'edit-objective': toggleObjectiveEditing(); break;
     default: break;
   }
 }
 
-function toggleObjectiveEditing() {
+function beginObjectiveEditing() {
   if (state.phase !== PHASE.IDLE) return;
-  const copy = q('[data-objective-copy]');
-  if (!editingObjective) {
-    editingObjective = true;
-    copy.contentEditable = 'true';
-    copy.setAttribute('role', 'textbox');
-    copy.setAttribute('aria-label', 'Mission objective');
-    copy.focus();
-    document.execCommand?.('selectAll', false, null);
-  } else {
-    const next = copy.textContent.trim();
-    if (next) objective = next;
-    copy.contentEditable = 'false';
-    copy.removeAttribute('role');
-    copy.removeAttribute('aria-label');
-    editingObjective = false;
-    state = createState(objective);
-    render();
+  editingObjective = true;
+  const input = q('[data-objective-input]');
+  input.value = objective;
+  renderMissionBrief();
+  schedule(0, () => { input.focus(); input.select(); });
+}
+
+function saveObjectiveEditing() {
+  if (!editingObjective || state.phase !== PHASE.IDLE) return;
+  const input = q('[data-objective-input]');
+  const next = input.value.trim();
+  if (!next) {
+    showToast('Objective cannot be empty', 'Describe the outcome and authority boundary before starting.', 'warning');
+    input.focus();
+    return;
   }
+  objective = next;
+  editingObjective = false;
+  state = createState(objective);
+  render();
+  schedule(0, () => q('[data-action="edit-objective"]')?.focus());
+}
+
+function cancelObjectiveEditing() {
+  if (!editingObjective) return;
+  editingObjective = false;
+  q('[data-objective-input]').value = objective;
+  renderMissionBrief();
+  schedule(0, () => q('[data-action="edit-objective"]')?.focus());
 }
 
 document.addEventListener('click', (event) => {
@@ -1859,15 +2160,8 @@ document.addEventListener('click', (event) => {
   }
   const rail = event.target.closest('[data-view]');
   if (rail) {
-    qa('[data-view]').forEach((button) => {
-      const active = button === rail;
-      button.classList.toggle('active', active);
-      button.toggleAttribute('aria-current', active);
-    });
-    if (rail.dataset.view === 'evidence') setPanel('evidence');
-    if (rail.dataset.view === 'audit') setPanel('audit');
-    if (rail.dataset.view === 'approvals') openApprovalDialog();
-    if (rail.dataset.view === 'help') showToast('Mission controls', 'Select nodes to inspect. Pulses show only the currently active causal path.', 'info');
+    if (rail.dataset.view === 'help') openHelpDrawer();
+    else setPrimaryView(rail.dataset.view, { moveFocus: true });
     return;
   }
   const graphNode = event.target.closest('[data-node-id]');
@@ -1880,7 +2174,9 @@ document.addEventListener('keydown', (event) => {
     ? q('[data-approval-dialog]')
     : commandMenuOpen
       ? q('[data-command-menu]')
-      : null;
+      : helpDrawerOpen
+        ? q('[data-help-drawer]')
+        : null;
   if (activeOverlay && event.key === 'Tab') {
     const targets = visibleFocusTargets(activeOverlay);
     if (!targets.length) {
@@ -1953,7 +2249,8 @@ document.addEventListener('keydown', (event) => {
     event.preventDefault();
     handleAction('open-command');
   }
-  if (event.key === 'Escape') closeOverlays();
+  if (event.key === 'Escape' && editingObjective && !activeOverlay) cancelObjectiveEditing();
+  else if (event.key === 'Escape') closeOverlays();
 });
 
 document.addEventListener('input', (event) => {

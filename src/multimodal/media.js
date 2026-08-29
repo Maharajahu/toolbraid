@@ -15,6 +15,16 @@ export const DEFAULT_MEDIA_LIMITS = Object.freeze({
 
 const KIND_VALUES = new Set(Object.values(MEDIA_KIND));
 const SOURCE_VALUES = new Set(['dom', 'capture', 'upload', 'adapter']);
+const CAPTURE_BINDING_FIELDS = Object.freeze([
+  'pageOrigin',
+  'frameId',
+  'sessionId',
+  'pageFingerprint',
+  'documentId',
+  'pageInstanceId',
+  'elementRef',
+]);
+const MAX_VIDEO_KEYFRAMES = 12;
 
 function finiteNonNegative(value, field, fallback = null) {
   if (value === undefined || value === null) return fallback;
@@ -29,6 +39,37 @@ function optionalText(value, field, maxLength = 4096) {
   const normalized = value.normalize('NFC').trim();
   if (normalized.length > maxLength) throw new RangeError(`${field} exceeds ${maxLength} characters.`);
   return normalized || null;
+}
+
+function plainObject(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+function normalizeCaptureBinding(value) {
+  if (value === undefined || value === null) return null;
+  if (!plainObject(value)) throw new TypeError('asset.captureBinding must be a plain object.');
+  const output = {};
+  for (const key of CAPTURE_BINDING_FIELDS) {
+    const supplied = value[key];
+    if (supplied === undefined || supplied === null) continue;
+    if (key === 'frameId' && Number.isInteger(supplied) && supplied >= 0) output[key] = String(supplied);
+    else output[key] = optionalText(supplied, `asset.captureBinding.${key}`, 2048);
+  }
+  return Object.keys(output).length ? Object.freeze(output) : null;
+}
+
+function normalizeVideoKeyframe(value, pageOrigin, index) {
+  if (!plainObject(value)) throw new TypeError('asset.keyframes entries must be plain objects.');
+  const frame = normalizeMediaAsset(value, { pageOrigin });
+  if (frame.kind !== MEDIA_KIND.IMAGE || frame.source !== 'capture' || !frame.handle || frame.url) {
+    throw new TypeError('Video keyframes must be extension-owned captured image handles.');
+  }
+  return Object.freeze({
+    ...frame,
+    timeMs: finiteNonNegative(value.timeMs ?? value.timestampMs ?? value.timestamp, `asset.keyframes[${index}].timeMs`, 0),
+  });
 }
 
 function normalizeUrl(value) {
@@ -90,6 +131,40 @@ export function normalizeMediaAsset(asset, { pageOrigin = null } = {}) {
     sensitive: Boolean(asset.sensitive),
   };
 
+  const elementRef = optionalText(asset.elementRef, 'asset.elementRef', 512);
+  const primaryBinding = normalizeCaptureBinding(asset.captureBinding);
+  const aliasBinding = normalizeCaptureBinding(asset.binding);
+  if (primaryBinding && aliasBinding && stableStringify(primaryBinding) !== stableStringify(aliasBinding)) {
+    throw new TypeError('asset capture binding aliases conflict.');
+  }
+  const captureBinding = primaryBinding ?? aliasBinding;
+  if (captureBinding) {
+    for (const key of CAPTURE_BINDING_FIELDS) {
+      if (asset[key] === undefined || asset[key] === null || captureBinding[key] === undefined) continue;
+      const topLevel = normalizeCaptureBinding({ [key]: asset[key] });
+      if (topLevel?.[key] !== captureBinding[key]) throw new TypeError(`asset.${key} conflicts with asset.captureBinding.${key}.`);
+    }
+  }
+  if (elementRef) normalized.elementRef = elementRef;
+  if (captureBinding) normalized.captureBinding = captureBinding;
+
+  if (kind === MEDIA_KIND.VIDEO) {
+    const rawKeyframes = asset.keyframes ?? asset.frames ?? asset.videoEvidence?.keyframes;
+    if (rawKeyframes !== undefined && !Array.isArray(rawKeyframes)) throw new TypeError('asset.keyframes must be an array.');
+    const keyframes = (rawKeyframes ?? []).slice(0, MAX_VIDEO_KEYFRAMES)
+      .map((frame, index) => normalizeVideoKeyframe(frame, normalized.pageOrigin, index));
+    if (keyframes.length) normalized.keyframes = Object.freeze(keyframes);
+
+    const rawAudio = asset.audioAsset ?? asset.audio ?? asset.videoEvidence?.audioAsset;
+    if (rawAudio !== undefined && rawAudio !== null) {
+      const audioAsset = normalizeMediaAsset(rawAudio, { pageOrigin: normalized.pageOrigin });
+      if (audioAsset.kind !== MEDIA_KIND.AUDIO || audioAsset.source !== 'capture' || !audioAsset.handle || audioAsset.url) {
+        throw new TypeError('Video audio evidence must be an extension-owned captured audio handle.');
+      }
+      normalized.audioAsset = audioAsset;
+    }
+  }
+
   normalized.fingerprint = mediaAssetFingerprint(normalized);
   if (!normalized.id) normalized.id = `media-${normalized.fingerprint.slice(0, 16)}`;
   return Object.freeze(normalized);
@@ -109,6 +184,14 @@ export function mediaAssetFingerprint(asset) {
     height: asset.height ?? null,
     pageOrigin: asset.pageOrigin ?? null,
     frameId: asset.frameId ?? null,
+    elementRef: asset.elementRef ?? null,
+    captureBinding: asset.captureBinding ?? null,
+    keyframes: Array.isArray(asset.keyframes)
+      ? asset.keyframes.map((frame) => ({ fingerprint: frame.fingerprint ?? mediaAssetFingerprint(frame), timeMs: frame.timeMs ?? 0 }))
+      : [],
+    audioAsset: asset.audioAsset
+      ? { fingerprint: asset.audioAsset.fingerprint ?? mediaAssetFingerprint(asset.audioAsset) }
+      : null,
   };
   return sha256Hex(stableStringify(projection));
 }

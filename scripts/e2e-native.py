@@ -155,7 +155,7 @@ def main() -> int:
             for field, expected in required.items():
                 assert_equal(surface[field], expected, f"native {field}")
 
-            page.get_by_role("button", name="Start mission", exact=True).click()
+            page.locator("[data-context-action]").click()
             wait_until(page, "() => window.__TOOLBRAID_V2__.getState().phase === 'mapping'")
             discovered = page.evaluate("window.__TOOLBRAID_V2__.getEngineSnapshot()")
             assert_equal(discovered["mode"], "native", "runtime mode")

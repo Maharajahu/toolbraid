@@ -49,8 +49,9 @@ field changes, clicks, navigation, and form submission all require a fresh
 approval created by a trusted click in the extension side panel. A receipt
 proves exact browser dispatch; it is not described as remote success unless a
 verified adapter proves its declared postcondition. The service worker wires
-the built-in GitHub and Vercel page-snapshot verifiers; generic and X actions
-remain postcondition-unverified.
+the built-in GitHub and Vercel page-snapshot verifiers plus X like/repost
+verifiers; generic actions remain postcondition-unverified and X reply is
+stage-only.
 
 The shipped MV3 runtime selects three statically trusted, lazily loaded
 capability packs — `site.x`, `site.github`, and `site.vercel` — by exact HTTPS
@@ -74,19 +75,28 @@ rebind; pending actions are not restored. The handoff broker supports login,
 TTL, exact-origin side-panel-created surfaces, and separate trusted
 open/complete proof. Credentials are not stored.
 
+For CAPTCHA, one trusted user gesture may dispatch exactly one checkbox click
+only when the active handoff surface contains one unchecked, visible, top-frame
+checkbox with explicit CAPTCHA markers. ToolBraid does not traverse CAPTCHA
+iframes or solve challenge flows. Missing or ambiguous markers, iframe widgets,
+site rejection, and any remaining challenge keep the handoff with the user.
+
 Activation and page injection are bound to top-level frame 0; child iframe
-documents are not traversed. Rendered capture is audio-track/caption-only and
-rejects encrypted media (`mediaKeys`) with `DRM_MEDIA_UNSUPPORTED`.
+documents are not traversed. Rendered capture supports bounded visible video
+keyframes, optional rendered audio, and loaded captions. It fails closed for
+encrypted media (`mediaKeys`), invisible targets, invalid bounds, binding drift,
+page drift, or target drift.
 
 ## Multimodal evidence
 
 Activation captures a bounded visible-tab screenshot and eligible same-origin
-caption tracks. Explicit reanalysis can capture bounded rendered audio and
-loaded captions; the shipped provider leaves video at metadata/caption-only and
-does not decode or upload video bytes. The real Chrome gate covers this
-audio/caption path without dispatching a mutation. Media bytes live only in
-extension-owned volatile handles with size, count, timeout, and TTL limits and
-are zeroed on release.
+caption tracks. Explicit reanalysis can capture bounded keyframe images from a
+visibly rendered top-frame video, optional rendered audio, and loaded captions.
+Raw video streams and URLs are not sent to the provider. The real Chrome gate
+exercises keyframe, audio, caption, and narrowly scoped CAPTCHA paths against
+local fixtures without claiming arbitrary authenticated-SaaS completion. Media
+bytes live only in extension-owned volatile handles with size, count, timeout,
+and TTL limits and are zeroed on release.
 Multimodal output is untrusted evidence: it may enrich a snapshot but can never
 approve or execute an action. Metadata-only evidence is the default. The side
 panel can connect an optional OpenAI-compatible vision/ASR endpoint; its API key
@@ -120,6 +130,8 @@ host grant and temporary `debugger` permission so the test can perform genuine
 trusted clicks in the authentic side panel. The script first asserts that the
 source manifest contains neither `host_permissions` nor `debugger`; those test
 grants never ship in the production bundle, and the disposable copy is removed
-after the run. A separate `--live-read-only` mode has passed real GitHub
-repository and issue reads without external dispatch; no live-site mutation is
-claimed.
+after the run. The gate exercises bounded rendered-video keyframes, optional
+rendered audio, loaded captions, and exactly one visible top-frame CAPTCHA
+checkbox click on local fixtures. A separate `--live-read-only` mode has passed
+real GitHub repository and issue reads without external dispatch; no live-site
+mutation or arbitrary authenticated-SaaS completion is claimed.

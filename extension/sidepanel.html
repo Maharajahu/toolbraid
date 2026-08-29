@@ -29,7 +29,26 @@
         </div>
       </header>
 
+      <p id="toast" class="toast" role="status" aria-live="polite" aria-atomic="true"></p>
+
       <main id="sidepanel-main" tabindex="-1">
+        <section class="workflow-strip" aria-labelledby="workflow-heading">
+          <h2 id="workflow-heading" class="visually-hidden">Current workflow</h2>
+          <div class="workflow-step workflow-now">
+            <span class="workflow-label">NOW</span>
+            <strong id="workflow-now">Connecting to the page</strong>
+          </div>
+          <div class="workflow-arrow" aria-hidden="true">→</div>
+          <div class="workflow-step">
+            <span class="workflow-label">NEXT</span>
+            <strong id="workflow-next">Discover live tools</strong>
+          </div>
+          <div class="workflow-step workflow-required">
+            <span class="workflow-label">REQUIRES YOU</span>
+            <strong id="workflow-required">Nothing yet</strong>
+          </div>
+        </section>
+
         <section class="panel page-panel" aria-labelledby="page-heading">
           <div class="section-heading">
             <div>
@@ -63,9 +82,17 @@
             </div>
             <button id="mission-start" class="button button-primary" type="button">Start on this page</button>
           </div>
+          <div class="mission-composer">
+            <label class="field-label" for="mission-objective">
+              Mission objective
+              <input id="mission-objective" name="objective" type="text" maxlength="280" autocomplete="off" value="Inspect the active page and recover safely.">
+            </label>
+            <p class="field-hint">This bounded brief travels with the mission so every page keeps the same intent.</p>
+          </div>
           <div id="missions-list" class="stack-list">
             <p class="empty-state">No active mission. Start one from the current page.</p>
           </div>
+          <div id="mission-inspect-result" class="mission-inspect-result stack-list" aria-label="Latest mission inspection results"></div>
           <p id="mission-note" class="policy-note">Each mission keeps exact tab, frame, session, origin, and page-fingerprint ownership.</p>
         </section>
 
@@ -79,70 +106,103 @@
           <div id="handoffs-list" class="stack-list">
             <p class="empty-state">No human-only step is waiting.</p>
           </div>
+          <div id="handoff-request" class="handoff-request"></div>
           <p id="handoff-note" class="policy-note">Credentials stay inside the approved site. ToolBraid stores no password, one-time code, or raw login URL.</p>
         </section>
 
-        <section class="panel" aria-labelledby="tools-heading">
-          <div class="section-heading">
+        <details id="tools-panel" class="panel disclosure-panel">
+          <summary class="disclosure-summary">
             <div>
               <p class="eyebrow">DISCOVERY</p>
               <h2 id="tools-heading">Available tools <span id="tools-count" class="count-badge">0</span></h2>
             </div>
-            <span id="quarantine-count" class="mode-pill">No quarantined tools</span>
+            <span class="summary-status">
+              <span id="quarantine-count" class="mode-pill">No quarantined tools</span>
+              <span class="disclosure-chevron" aria-hidden="true">⌄</span>
+            </span>
+          </summary>
+          <div class="disclosure-body" aria-labelledby="tools-heading">
+            <div class="capability-summary">
+              <div class="metric-cluster">
+                <span class="metric-label">Selected packs</span>
+                <strong id="packs-selected">0</strong>
+              </div>
+              <div class="metric-cluster">
+                <span class="metric-label">Active packs</span>
+                <strong id="packs-active">0</strong>
+              </div>
+              <div class="metric-cluster">
+                <span class="metric-label">Tool budget</span>
+                <strong id="packs-budget">0 / 0</strong>
+              </div>
+            </div>
+            <div id="packs-list" class="stack-list compact-list"></div>
+            <div id="quarantine-list" class="stack-list compact-list"></div>
+            <div id="tools-list" class="stack-list">
+              <p class="empty-state">No tools discovered yet.</p>
+            </div>
           </div>
-          <div id="tools-list" class="stack-list">
-            <p class="empty-state">No tools discovered yet.</p>
-          </div>
-        </section>
+        </details>
 
-        <section class="panel" aria-labelledby="evidence-heading">
-          <div class="section-heading">
+        <details id="evidence-panel" class="panel disclosure-panel">
+          <summary class="disclosure-summary">
             <div>
               <p class="eyebrow">MULTIMODAL CONTEXT</p>
               <h2 id="evidence-heading">Evidence <span id="evidence-count" class="count-badge">0</span></h2>
             </div>
+            <span class="disclosure-chevron" aria-hidden="true">⌄</span>
+          </summary>
+          <div class="disclosure-body" aria-labelledby="evidence-heading">
+            <div class="section-toolbar">
+              <p id="evidence-stats" class="metric-line">0 analyzed · 0 degraded · 0 blocked</p>
+              <button id="evidence-analyze" class="button" type="button">Analyze again</button>
+            </div>
+            <div id="evidence-list" class="stack-list">
+              <p class="empty-state">No visual, audio, or video evidence on this page.</p>
+            </div>
+            <p id="evidence-warnings" class="policy-note">Visible-tab capture is ephemeral and never grants action authority.</p>
           </div>
-          <p id="evidence-stats" class="metric-line">0 analyzed · 0 degraded · 0 blocked</p>
-          <div id="evidence-list" class="stack-list">
-            <p class="empty-state">No visual, audio, or video evidence on this page.</p>
-          </div>
-          <p id="evidence-warnings" class="policy-note">Visible-tab capture is ephemeral and never grants action authority.</p>
-        </section>
+        </details>
 
-        <section class="panel provider-panel" aria-labelledby="provider-heading">
-          <div class="section-heading">
+        <details id="provider-panel" class="panel disclosure-panel provider-panel">
+          <summary class="disclosure-summary">
             <div>
               <p class="eyebrow">OPTIONAL ANALYSIS</p>
               <h2 id="provider-heading">Multimodal provider</h2>
             </div>
-            <span id="provider-badge" class="status-badge status-pending">Metadata only</span>
+            <span class="summary-status">
+              <span id="provider-badge" class="status-badge status-pending">Metadata only</span>
+              <span class="disclosure-chevron" aria-hidden="true">⌄</span>
+            </span>
+          </summary>
+          <div class="disclosure-body" aria-labelledby="provider-heading">
+            <form id="provider-form" class="provider-form" novalidate>
+              <label class="field-label">
+                OpenAI-compatible endpoint
+                <input id="provider-endpoint" name="baseUrl" type="url" inputmode="url" autocomplete="off" placeholder="http://127.0.0.1:11434/v1/" required>
+              </label>
+              <div class="provider-grid">
+                <label class="field-label">
+                  Vision model
+                  <input id="provider-vision-model" name="visionModel" type="text" autocomplete="off" placeholder="qwen2.5-vl" required>
+                </label>
+                <label class="field-label">
+                  Audio model (optional)
+                  <input id="provider-audio-model" name="audioModel" type="text" autocomplete="off" placeholder="whisper-1">
+                </label>
+              </div>
+              <label class="field-label">
+                Session API key
+                <input id="provider-api-key" name="apiKey" type="password" autocomplete="new-password" placeholder="Leave blank to keep the current key">
+              </label>
+              <div class="action-footer provider-actions">
+                <button id="provider-disable" class="button button-danger" type="button">Use metadata only</button>
+                <button id="provider-save" class="button button-primary" type="submit">Save &amp; analyze</button>
+              </div>
+            </form>
+            <p id="provider-note" class="policy-note">Disabled by default. Enabling requests access only to the exact endpoint origin; the API key stays in extension session storage.</p>
           </div>
-          <form id="provider-form" class="provider-form" novalidate>
-            <label class="field-label">
-              OpenAI-compatible endpoint
-              <input id="provider-endpoint" name="baseUrl" type="url" inputmode="url" autocomplete="off" placeholder="http://127.0.0.1:11434/v1/" required>
-            </label>
-            <div class="provider-grid">
-              <label class="field-label">
-                Vision model
-                <input id="provider-vision-model" name="visionModel" type="text" autocomplete="off" placeholder="qwen2.5-vl" required>
-              </label>
-              <label class="field-label">
-                Audio model (optional)
-                <input id="provider-audio-model" name="audioModel" type="text" autocomplete="off" placeholder="whisper-1">
-              </label>
-            </div>
-            <label class="field-label">
-              Session API key
-              <input id="provider-api-key" name="apiKey" type="password" autocomplete="new-password" placeholder="Leave blank to keep the current key">
-            </label>
-            <div class="action-footer provider-actions">
-              <button id="provider-disable" class="button button-danger" type="button">Use metadata only</button>
-              <button id="provider-save" class="button button-primary" type="submit">Save &amp; analyze</button>
-            </div>
-          </form>
-          <p id="provider-note" class="policy-note">Disabled by default. Enabling requests access only to the exact endpoint origin; the API key stays in extension session storage.</p>
-        </section>
+        </details>
 
         <section class="panel action-panel" aria-labelledby="actions-heading">
           <div class="section-heading">
@@ -163,8 +223,19 @@
               <h2 id="approvals-heading">Approvals <span id="approvals-count" class="count-badge">0</span></h2>
             </div>
           </div>
+          <div class="subsection-heading">
+            <h3>Current context</h3>
+            <span id="approvals-current-count" class="mode-pill">0 actionable</span>
+          </div>
           <div id="approvals-list" class="stack-list">
-            <p class="empty-state">No active approvals.</p>
+            <p class="empty-state">No approval is actionable on this page.</p>
+          </div>
+          <div class="subsection-heading subsection-heading-spaced">
+            <h3>History &amp; other contexts</h3>
+            <span id="approvals-history-count" class="mode-pill">0 records</span>
+          </div>
+          <div id="approvals-history-list" class="stack-list">
+            <p class="empty-state">No approval history.</p>
           </div>
           <p class="policy-note"><span aria-hidden="true">⌁</span> External effects remain blocked until the exact target, arguments, effect, and expiry are approved here.</p>
         </section>
@@ -180,18 +251,26 @@
           <div id="receipts-list" class="stack-list">
             <p class="empty-state">No action has been dispatched.</p>
           </div>
-          <div class="audit-summary">
-            <span>Audit head</span>
-            <code id="audit-head">—</code>
-          </div>
-          <div id="audit-list" class="audit-list" aria-label="Recent audit events">
-            <p class="empty-state">Audit entries appear after activation.</p>
-          </div>
+          <details id="audit-panel" class="nested-disclosure">
+            <summary>
+              <span>Audit trail</span>
+              <span class="disclosure-chevron" aria-hidden="true">⌄</span>
+            </summary>
+            <div class="nested-disclosure-body">
+              <div class="audit-summary">
+                <span>Audit head</span>
+                <code id="audit-head">—</code>
+              </div>
+              <div id="audit-list" class="audit-list" aria-label="Recent audit events">
+                <p class="empty-state">Audit entries appear after activation.</p>
+              </div>
+              <button id="audit-more" class="button audit-more" type="button" hidden>Show all recent events</button>
+            </div>
+          </details>
         </section>
       </main>
 
       <p id="sidepanel-announcer" class="visually-hidden" role="status" aria-live="polite" aria-atomic="true"></p>
-      <p id="toast" class="toast" role="status" aria-live="polite" aria-atomic="true"></p>
     </div>
     <script type="module" src="sidepanel.js"></script>
   </body>
