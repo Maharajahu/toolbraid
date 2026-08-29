@@ -1,0 +1,11 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Shadow DOM fixture</title></head>
+<body>
+  <main><h1>Open component fixture</h1><section id="host"></section></main>
+  <script>
+    const root = document.querySelector('#host').attachShadow({ mode: 'open' });
+    root.innerHTML = '<article><h2>Component status</h2><p>All component checks passed.</p><button type="button">Refresh component</button></article>';
+  </script>
+</body>
+</html>

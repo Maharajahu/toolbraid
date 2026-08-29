@@ -26,6 +26,37 @@ WebMCP lets participating websites expose named, schema-described actions with s
 
 ToolBraid is the orchestration and safety layer above those tools. It discovers capabilities across origins, normalizes incompatible provider contracts, quarantines untrusted metadata, executes safe reads, and requires a separate human approval for every external mutation. WebMCP makes website actions machine-readable; ToolBraid makes multi-site execution reliable, explainable, and accountable without allowing the agent to approve its own actions.
 
+## ToolBraid Universal
+
+The Universal extension extends that control plane to ordinary websites that have not implemented WebMCP. It observes the current page, builds a bounded DOM/ARIA snapshot, and registers a transparent local WebMCP surface inside the browser. Every generated tool is labelled `generated-by-toolbraid`; it is never presented as a native capability supplied by the website.
+
+The generated surface includes a bounded read tool plus target-specific tools for the exact live links, controls, and forms that ToolBraid can identify unambiguously. Known GitHub, Vercel, and X page shapes can be recognized by versioned, fail-closed adapters. All generic interactions require an exact approval in extension-owned UI before the isolated runtime can change the page. Approval is bound to the tab, session, origin, page and target fingerprints, normalized arguments, predicted effect, expiry, and a one-time nonce.
+
+Optional visual and audio analysis can enrich page evidence through an OpenAI-compatible endpoint configured by the user. The endpoint receives no authority: media stays behind short-lived extension-owned handles, credentials never enter the page context, and model output cannot approve or execute an action. Without a configured provider, Universal remains fully usable with deterministic DOM/ARIA and media metadata.
+
+A generic receipt proves that the exact browser action was dispatched. It does not claim that a remote service completed the operation. Only a verified adapter with an observed postcondition may make that stronger claim.
+
+Build the load-unpacked extension with:
+
+```bash
+node scripts/build-universal-extension.mjs
+```
+
+Then load `dist/toolbraid-universal-extension/` from `chrome://extensions` with Developer mode enabled. The production manifest requests no permanent website access; the user activates ToolBraid for the current tab, while an optional multimodal endpoint requires a separate exact-origin permission.
+
+Run the deterministic Universal gates and the separate real MV3/WebMCP browser gate with:
+
+```bash
+npm run validate:universal
+npm run test:universal:e2e
+```
+
+The gate launches Chromium with the native `document.modelContext` surface, loads a temporary copy of the production bundle, and proves real read, exact approval, value change, form POST, redacted receipt, audit persistence, SPA invalidation, and adversarial rejection paths. Its fixture-origin and debugger grants exist only in that disposable test copy; the production manifest is asserted to contain neither permanent host access nor debugger authority.
+
+Universal E2E requires a Node Playwright module plus Chrome/Chromium. A non-standard installation can be supplied through `E2E_PLAYWRIGHT_MODULE` and `E2E_CHROME_PATH`; Python is needed only by the existing recovery-browser E2E commands.
+
+The complete design and authority boundary are documented in [Universal Architecture](docs/universal-architecture.md).
+
 ## How ToolBraid works
 
 [![ToolBraid execution story from one human objective through WebMCP discovery, semantic normalization, a nine-node plan, two exact approvals, ordered effects, and a sealed audit chain](docs/diagrams/toolbraid-how-it-works.svg)](docs/diagrams/toolbraid-how-it-works.svg)
@@ -53,7 +84,7 @@ Ordinary browsers can run the visibly labelled local verification harness. It mi
 
 ## Run locally
 
-Requirements: Node.js 20+; Python and Playwright/Chromium only for browser E2E.
+Requirements: Node.js 20+. Browser E2E additionally needs Playwright and Chrome/Chromium; Python is used by the existing recovery-browser E2E commands, while Universal E2E uses the Node Playwright module.
 
 ```bash
 # Ordinary-browser verification harness
@@ -137,7 +168,14 @@ server/live-services/       allowlisted GitHub, Vercel, health, signing, and HTT
 api/                        scoped Vercel Function entrypoints for live providers
 sandbox/recovery-lab/       disposable stable/degraded target for real rollback evidence
 src/app/                    mission controller, state projection, constellation UI
+src/universal/              bounded page snapshots, generated tools, policy, and execution contracts
+src/site-adapters/          versioned fail-closed adapters for supported live page shapes
+src/multimodal/             volatile media capture, evidence normalization, and provider contracts
+src/runtime/                Universal session and dispatch lifecycle
+src/persistence/            bounded approvals, receipts, and audit persistence
+extension/                  MV3 worker, isolated runtime, MAIN-world registrar, and trusted side panel
 tests/v2/                   unit, integration, security, and multi-origin contract tests
+tests/universal/            Universal unit, protocol, security, adapter, and build tests
 scripts/                    servers, checks, standalone/Vercel builds, capture, and browser E2E
 video-production/           reproducible English voice-over, mastering, captions, and 1080p compositor ([runbook](video-production/README.md))
 docs/                       architecture, threat model, test evidence, and challenge notes

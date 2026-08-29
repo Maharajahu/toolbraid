@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta http-equiv="Content-Security-Policy" content="script-src 'self'; style-src 'self'; object-src 'none';">
+    <title>ToolBraid Universal</title>
+    <link rel="stylesheet" href="sidepanel.css">
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand-lockup">
+          <span class="brand-mark" aria-hidden="true">TB</span>
+          <div>
+            <p class="eyebrow">TOOLBRAID</p>
+            <h1>Universal</h1>
+          </div>
+        </div>
+        <div class="topbar-actions">
+          <span id="connection-badge" class="status-badge status-pending" role="status">Connecting</span>
+          <button id="refresh-button" class="icon-button" type="button" aria-label="Refresh page state" title="Refresh page state">↻</button>
+        </div>
+      </header>
+
+      <main id="sidepanel-main" tabindex="-1">
+        <section class="panel page-panel" aria-labelledby="page-heading">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">ACTIVE CONTEXT</p>
+              <h2 id="page-heading">Current page</h2>
+            </div>
+            <span id="page-mode" class="mode-pill">Waiting</span>
+          </div>
+          <div class="origin-row">
+            <span class="origin-dot" aria-hidden="true"></span>
+            <p id="page-origin" class="origin-value">No active HTTP(S) page</p>
+          </div>
+          <p id="page-title" class="muted">Activate ToolBraid on a tab to inspect its live context.</p>
+          <dl class="fingerprint-grid">
+            <div>
+              <dt>Tab</dt>
+              <dd id="tab-value">—</dd>
+            </div>
+            <div>
+              <dt>Snapshot fingerprint</dt>
+              <dd id="fingerprint-value" class="fingerprint-value">—</dd>
+            </div>
+          </dl>
+        </section>
+
+        <section class="panel" aria-labelledby="tools-heading">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">DISCOVERY</p>
+              <h2 id="tools-heading">Available tools <span id="tools-count" class="count-badge">0</span></h2>
+            </div>
+            <span id="quarantine-count" class="mode-pill">No quarantined tools</span>
+          </div>
+          <div id="tools-list" class="stack-list" aria-live="polite">
+            <p class="empty-state">No tools discovered yet.</p>
+          </div>
+        </section>
+
+        <section class="panel" aria-labelledby="evidence-heading">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">MULTIMODAL CONTEXT</p>
+              <h2 id="evidence-heading">Evidence <span id="evidence-count" class="count-badge">0</span></h2>
+            </div>
+          </div>
+          <p id="evidence-stats" class="metric-line">0 analyzed · 0 degraded · 0 blocked</p>
+          <div id="evidence-list" class="stack-list" aria-live="polite">
+            <p class="empty-state">No visual, audio, or video evidence on this page.</p>
+          </div>
+          <p id="evidence-warnings" class="policy-note">Visible-tab capture is ephemeral and never grants action authority.</p>
+        </section>
+
+        <section class="panel provider-panel" aria-labelledby="provider-heading">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">OPTIONAL ANALYSIS</p>
+              <h2 id="provider-heading">Multimodal provider</h2>
+            </div>
+            <span id="provider-badge" class="status-badge status-pending">Metadata only</span>
+          </div>
+          <form id="provider-form" class="provider-form" novalidate>
+            <label class="field-label">
+              OpenAI-compatible endpoint
+              <input id="provider-endpoint" name="baseUrl" type="url" inputmode="url" autocomplete="off" placeholder="http://127.0.0.1:11434/v1/" required>
+            </label>
+            <div class="provider-grid">
+              <label class="field-label">
+                Vision model
+                <input id="provider-vision-model" name="visionModel" type="text" autocomplete="off" placeholder="qwen2.5-vl" required>
+              </label>
+              <label class="field-label">
+                Audio model (optional)
+                <input id="provider-audio-model" name="audioModel" type="text" autocomplete="off" placeholder="whisper-1">
+              </label>
+            </div>
+            <label class="field-label">
+              Session API key
+              <input id="provider-api-key" name="apiKey" type="password" autocomplete="new-password" placeholder="Leave blank to keep the current key">
+            </label>
+            <div class="action-footer provider-actions">
+              <button id="provider-disable" class="button button-danger" type="button">Use metadata only</button>
+              <button id="provider-save" class="button button-primary" type="submit">Save &amp; analyze</button>
+            </div>
+          </form>
+          <p id="provider-note" class="policy-note">Disabled by default. Enabling requests access only to the exact endpoint origin; the API key stays in extension session storage.</p>
+        </section>
+
+        <section class="panel" aria-labelledby="actions-heading">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">CONTROL SURFACE</p>
+              <h2 id="actions-heading">Page actions <span id="actions-count" class="count-badge">0</span></h2>
+            </div>
+          </div>
+          <div id="actions-list" class="stack-list" aria-live="polite">
+            <p class="empty-state">No page actions discovered yet.</p>
+          </div>
+        </section>
+
+        <section class="panel approval-panel" aria-labelledby="approvals-heading">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">HUMAN AUTHORITY</p>
+              <h2 id="approvals-heading">Approvals <span id="approvals-count" class="count-badge">0</span></h2>
+            </div>
+          </div>
+          <div id="approvals-list" class="stack-list" aria-live="polite">
+            <p class="empty-state">No active approvals.</p>
+          </div>
+          <p class="policy-note"><span aria-hidden="true">⌁</span> External effects remain blocked until the exact target, arguments, effect, and expiry are approved here.</p>
+        </section>
+
+        <section class="panel proof-panel" aria-labelledby="proof-heading">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">EXECUTION PROOF</p>
+              <h2 id="proof-heading">Receipts <span id="receipts-count" class="count-badge">0</span></h2>
+            </div>
+            <span id="audit-badge" class="status-badge status-pending">Checking chain</span>
+          </div>
+          <div id="receipts-list" class="stack-list" aria-live="polite">
+            <p class="empty-state">No action has been dispatched.</p>
+          </div>
+          <div class="audit-summary">
+            <span>Audit head</span>
+            <code id="audit-head">—</code>
+          </div>
+          <div id="audit-list" class="audit-list" aria-label="Recent audit events">
+            <p class="empty-state">Audit entries appear after activation.</p>
+          </div>
+        </section>
+      </main>
+
+      <p id="toast" class="toast" role="status" aria-live="polite" aria-atomic="true"></p>
+    </div>
+    <script type="module" src="sidepanel.js"></script>
+  </body>
+</html>

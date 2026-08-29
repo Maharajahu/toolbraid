@@ -1,0 +1,37 @@
+{
+  "metadata": {
+    "url": "https://github.com/toolbraid/toolbraid",
+    "origin": "https://github.com",
+    "title": "toolbraid/toolbraid: Governed browser actions",
+    "description": "A browser-native semantic and policy control plane.",
+    "github": {
+      "repository": {
+        "title": "toolbraid/toolbraid",
+        "description": "A browser-native semantic and policy control plane.",
+        "defaultBranch": "main",
+        "visibility": "public",
+        "language": "JavaScript",
+        "topics": ["webmcp", "browser-security", "webmcp"],
+        "stars": 42,
+        "forks": 7,
+        "openIssues": 3,
+        "watchers": 19,
+        "homepage": "https://toolbraid.example/"
+      },
+      "evidence": {
+        "source": "canonical-page-metadata",
+        "section": "About"
+      }
+    }
+  },
+  "headings": [
+    { "ref": "repo-heading", "level": 1, "text": "toolbraid/toolbraid" }
+  ],
+  "mainText": "toolbraid/toolbraid Governed browser actions",
+  "links": [
+    { "ref": "repo-link", "href": "https://github.com/toolbraid/toolbraid", "text": "toolbraid/toolbraid" }
+  ],
+  "forms": [],
+  "accessibleControls": [],
+  "elementRefs": []
+}

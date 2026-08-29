@@ -1,0 +1,33 @@
+{
+  "metadata": {
+    "url": "https://github.com/toolbraid/toolbraid/commit/0123456789abcdef0123456789abcdef01234567",
+    "origin": "https://github.com",
+    "title": "Harden adapter provenance",
+    "description": "Harden adapter provenance and page drift checks.",
+    "github": {
+      "commit": {
+        "message": "Harden adapter provenance\n\nReject stale page reads.",
+        "author": { "login": "toolbraid-bot", "name": "ToolBraid Bot" },
+        "committedAt": "2026-08-29T10:20:00Z",
+        "parentCount": 1,
+        "additions": 28,
+        "deletions": 4,
+        "changedFiles": 2,
+        "files": [
+          { "path": "src/site-adapters/github.js", "status": "modified", "additions": 20, "deletions": 3, "changes": 23 },
+          { "path": "tests/universal/site-adapter-github.test.mjs", "status": "added", "additions": 8, "deletions": 0, "changes": 8 }
+        ]
+      }
+    }
+  },
+  "headings": [
+    { "ref": "commit-heading", "level": 1, "text": "Harden adapter provenance" }
+  ],
+  "mainText": "Harden adapter provenance toolbraid-bot",
+  "links": [
+    { "ref": "author-link", "href": "https://github.com/toolbraid-bot", "text": "toolbraid-bot" }
+  ],
+  "forms": [],
+  "accessibleControls": [],
+  "elementRefs": []
+}

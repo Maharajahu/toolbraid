@@ -1,0 +1,35 @@
+{
+  "metadata": {
+    "url": "https://vercel.com/toolbraid/mission-control/dpl_123",
+    "origin": "https://vercel.com",
+    "title": "dpl_123 - Vercel",
+    "description": "Production deployment details.",
+    "vercel": {
+      "deployment": {
+        "id": "dpl_123",
+        "deploymentUrl": "https://mission-control-abc.vercel.app",
+        "state": "READY",
+        "environment": "production",
+        "createdAt": "2026-08-29T10:29:00Z",
+        "completedAt": "2026-08-29T10:30:00Z",
+        "durationMs": 60000,
+        "commitSha": "0123456789abcdef0123456789abcdef01234567",
+        "branch": "main",
+        "creator": { "username": "toolbraid" },
+        "region": "iad1",
+        "build": { "status": "succeeded", "steps": ["install", "build"] },
+        "checks": [{ "name": "HTTP", "state": "succeeded" }, { "name": "Lighthouse", "state": "passed" }]
+      }
+    }
+  },
+  "headings": [
+    { "ref": "deployment-heading", "level": 1, "text": "dpl_123" }
+  ],
+  "mainText": "dpl_123 Production deployment details",
+  "links": [
+    { "ref": "deployment-url", "href": "https://mission-control-abc.vercel.app", "text": "Visit" }
+  ],
+  "forms": [],
+  "accessibleControls": [],
+  "elementRefs": []
+}

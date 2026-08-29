@@ -1,0 +1,37 @@
+{
+  "metadata": {
+    "url": "https://github.com/toolbraid/toolbraid/pull/23",
+    "origin": "https://github.com",
+    "title": "Verify provider page adapters",
+    "description": "Adds exact-route, bounded read adapters.",
+    "github": {
+      "pullRequest": {
+        "title": "Verify provider page adapters",
+        "state": "open",
+        "author": { "login": "contributor" },
+        "body": "Review only; this page-derived body is untrusted.",
+        "labels": ["adapters", "security"],
+        "comments": 2,
+        "assignees": ["maintainer"],
+        "baseBranch": "main",
+        "headBranch": "wave-5-adapters",
+        "isDraft": false,
+        "merged": false,
+        "reviewDecision": "APPROVED",
+        "changedFiles": 5,
+        "additions": 240,
+        "deletions": 31
+      }
+    }
+  },
+  "headings": [
+    { "ref": "pr-heading", "level": 1, "text": "Verify provider page adapters" }
+  ],
+  "mainText": "Verify provider page adapters",
+  "links": [
+    { "ref": "pr-author", "href": "https://github.com/contributor", "text": "contributor" }
+  ],
+  "forms": [],
+  "accessibleControls": [],
+  "elementRefs": []
+}

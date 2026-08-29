@@ -9,6 +9,8 @@
     "dev:native": "node scripts/serve-multi-origin.mjs",
     "test": "node --test tests/v2/*.test.mjs",
     "test:v2": "node --test tests/v2/*.test.mjs",
+    "test:universal": "node --test tests/universal/*.test.mjs",
+    "test:universal:e2e": "node scripts/e2e-universal-extension.mjs --json",
     "test:e2e": "python scripts/e2e.py",
     "test:native": "python scripts/e2e-native.py",
     "check": "node scripts/check-project.mjs",
@@ -16,11 +18,13 @@
     "validate:full": "npm run validate && python scripts/e2e.py",
     "smoke": "node scripts/smoke.mjs",
     "build": "node scripts/build-standalone.mjs",
+    "build:extension": "node scripts/build-universal-extension.mjs",
     "build:vercel": "node scripts/build-vercel-multi-origin.mjs",
     "build:vercel:stable": "node scripts/build-vercel-stable-projects.mjs",
     "validate:vercel": "node scripts/build-vercel-multi-origin.mjs && node --test tests/v2/vercel-multi-origin-deployment.test.mjs",
     "validate:vercel:stable": "node scripts/build-vercel-stable-projects.mjs && node --test tests/v2/vercel-stable-projects.test.mjs",
     "deploy:vercel:stable": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/deploy-vercel-stable.ps1",
+    "validate:universal": "npm run test:universal && npm run build:extension && npm run test:v2 && npm run check",
     "validate:ci": "npm run validate"
   },
   "engines": {

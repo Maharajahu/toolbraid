@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Publish recovery notice</title></head>
+<body>
+  <main>
+    <h1>Publish recovery notice</h1>
+    <p id="effect">Submitting this form creates a public fixture notice.</p>
+    <form method="post" action="/api/submit" target="publication-receipt" aria-describedby="effect">
+      <label>Title <input name="title" required value="Checkout recovered"></label>
+      <label>Audience
+        <select name="audience"><option value="customers">Customers</option><option value="internal">Internal only</option></select>
+      </label>
+      <label>Message <textarea name="message" required>Checkout is operating normally.</textarea></label>
+      <label><input type="checkbox" name="confirm" value="yes" required> I confirm this fixture publication.</label>
+      <button type="submit">Publish public notice</button>
+    </form>
+    <iframe name="publication-receipt" title="Fixture publication receipt" hidden></iframe>
+  </main>
+</body>
+</html>

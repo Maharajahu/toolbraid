@@ -1,0 +1,28 @@
+{
+  "manifest_version": 3,
+  "name": "ToolBraid Universal",
+  "version": "0.1.0",
+  "description": "User-activated WebMCP tool registration and execution bridge for ToolBraid.",
+  "minimum_chrome_version": "120",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage",
+    "sidePanel"
+  ],
+  "optional_host_permissions": [
+    "https://*/*",
+    "http://localhost/*",
+    "http://127.0.0.1/*"
+  ],
+  "action": {
+    "default_title": "Connect ToolBraid Universal"
+  },
+  "background": {
+    "service_worker": "service-worker.js",
+    "type": "module"
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  }
+}

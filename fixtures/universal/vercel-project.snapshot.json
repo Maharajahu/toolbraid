@@ -1,0 +1,38 @@
+{
+  "metadata": {
+    "url": "https://vercel.com/toolbraid/mission-control",
+    "origin": "https://vercel.com",
+    "title": "mission-control - Vercel",
+    "description": "Governed browser mission control.",
+    "vercel": {
+      "project": {
+        "id": "prj_toolbraid_001",
+        "name": "mission-control",
+        "owner": { "slug": "toolbraid" },
+        "team": { "slug": "toolbraid" },
+        "framework": "Next.js",
+        "productionDomain": "mission-control.example",
+        "productionUrl": "https://mission-control.example/",
+        "repository": { "name": "toolbraid/mission-control", "url": "https://github.com/toolbraid/mission-control" },
+        "defaultBranch": "main",
+        "status": "ready",
+        "deploymentCount": 12,
+        "updatedAt": "2026-08-29T10:30:00Z",
+        "latestDeployment": { "id": "dpl_123", "state": "READY", "url": "https://mission-control-abc.vercel.app", "createdAt": "2026-08-29T10:29:00Z" },
+        "environments": ["production", "preview", "development"]
+      },
+      "evidence": { "section": "Project overview" }
+    }
+  },
+  "headings": [
+    { "ref": "project-heading", "level": 1, "text": "mission-control" }
+  ],
+  "mainText": "mission-control Project overview",
+  "links": [
+    { "ref": "deployment-link", "href": "https://mission-control-abc.vercel.app", "text": "Production" },
+    { "ref": "repository-link", "href": "https://github.com/toolbraid/mission-control", "text": "Repository" }
+  ],
+  "forms": [],
+  "accessibleControls": [],
+  "elementRefs": []
+}
