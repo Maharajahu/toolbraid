@@ -77,6 +77,29 @@ test('every coordinate and generated SVG path stays finite', () => {
   assert.equal(createCurvedSvgPath({ x: 4, y: 4 }, { x: 4, y: 4 }), 'M 4 4 Q 4 4 4 4');
 });
 
+test('compact layout remains exactly centered and keeps approval gates separated', () => {
+  const layout = createConstellationLayout({
+    ...fixture(),
+    width: 720,
+    height: 700,
+    centerX: 360,
+    centerY: 300,
+    outerRadius: 235,
+    innerRadius: 132,
+    mutationGap: 120,
+    mutationWidth: 196,
+  });
+
+  assert.equal(layout.hub.x, layout.width / 2);
+  assert.equal(layout.mutations[0].x + layout.mutations[1].x, layout.width);
+  assert.ok(
+    layout.mutations[0].x + layout.mutations[0].width / 2
+      < layout.mutations[1].x - layout.mutations[1].width / 2,
+  );
+  assert.ok(layout.providers.some((provider) => provider.labelPlacement === 'above'));
+  assert.ok(layout.providers.some((provider) => provider.labelPlacement === 'below'));
+});
+
 test('renderer escapes all user-controlled text and attributes', () => {
   const markup = renderConstellationSvg({
     providers: [{ origin: 'https://safe.example', label: '<script>alert("provider")</script>' }],

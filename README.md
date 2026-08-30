@@ -1,10 +1,32 @@
-<p align="center"><img src="assets/favicon.svg" width="88" height="88" alt="ToolBraid braid mark"></p>
+<p align="center"><img src="assets/favicon.svg" width="96" height="96" alt="ToolBraid braid mark"></p>
 
 <h1 align="center">ToolBraid</h1>
 
 <p align="center"><strong>A browser-native semantic and policy control plane for safe, explainable, human-approved WebMCP execution across sites.</strong></p>
 
-<p align="center"><strong><a href="https://toolbraid-webmcp.vercel.app">Launch live deployment</a></strong> · <a href="docs/JUDGING.md">Judge Guide</a> · <a href="START-HERE.md">Start Here</a> · <a href="LICENSE">MIT License</a></p>
+<p align="center">
+  <a href="https://toolbraid-webmcp.vercel.app"><img alt="Open live demo" src="https://img.shields.io/badge/LIVE_DEMO-OPEN-5de7ff?style=for-the-badge&amp;logo=vercel&amp;logoColor=111318&amp;labelColor=151820"></a>
+  <a href="docs/JUDGING.md"><img alt="Read the judge guide" src="https://img.shields.io/badge/JUDGE_GUIDE-READ-ff8cc8?style=for-the-badge&amp;logo=readme&amp;logoColor=111318&amp;labelColor=151820"></a>
+  <a href="#toolbraid-universal"><img alt="Build the Chrome MV3 extension" src="https://img.shields.io/badge/CHROME_MV3-BUILD-ffd278?style=for-the-badge&amp;logo=googlechrome&amp;logoColor=111318&amp;labelColor=151820"></a>
+</p>
+
+<p align="center">
+  <a href="#capabilities-at-a-glance">Capabilities</a> ·
+  <a href="#live-deployment">Demo</a> ·
+  <a href="#how-toolbraid-works">How it works</a> ·
+  <a href="#runtime-topology">Architecture</a> ·
+  <a href="#human-authority-boundary">Security</a> ·
+  <a href="#run-locally">Installation</a> ·
+  <a href="#validate">Testing</a>
+</p>
+
+<p align="center">
+  <img alt="Native WebMCP" src="https://img.shields.io/badge/WebMCP-native-5de7ff?style=flat-square&amp;labelColor=242832">
+  <img alt="Universal browser layer" src="https://img.shields.io/badge/Universal-browser_layer-ff8cc8?style=flat-square&amp;labelColor=242832">
+  <img alt="Node.js 20 or newer" src="https://img.shields.io/badge/Node.js-20%2B-89e9a5?style=flat-square&amp;logo=nodedotjs&amp;logoColor=white&amp;labelColor=242832">
+  <img alt="Automated validation passing" src="https://img.shields.io/badge/validation-passing-89e9a5?style=flat-square&amp;labelColor=242832">
+  <a href="LICENSE"><img alt="Apache License 2.0" src="https://img.shields.io/badge/license-Apache--2.0-ffd278?style=flat-square&amp;labelColor=242832"></a>
+</p>
 
 ToolBraid turns one human objective spanning several websites into a visible, explainable execution graph. It discovers live WebMCP tools, quarantines hostile metadata, maps incompatible contracts into canonical capabilities, executes safe reads, and stops before each external mutation until the human approves the exact origin, tool, arguments, and effect.
 
@@ -265,4 +287,4 @@ See [Start Here](START-HERE.md), [Architecture](docs/architecture.md), [Threat M
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+Apache License 2.0. See [LICENSE](LICENSE).

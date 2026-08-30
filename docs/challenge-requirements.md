@@ -14,7 +14,7 @@ Verified again on **30 August 2026** against the [official rules](https://webmcp
 - exact, separate human approvals, atomically claimed before any mutation;
 - unique idempotency keys, replay defense, live-registry revalidation, partial-failure receipts, and a sealed local integrity chain;
 - deterministic unit, integration, multi-origin, desktop, mobile, keyboard, dialog, CSP, and native-browser validation;
-- local MIT license and reproducible setup documentation;
+- local Apache-2.0 license and reproducible setup documentation;
 - dated Git history beginning during the submission period (`b615fa7`, 25 August 2026).
 
 Native evidence is recorded in [native-e2e-validation.json](native-e2e-validation.json), and the public read-only gate is recorded in [native-public-readonly-validation.json](native-public-readonly-validation.json). Harness evidence and screenshots are recorded in [e2e-validation.json](e2e-validation.json).
@@ -25,7 +25,7 @@ Native evidence is recorded in [native-e2e-validation.json](native-e2e-validatio
 |---|---|
 | Working live URL accessible in ChatGPT's in-app browser or Chrome 149+ with WebMCP enabled | Complete — [toolbraid-webmcp.vercel.app](https://toolbraid-webmcp.vercel.app) is live across seven anonymous HTTPS origins; native Chrome 151 read-only validation passed |
 | Public source repository with all source/assets/instructions | Release-prepared and synchronized on default branch `main`; full-history secret scan is clean. The owner intentionally retains private visibility until explicit publication approval, so this gate remains open |
-| Open-source license detectable on the repository page and visible in About | Complete while private — GitHub detects the root MIT `LICENSE`, package metadata declares MIT, and the license is linked at the top of the README. Recheck that it remains visible after publication |
+| Open-source license detectable on the repository page and visible in About | Complete while private — the repository has the standard root Apache-2.0 `LICENSE`, package metadata declares `Apache-2.0`, and the license is linked in the README header. Recheck GitHub's detection after publication |
 | English description covering WebMCP fit, UX improvement, human-agent collaboration, and implementation | Complete in the README, Judge Guide, and product definition; the final Devpost form remains pending |
 | Public YouTube demonstration under three minutes, with audio | English 1080p master is locked at 69.700 seconds / 2,091 frames with continuous voice and burned-in captions; final render validation and public YouTube upload remain pending |
 | English video/text/testing instructions | Repository, video materials, and live-URL testing instructions are complete |

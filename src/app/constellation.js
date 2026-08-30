@@ -237,19 +237,18 @@ export function createConstellationLayout(input = {}) {
 
   const providerStartAngle = (-7 * Math.PI) / 6;
   const providerEndAngle = Math.PI / 6;
-  const providerNodes = inputs.providers.map((provider, index, all) => ({
-    ...provider,
-    id: semanticNodeId('provider', provider.origin),
-    semanticId: provider.origin,
-    type: 'provider',
-    ...pointOnRing(
-      centerX,
-      centerY,
-      outerRadius,
-      angleAcrossArc(index, all.length, providerStartAngle, providerEndAngle),
-    ),
-    radius: 40,
-  }));
+  const providerNodes = inputs.providers.map((provider, index, all) => {
+    const angle = angleAcrossArc(index, all.length, providerStartAngle, providerEndAngle);
+    return {
+      ...provider,
+      id: semanticNodeId('provider', provider.origin),
+      semanticId: provider.origin,
+      type: 'provider',
+      ...pointOnRing(centerX, centerY, outerRadius, angle),
+      radius: 40,
+      labelPlacement: Math.sin(angle) < -0.15 ? 'above' : 'below',
+    };
+  });
 
   const providerOrder = new Map(inputs.providers.map((provider, index) => [provider.origin, index]));
   const capabilityOrder = [...inputs.capabilities].sort((left, right) => {
@@ -291,7 +290,12 @@ export function createConstellationLayout(input = {}) {
     radius: 64,
   };
 
-  const mutationGap = Math.min(180, width * 0.16);
+  const mutationGap = positiveNumber(
+    input.mutationGap ?? Math.min(180, width * 0.16),
+    'mutationGap',
+  );
+  const mutationWidth = positiveNumber(input.mutationWidth ?? 214, 'mutationWidth');
+  const mutationHeight = positiveNumber(input.mutationHeight ?? 64, 'mutationHeight');
   const mutationY = height - 58;
   const mutationNodes = inputs.mutations.map((mutation, index) => ({
     ...mutation,
@@ -301,8 +305,8 @@ export function createConstellationLayout(input = {}) {
     type: 'mutation',
     x: centerX + (index === 0 ? -mutationGap : mutationGap),
     y: mutationY,
-    width: 214,
-    height: 64,
+    width: mutationWidth,
+    height: mutationHeight,
     approvalRequired: true,
     gate: 'approval',
   }));
@@ -602,13 +606,16 @@ function renderNode(node) {
   }
 
   if (node.type === 'provider') {
+    const labelY = node.labelPlacement === 'above'
+      ? node.y - node.radius - 12
+      : node.y + node.radius + 20;
     return [
-      `<g ${common} data-shape="origin-hexagon">`,
+      `<g ${common} data-shape="origin-hexagon" data-label-placement="${escapeSvgAttribute(node.labelPlacement ?? 'below')}">`,
       `<title>${label}</title>`,
       `<circle class="tb-node__halo" cx="${x}" cy="${y}" r="${formatNumber(node.radius + 8)}" />`,
       `<path class="tb-node__surface" d="${regularPolygonPath(node.x, node.y, node.radius, 6)}" />`,
       renderSemanticIcon(node, { scale: 0.9 }),
-      `<text class="tb-node__label" x="${x}" y="${formatNumber(node.y + node.radius + 20)}" text-anchor="middle">${label}</text>`,
+      `<text class="tb-node__label" x="${x}" y="${formatNumber(labelY)}" text-anchor="middle">${label}</text>`,
       '</g>',
     ].join('');
   }

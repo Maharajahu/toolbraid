@@ -315,7 +315,6 @@ let objective = DEFAULT_OBJECTIVE;
 let missionStartedAt = null;
 let missionCompletedIn = null;
 let graphZoom = 1;
-let mobileGraphCentered = false;
 let approvalDialogOpen = false;
 let commandMenuOpen = false;
 let helpDrawerOpen = false;
@@ -739,15 +738,18 @@ function edgeVisualState(edge, activeEdges, nodeStates) {
 }
 
 function graphInput() {
+  const compact = window.matchMedia('(max-width: 680px)').matches;
   const activeEdges = new Set(state.phase === PHASE.COMPLETE ? [] : selectActiveEdgeIds(state));
   const nodeStates = new Map(baseLayout.nodes.map((node) => [node.id, visualStateForNode(node)]));
   return {
-    width: baseLayout.width,
-    height: baseLayout.height,
-    centerX: baseLayout.center.x,
-    centerY: baseLayout.center.y,
-    outerRadius: baseLayout.radii.outer,
-    innerRadius: baseLayout.radii.inner,
+    width: compact ? 720 : baseLayout.width,
+    height: compact ? 700 : baseLayout.height,
+    centerX: compact ? 360 : baseLayout.center.x,
+    centerY: compact ? 300 : baseLayout.center.y,
+    outerRadius: compact ? 235 : baseLayout.radii.outer,
+    innerRadius: compact ? 132 : baseLayout.radii.inner,
+    mutationGap: compact ? 120 : undefined,
+    mutationWidth: compact ? 196 : undefined,
     providers: PROVIDERS.map((provider) => {
       const node = nodeBySemantic(provider.origin, 'provider');
       let visualState = nodeStates.get(node.id);
@@ -1295,19 +1297,6 @@ function renderConstellation() {
     node.dataset.selected = String(selected);
     node.setAttribute('aria-pressed', String(selected));
     node.tabIndex = selected ? 0 : -1;
-  }
-  if (!mobileGraphCentered && window.matchMedia('(max-width: 680px)').matches) {
-    mobileGraphCentered = true;
-    schedule(0, () => {
-      const viewport = q('[data-constellation-viewport]');
-      const hub = q('[data-node-type="hub"]', mount);
-      const viewportRect = viewport.getBoundingClientRect();
-      const hubRect = hub?.getBoundingClientRect();
-      const hubCenter = hubRect
-        ? viewport.scrollLeft + hubRect.left + (hubRect.width / 2) - viewportRect.left
-        : viewport.scrollWidth / 2;
-      viewport.scrollLeft = Math.max(0, hubCenter - (viewport.clientWidth / 2));
-    });
   }
 }
 
@@ -1938,7 +1927,6 @@ async function resetMission() {
   missionStartedAt = null;
   missionCompletedIn = null;
   graphZoom = 1;
-  mobileGraphCentered = false;
   providerSwapRequested = false;
   auditSealHash = null;
   guidedTourActive = false;

@@ -14,7 +14,7 @@
 - atomic approval-set claim, replay defense, idempotency, registry-drift checks, and partial-failure receipts;
 - local integrity-chain verification and seal;
 - unit, integration, server, desktop, mobile, keyboard, modal, layout, CSP, and native-browser gates;
-- local documentation, source, and MIT license.
+- local documentation, source, and Apache-2.0 license.
 - anonymous seven-origin public Vercel deployment;
 - public native Chrome 151 read-only validation through the human review checkpoint.
 - secure local Codex/MCP bridge with extension-owned approval authority;

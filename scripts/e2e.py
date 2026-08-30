@@ -379,11 +379,23 @@ def main() -> int:
             graph_metrics = narrow_page.evaluate(
                 """() => {
                   const viewport = document.querySelector('[data-constellation-viewport]');
-                  return { clientWidth: viewport.clientWidth, scrollWidth: viewport.scrollWidth, scrollLeft: viewport.scrollLeft };
+                  const labels = [...viewport.querySelectorAll('.tb-node__label')];
+                  const bounds = viewport.getBoundingClientRect();
+                  const outside = labels
+                    .map(label => ({ text: label.textContent.trim(), rect: label.getBoundingClientRect() }))
+                    .filter(({ rect }) => rect.left < bounds.left - 1 || rect.right > bounds.right + 1);
+                  return {
+                    clientWidth: viewport.clientWidth,
+                    scrollWidth: viewport.scrollWidth,
+                    scrollLeft: viewport.scrollLeft,
+                    outside: outside.map(({ text, rect }) => ({ text, left: rect.left, right: rect.right })),
+                  };
                 }"""
             )
-            if graph_metrics["scrollWidth"] <= graph_metrics["clientWidth"]:
-                raise AssertionError(f"narrow graph is not horizontally scrollable: {graph_metrics}")
+            if graph_metrics["scrollWidth"] > graph_metrics["clientWidth"] + 1 or graph_metrics["scrollLeft"] != 0:
+                raise AssertionError(f"narrow graph requires horizontal scrolling: {graph_metrics}")
+            if graph_metrics["outside"]:
+                raise AssertionError(f"narrow graph labels leave the viewport: {graph_metrics}")
             active_graph_node = narrow_page.locator('[data-constellation] [data-node-id][tabindex="0"]')
             active_graph_node.focus()
             active_graph_node.press("End")

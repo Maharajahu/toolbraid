@@ -28,14 +28,20 @@
       <feGaussianBlur stdDeviation="6" result="blur"/>
       <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
     </filter>
-    <marker id="arrowCyan" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+    <marker id="arrowCyan" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto">
       <path d="M1 1L9 5L1 9Z" fill="#38c7ff"/>
     </marker>
-    <marker id="arrowBlue" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+    <marker id="arrowBlue" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto">
       <path d="M1 1L9 5L1 9Z" fill="#3f7cff"/>
     </marker>
-    <marker id="arrowGreen" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+    <marker id="arrowGreen" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto">
       <path d="M1 1L9 5L1 9Z" fill="#7fe36a"/>
+    </marker>
+    <marker id="arrowAmber" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M1 1L9 5L1 9Z" fill="#f6b941"/>
+    </marker>
+    <marker id="arrowPurple" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M1 1L9 5L1 9Z" fill="#9a8cff"/>
     </marker>
     <style>
       text { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
@@ -50,6 +56,7 @@
       .metric-label { fill: #73889d; font-size: 11px; font-weight: 700; letter-spacing: 1.4px; }
       .node-title { fill: #f2f7fb; font-size: 14px; font-weight: 680; }
       .node-note { fill: #73889d; font-size: 11px; font-weight: 560; }
+      .approval-binding { fill: #73889d; font-size: 9.5px; font-weight: 560; }
       .mono { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; }
     </style>
   </defs>
@@ -62,9 +69,11 @@
   <!-- Header -->
   <g transform="translate(60 45)">
     <rect x="0" y="0" width="42" height="42" rx="12" fill="#0e2238" stroke="#38c7ff" stroke-opacity="0.7"/>
-    <path d="M11 14C18 8 24 8 31 14M11 28C18 34 24 34 31 28M12 14L30 28M30 14L12 28" fill="none" stroke="#77e1ff" stroke-width="2.4" stroke-linecap="round"/>
-    <circle cx="11" cy="14" r="2.6" fill="#7fe36a"/><circle cx="31" cy="14" r="2.6" fill="#38c7ff"/>
-    <circle cx="11" cy="28" r="2.6" fill="#3f7cff"/><circle cx="31" cy="28" r="2.6" fill="#9a8cff"/>
+    <g transform="translate(1 1)">
+      <path d="M8 12.5c0-3 2.4-5.5 5.5-5.5S19 9.5 19 12.5 16.6 18 13.5 18H12c-3.1 0-5.5 2.5-5.5 5.5S8.9 29 12 29h7" fill="none" stroke="#77e7f4" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M32 12.5c0-3-2.4-5.5-5.5-5.5S21 9.5 21 12.5s2.4 5.5 5.5 5.5H28c3.1 0 5.5 2.5 5.5 5.5S31.1 29 28 29h-7" fill="none" stroke="#ff8cc8" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M15 33c0-3 2.2-5 5-5s5 2 5 5" fill="none" stroke="#ffd278" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
     <text x="58" y="15" class="eyebrow">TOOLBRAID · EXECUTION STORY</text>
     <text x="58" y="54" class="display">One objective. Nine-node plan. Human-controlled effects.</text>
     <text x="58" y="83" class="subtitle">A browser-native semantic and policy control plane for safe, explainable WebMCP execution.</text>
@@ -85,7 +94,7 @@
   <!-- Top process -->
   <g>
     <!-- stage 01 -->
-    <rect x="60" y="165" width="330" height="174" rx="20" fill="url(#panel)" stroke="#0e2238"/>
+    <rect x="60" y="165" width="355" height="174" rx="20" fill="url(#panel)" stroke="#0e2238"/>
     <rect x="60" y="165" width="5" height="174" rx="2.5" fill="#38c7ff"/>
     <text x="88" y="198" class="eyebrow">01 · HUMAN OBJECTIVE</text>
     <text x="88" y="232" class="card-title">Restore checkout safely</text>
@@ -96,14 +105,14 @@
     <text x="115" y="316" class="small" fill="#f6b941">Intent is not execution authority</text>
 
     <!-- stage arrow -->
-    <path d="M398 252H422" stroke="#38c7ff" stroke-width="2" marker-end="url(#arrowCyan)"/>
+    <path d="M418 252H430" stroke="#38c7ff" stroke-width="2" marker-end="url(#arrowCyan)"/>
 
     <!-- stage 02 -->
-    <rect x="430" y="165" width="360" height="174" rx="20" fill="url(#panel)" stroke="#0e2238"/>
-    <rect x="430" y="165" width="5" height="174" rx="2.5" fill="#ff6b55"/>
-    <text x="458" y="198" class="eyebrow">02 · DISCOVER + DEFEND</text>
-    <text x="458" y="232" class="card-title">6 origins → 9 live tools</text>
-    <g transform="translate(458 252)">
+    <rect x="435" y="165" width="355" height="174" rx="20" fill="url(#panel)" stroke="#0e2238"/>
+    <rect x="435" y="165" width="5" height="174" rx="2.5" fill="#ff6b55"/>
+    <text x="463" y="198" class="eyebrow">02 · DISCOVER + DEFEND</text>
+    <text x="463" y="232" class="card-title">6 origins → 9 live tools</text>
+    <g transform="translate(463 252)">
       <circle cx="8" cy="8" r="7" fill="#38c7ff"/><circle cx="32" cy="8" r="7" fill="#38c7ff"/>
       <circle cx="56" cy="8" r="7" fill="#3f7cff"/><circle cx="80" cy="8" r="7" fill="#3f7cff"/>
       <circle cx="104" cy="8" r="7" fill="#77e1ff"/><circle cx="128" cy="8" r="7" fill="#77e1ff"/>
@@ -111,20 +120,20 @@
       <circle cx="200" cy="8" r="9" fill="none" stroke="#ff6b55" stroke-width="2"/>
       <path d="M195 3L205 13M205 3L195 13" stroke="#ff6b55" stroke-width="2" stroke-linecap="round"/>
     </g>
-    <rect x="458" y="286" width="296" height="34" rx="10" fill="#ff6b55" opacity="0.1"/>
-    <path d="M474 296L481 308H467Z" fill="none" stroke="#ff6b55" stroke-width="1.5"/>
-    <text x="490" y="308" class="small" fill="#ff6b55">1 hostile tool quarantined before scoring</text>
+    <rect x="463" y="286" width="296" height="34" rx="10" fill="#ff6b55" opacity="0.1"/>
+    <path d="M479 296L486 308H472Z" fill="none" stroke="#ff6b55" stroke-width="1.5"/>
+    <text x="495" y="308" class="small" fill="#ff6b55">1 hostile tool quarantined before scoring</text>
 
-    <path d="M798 252H812" stroke="#38c7ff" stroke-width="2" marker-end="url(#arrowCyan)"/>
+    <path d="M793 252H805" stroke="#38c7ff" stroke-width="2" marker-end="url(#arrowCyan)"/>
 
     <!-- stage 03 -->
-    <rect x="820" y="165" width="340" height="174" rx="20" fill="url(#panel)" stroke="#0e2238"/>
-    <rect x="820" y="165" width="5" height="174" rx="2.5" fill="#3f7cff"/>
-    <text x="848" y="198" class="eyebrow">03 · NORMALIZE</text>
-    <text x="848" y="232" class="card-title">7 canonical capabilities</text>
-    <text x="848" y="260" class="body">Incompatible names, fields and results</text>
-    <text x="848" y="282" class="body">become one provider-neutral vocabulary.</text>
-    <g transform="translate(848 299)">
+    <rect x="810" y="165" width="355" height="174" rx="20" fill="url(#panel)" stroke="#0e2238"/>
+    <rect x="810" y="165" width="5" height="174" rx="2.5" fill="#3f7cff"/>
+    <text x="838" y="198" class="eyebrow">03 · NORMALIZE</text>
+    <text x="838" y="232" class="card-title">7 canonical capabilities</text>
+    <text x="838" y="260" class="body">Incompatible names, fields and results</text>
+    <text x="838" y="282" class="body">become one provider-neutral vocabulary.</text>
+    <g transform="translate(838 299)">
       <rect width="70" height="24" rx="12" fill="#38c7ff" opacity="0.12"/><text x="35" y="16" class="small" fill="#77e1ff" text-anchor="middle">4 reads</text>
       <rect x="78" width="72" height="24" rx="12" fill="#3f7cff" opacity="0.14"/><text x="114" y="16" class="small" fill="#77e1ff" text-anchor="middle">prepare</text>
       <rect x="158" width="58" height="24" rx="12" fill="#f6b941" opacity="0.14"/><text x="187" y="16" class="small" fill="#f6b941" text-anchor="middle">apply</text>
@@ -134,14 +143,14 @@
     <path d="M1168 252H1182" stroke="#3f7cff" stroke-width="2" marker-end="url(#arrowBlue)"/>
 
     <!-- stage 04 -->
-    <rect x="1190" y="165" width="350" height="174" rx="20" fill="url(#panel)" stroke="#0e2238"/>
-    <rect x="1190" y="165" width="5" height="174" rx="2.5" fill="#9a8cff"/>
-    <text x="1218" y="198" class="eyebrow">04 · PLAN</text>
-    <text x="1218" y="232" class="card-title">Build a 9-node DAG</text>
-    <text x="1218" y="260" class="body">Dependencies stay visible. Safe reads</text>
-    <text x="1218" y="282" class="body">run first; mutation arguments finalize later.</text>
-    <rect x="1218" y="299" width="288" height="24" rx="12" fill="#0e2238"/>
-    <text x="1362" y="316" class="small" text-anchor="middle">No mutation retry · no mutation fallback</text>
+    <rect x="1185" y="165" width="355" height="174" rx="20" fill="url(#panel)" stroke="#0e2238"/>
+    <rect x="1185" y="165" width="5" height="174" rx="2.5" fill="#9a8cff"/>
+    <text x="1213" y="198" class="eyebrow">04 · PLAN</text>
+    <text x="1213" y="232" class="card-title">Build a 9-node DAG</text>
+    <text x="1213" y="260" class="body">Dependencies stay visible. Safe reads</text>
+    <text x="1213" y="282" class="body">run first; mutation arguments finalize later.</text>
+    <rect x="1213" y="299" width="288" height="24" rx="12" fill="#0e2238"/>
+    <text x="1357" y="316" class="small" text-anchor="middle">No mutation retry · no mutation fallback</text>
   </g>
 
   <!-- Lower: graph -->
@@ -223,7 +232,7 @@
     </g>
 
     <rect x="885" y="697" width="145" height="87" rx="16" fill="#020914" stroke="#f6b941" stroke-opacity="0.45" stroke-dasharray="5 5"/>
-    <path d="M915 740H990" stroke="#f6b941" stroke-width="2" marker-end="url(#arrowBlue)"/>
+    <path d="M915 740H990" stroke="#f6b941" stroke-width="2" marker-end="url(#arrowAmber)"/>
     <text x="957" y="721" class="metric-label" fill="#f6b941" text-anchor="middle">AUTHORITY</text>
     <text x="957" y="762" class="node-note" fill="#f6b941" text-anchor="middle">human boundary</text>
   </g>
@@ -242,7 +251,8 @@
       <path d="M19 24L23 28L30 20" fill="none" stroke="#f6b941" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
       <text x="44" y="23" class="node-title">Approval 1</text>
       <text x="16" y="48" class="node-note" fill="#f6b941">Apply exact recovery</text>
-      <text x="16" y="66" class="node-note">origin · tool · schema · args · effect · nonce</text>
+      <text x="16" y="62" class="approval-binding">origin · tool · schema · args</text>
+      <text x="16" y="75" class="approval-binding">effect · expiry · one-time nonce</text>
     </g>
     <g transform="translate(1322 458)">
       <rect width="190" height="82" rx="15" fill="#0a1a2c" stroke="#f6b941" stroke-opacity="0.8"/>
@@ -250,7 +260,8 @@
       <path d="M19 24L23 28L30 20" fill="none" stroke="#f6b941" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
       <text x="44" y="23" class="node-title">Approval 2</text>
       <text x="16" y="48" class="node-note" fill="#f6b941">Publish exact message</text>
-      <text x="16" y="66" class="node-note">origin · tool · schema · args · effect · nonce</text>
+      <text x="16" y="62" class="approval-binding">origin · tool · schema · args</text>
+      <text x="16" y="75" class="approval-binding">effect · expiry · one-time nonce</text>
     </g>
 
     <path d="M1213 540V554H1315V566M1417 540V554H1315V566" fill="none" stroke="#f6b941" stroke-width="1.8"/>
@@ -282,7 +293,7 @@
       <text x="301" y="33" class="node-note" fill="#9a8cff" text-anchor="middle">THEN</text>
     </g>
 
-    <path d="M1315 762V775" stroke="#9a8cff" stroke-width="2" marker-end="url(#arrowBlue)"/>
+    <path d="M1315 762V775" stroke="#9a8cff" stroke-width="2" marker-end="url(#arrowPurple)"/>
     <rect x="1118" y="777" width="394" height="31" rx="12" fill="#9a8cff" opacity="0.1" stroke="#9a8cff" stroke-opacity="0.55"/>
     <path d="M1136 792L1142 797L1150 786" fill="none" stroke="#9a8cff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
     <text x="1160" y="797" class="small" fill="#9a8cff">54 append-only entries · SHA-256 chain verified + sealed</text>

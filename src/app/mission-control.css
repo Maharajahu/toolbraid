@@ -904,8 +904,24 @@ code { color: var(--cyan-bright); font-family: var(--font-mono); font-size: .95e
 .tb-node { color: var(--cyan); cursor: pointer; outline: none; }
 .tb-node__halo { fill: rgb(7 25 43 / 62%); stroke: rgb(71 150 211 / 24%); stroke-width: 1; transition: fill 180ms ease, stroke 180ms ease, filter 180ms ease, transform 180ms var(--ease-out); transform-box: fill-box; transform-origin: center; }
 .tb-node__surface { fill: rgb(8 26 45 / 94%); stroke: rgb(72 160 224 / 58%); stroke-width: 1.25; transition: fill 180ms ease, stroke 180ms ease, filter 180ms ease, transform 180ms var(--ease-out); transform-box: fill-box; transform-origin: center; }
-.tb-node__label { fill: var(--text); font-size: 10px; font-weight: 720; }
-.tb-node__subtitle { fill: var(--cyan-bright); font-family: var(--font-mono) !important; font-size: 8px; }
+.tb-node__label {
+  fill: var(--text);
+  stroke: rgb(7 8 11 / 96%);
+  stroke-width: 3px;
+  stroke-linejoin: round;
+  paint-order: stroke fill;
+  font-size: 10px;
+  font-weight: 720;
+}
+.tb-node__subtitle {
+  fill: var(--cyan-bright);
+  stroke: rgb(7 8 11 / 96%);
+  stroke-width: 2.5px;
+  stroke-linejoin: round;
+  paint-order: stroke fill;
+  font-family: var(--font-mono) !important;
+  font-size: 8px;
+}
 .tb-node__icon { color: var(--cyan-bright); pointer-events: none; opacity: .88; transition: color 180ms ease, opacity 180ms ease; }
 .tb-node__icon .tb-icon__stroke { fill: none; stroke: currentColor; }
 .tb-node__icon .tb-icon__accent { fill: none; stroke: currentColor; opacity: .72; }
@@ -1418,38 +1434,36 @@ body[data-phase="complete"] .review-action:hover { background: rgb(18 67 92 / 90
 }
 
 @media (max-width: 680px) {
-  .topology-stage { height: 1830px; }
+  .topology-stage { height: 1810px; }
   .constellation-viewport {
-    top: 780px;
+    top: 930px;
     right: 0;
     bottom: auto;
     left: 0;
-    height: 630px;
-    overflow-x: auto;
-    overflow-y: hidden;
-    overscroll-behavior-inline: contain;
-    scrollbar-color: rgb(56 199 255 / 45%) rgb(5 18 31 / 55%);
+    height: 420px;
+    overflow: hidden;
   }
   .constellation-mount {
-    width: 920px;
-    height: 630px;
+    width: 100%;
+    height: 100%;
     contain: none;
-    transform-origin: 50% 50%;
+    transform-origin: center top;
   }
   .tb-constellation {
     position: relative;
     top: 0;
     left: 0;
-    width: 920px;
-    max-width: none;
-    height: 630px;
+    width: 100%;
+    max-width: 100%;
+    height: auto;
     transform: none;
   }
-  .tb-node__label { font-size: 12px; }
-  .tb-node--hub .tb-node__label { font-size: 17px; }
-  .tb-node--hub .tb-node__subtitle { font-size: 11px; }
+  .tb-node__label { font-size: 16px; }
+  .tb-node--hub .tb-node__label { font-size: 20px; }
+  .tb-node--hub .tb-node__subtitle { font-size: 12px; }
+  .tb-node--mutation .tb-node__label { font-size: 15px; }
   .approval-dock {
-    top: 1430px;
+    top: 1370px;
     right: 8px;
     bottom: auto;
     left: 8px;
@@ -1851,7 +1865,7 @@ body[data-phase="complete"] .tb-node--capability.is-complete .tb-node__surface {
     white-space: nowrap;
   }
   .stage-header { grid-template-columns: minmax(0, 1fr) auto; }
-  .tb-node--provider .tb-node__label { font-size: 10px; }
+  .tb-node--provider .tb-node__label { font-size: 15px; }
   .approval-dock { border-radius: var(--radius); }
 }
 
@@ -2173,9 +2187,9 @@ body[data-app-view="live"] .workspace { grid-template-columns: minmax(0, 1fr); }
   .context-strip-status dd { margin-top: 0; -webkit-line-clamp: 3; }
   .context-action { width: 100%; }
   .mission-rail-stack { top: 328px; }
-  .topology-stage { height: 2050px; }
-  .constellation-viewport { top: 950px; height: 630px; }
-  .approval-dock { top: 1600px; }
+  .topology-stage { height: 1810px; }
+  .constellation-viewport { top: 930px; height: 420px; }
+  .approval-dock { top: 1370px; }
   .universal-view { padding: 30px 14px 42px; }
   .universal-flow { grid-template-columns: 1fr; }
   .universal-flow li { min-height: 88px; }
