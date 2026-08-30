@@ -1639,9 +1639,13 @@ function renderInspector() {
     ? controllerSnapshot.securityChecks ?? []
     : [];
   const securityVerified = securityChecks.length === 3 && state.phase === PHASE.COMPLETE;
+  const quarantineCount = Object.keys(state.quarantine).length;
   const securityQuarantined = activeProfile.completion === 'security'
-    && Object.keys(state.quarantine).length > 0;
-  const signalQuarantined = securityQuarantined && !securityVerified ? true : Boolean(quarantined);
+    && quarantineCount > 0;
+  const hubQuarantined = node.type === 'hub' && quarantineCount > 0;
+  const signalQuarantined = (securityQuarantined || hubQuarantined) && !securityVerified
+    ? true
+    : Boolean(quarantined);
   const signal = q('[data-signal-card]');
   signal.classList.toggle('quarantine', signalQuarantined);
   signal.classList.toggle('clean', !signalQuarantined);
@@ -1650,6 +1654,8 @@ function renderInspector() {
     ? 'Fail-closed verified'
     : securityQuarantined
       ? 'Hostile metadata quarantined'
+      : hubQuarantined
+        ? 'Hostile metadata quarantined'
       : quarantined
         ? 'Quarantined before planning'
         : state.phase === PHASE.IDLE
@@ -1657,8 +1663,8 @@ function renderInspector() {
           : 'Metadata clean';
   q('[data-signal-count]').textContent = securityChecks.length
     ? `${securityChecks.length} attacks blocked`
-    : securityQuarantined || quarantined
-      ? `${Object.keys(state.quarantine).length || 1} signal`
+    : securityQuarantined || hubQuarantined || quarantined
+      ? `${quarantineCount || 1} signal`
       : '0 signals';
 
   const evidence = securityChecks.length
