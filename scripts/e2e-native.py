@@ -18,7 +18,8 @@ HOST = "127.0.0.1"
 PORTS = range(4173, 4180)
 BASE_URL = "http://127.0.0.1:4173"
 PUBLIC_BASE_URL = "https://toolbraid-webmcp.vercel.app"
-TARGET_URL = os.environ.get("TOOLBRAID_NATIVE_BASE_URL", BASE_URL).rstrip("/")
+TARGET_BASE_URL = os.environ.get("TOOLBRAID_NATIVE_BASE_URL", BASE_URL).rstrip("/")
+TARGET_URL = f"{TARGET_BASE_URL}/?mission=production-recovery&mode=guided"
 READ_ONLY = os.environ.get("TOOLBRAID_NATIVE_READ_ONLY") == "1"
 DEFAULT_CHROME = Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe")
 CHROME = Path(os.environ.get("TOOLBRAID_CHROME", DEFAULT_CHROME))
@@ -37,8 +38,6 @@ SAFE_RESULT_IDS = sorted([
     "read-deployment-history",
     "read-status-notice",
     "correlate-evidence",
-    "prepare-recovery-option",
-    "draft-status-update",
 ])
 MUTATION_NODE_IDS = {"apply-recovery-option", "publish-status-update"}
 MUTATION_AUDIT_EVENTS = {
@@ -93,7 +92,7 @@ def wait_until(page: Any, expression: str, timeout: float = 15.0) -> None:
 def main() -> int:
     if not CHROME.is_file():
         raise SystemExit(f"Chrome executable not found: {CHROME}")
-    if READ_ONLY and TARGET_URL != PUBLIC_BASE_URL:
+    if READ_ONLY and TARGET_BASE_URL != PUBLIC_BASE_URL:
         raise SystemExit(
             "TOOLBRAID_NATIVE_READ_ONLY=1 is reserved for the exact public judge URL "
             f"({PUBLIC_BASE_URL})."
@@ -161,10 +160,17 @@ def main() -> int:
             assert_equal(discovered["mode"], "native", "runtime mode")
             assert_equal(len(discovered["providerDescriptors"]), 6, "provider origins")
             assert_equal(len(discovered["discoveredTools"]), 9, "native tools")
+
+            page.get_by_role("button", name="Map live capabilities", exact=True).click()
+            wait_until(
+                page,
+                "() => Object.keys(window.__TOOLBRAID_V2__.getState().mappings).length === 7",
+            )
+            discovered = page.evaluate("window.__TOOLBRAID_V2__.getEngineSnapshot()")
             assert_equal(len(discovered["normalization"]["quarantined"]), 1, "native quarantine")
 
             page.get_by_role("button", name="Run 4 safe reads", exact=True).click()
-            wait_until(page, "() => window.__TOOLBRAID_V2__.getState().phase === 'review'")
+            wait_until(page, "() => window.__TOOLBRAID_V2__.getState().phase === 'preparing'")
             if READ_ONLY:
                 checkpoint = page.evaluate(
                     """() => ({
@@ -172,7 +178,7 @@ def main() -> int:
                       engine: window.__TOOLBRAID_V2__.getEngineSnapshot(),
                     })"""
                 )
-                assert_equal(checkpoint["state"]["phase"], "review", "read-only checkpoint")
+                assert_equal(checkpoint["state"]["phase"], "preparing", "read-only checkpoint")
                 assert_equal(checkpoint["engine"]["mode"], "native", "read-only runtime mode")
                 result_ids = sorted(checkpoint["engine"]["results"])
                 provider_origins = sorted(
@@ -221,6 +227,8 @@ def main() -> int:
                 browser = None
                 return 0
 
+            page.get_by_role("button", name="Prepare 2 exact effects", exact=True).click()
+            wait_until(page, "() => window.__TOOLBRAID_V2__.getState().phase === 'review'")
             page.locator('[data-approval-dock] [data-action="review-approval"]').click()
             page.locator('[data-action="approve-apply"]').click()
             wait_until(page, "() => window.__TOOLBRAID_V2__.getState().approvals.apply.granted")

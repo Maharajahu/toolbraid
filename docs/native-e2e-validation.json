@@ -10,7 +10,7 @@
   "expectedProviderFailures": 1,
   "audit": {
     "algorithm": "sha256-chain-v1",
-    "entries": 54,
-    "head": "ec9250eee8256abca88cdd6cd755992e662a844900ac8425e1f7331c7d1cd4a8"
+    "entries": 56,
+    "head": "0155d8205fdd41d6c17da33987912308759a7742003e44246346fde45da63d94"
   }
 }

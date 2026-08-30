@@ -1,9 +1,9 @@
 {
   "status": "PASS",
   "browser": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/151.0.0.0 Safari/537.36",
-  "target": "https://toolbraid-webmcp.vercel.app",
+  "target": "https://toolbraid-webmcp.vercel.app/?mission=production-recovery&mode=guided",
   "runtime": "native",
-  "checkpoint": "review",
+  "checkpoint": "preparing",
   "providers": 6,
   "providerOrigins": [
     "https://toolbraid-deploy-webmcp.vercel.app",
@@ -15,11 +15,9 @@
   ],
   "discoveredTools": 9,
   "quarantined": 1,
-  "safeResults": 7,
+  "safeResults": 5,
   "safeResultIds": [
     "correlate-evidence",
-    "draft-status-update",
-    "prepare-recovery-option",
     "read-deployment-history",
     "read-release-history",
     "read-service-health",
