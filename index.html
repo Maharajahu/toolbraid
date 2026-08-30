@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#060709">
   <meta name="description" content="ToolBraid is a browser-native semantic and policy control plane for safe, explainable, human-approved WebMCP execution across sites.">
-  <title>ToolBraid · Production recovery mission control</title>
+  <title>ToolBraid · WebMCP mission control</title>
   <link rel="icon" href="./assets/favicon.svg" type="image/svg+xml">
   <link rel="manifest" href="./manifest.webmanifest">
   <link rel="stylesheet" href="./src/app/mission-control.css">
@@ -22,7 +22,7 @@
 
       <div class="mission-context" aria-label="Current mission">
         <span class="mission-context-label">Mission</span>
-        <strong>Production recovery</strong>
+        <strong data-current-mission>Production recovery</strong>
         <span class="mission-context-divider" aria-hidden="true"></span>
         <span data-phase-label aria-live="polite">Ready for objective</span>
       </div>
@@ -86,9 +86,9 @@
             <li data-phase-step="executing"><span data-ui-icon="send" aria-hidden="true"></span><b>Execute</b><small>Approved</small></li>
           </ol>
           <div class="stage-tools">
-            <button class="guided-control" type="button" data-action="guided-tour" aria-pressed="false">
+            <button class="guided-control" type="button" data-action="toggle-guidance" aria-pressed="true">
               <span data-guided-icon data-ui-icon="play" aria-hidden="true"></span>
-              <span data-guided-label>Guided preview</span>
+              <span data-guided-label>Guided judge</span>
             </button>
             <span class="live-status"><i></i> Live graph</span>
             <button class="stage-tool" type="button" data-action="zoom-out" aria-label="Zoom out">−</button>
@@ -101,23 +101,33 @@
         <section class="mission-context-strip" data-context-strip aria-labelledby="mission-context-title">
           <header class="context-strip-title">
             <p>Judge Walkthrough</p>
-            <h2 id="mission-context-title">Production Recovery</h2>
+            <h2 id="mission-context-title" data-context-mission>Production Recovery</h2>
           </header>
           <dl class="context-strip-status">
-            <div><dt>Current</dt><dd data-context-current aria-live="polite">Objective ready</dd></div>
-            <div><dt>Next</dt><dd data-context-next>Discover verified provider origins</dd></div>
-            <div><dt>Requires you</dt><dd data-context-requires>Start the walkthrough</dd></div>
+            <div><dt data-context-label="current">What happened</dt><dd data-context-current aria-live="polite">Objective ready</dd></div>
+            <div><dt data-context-label="next">Why it matters</dt><dd data-context-next>Authority stays explicit</dd></div>
+            <div><dt data-context-label="requires">Next</dt><dd data-context-requires>Discover verified provider origins</dd></div>
           </dl>
           <button class="context-action" type="button" data-context-action data-action="start-mission">
             <span data-context-action-label>Start judge walkthrough</span><span aria-hidden="true">→</span>
           </button>
+          <ol class="judge-guide-track" data-judge-guide aria-label="Guided judge checkpoints">
+            <li data-guide-step="objective"><i>01</i><span>Objective</span></li>
+            <li data-guide-step="discovery"><i>02</i><span>Discovery</span></li>
+            <li data-guide-step="mapping"><i>03</i><span>Mapping</span></li>
+            <li data-guide-step="evidence"><i>04</i><span>Evidence</span></li>
+            <li data-guide-step="security"><i>05</i><span>Security</span></li>
+            <li data-guide-step="approval"><i>06</i><span>Approval</span></li>
+            <li data-guide-step="execution"><i>07</i><span>Execution</span></li>
+            <li data-guide-step="audit"><i>08</i><span>Audit</span></li>
+          </ol>
         </section>
 
         <div class="mission-rail-stack">
           <article class="mission-brief" data-mission-brief>
             <div class="mission-brief-head">
               <span class="brief-icon" data-ui-icon="mission" aria-hidden="true"></span>
-              <div><p data-mission-kicker>Recovery demo brief</p><strong data-mission-title>Restore checkout safely</strong></div>
+              <div><p data-mission-kicker>Full recovery mission</p><strong data-mission-title>Recover Production</strong></div>
               <div class="objective-actions">
                 <button type="button" data-action="edit-objective">Edit</button>
                 <button type="button" data-action="save-objective" hidden>Save</button>
@@ -142,7 +152,7 @@
           </section>
 
           <section class="parallel-reads" aria-labelledby="parallel-title">
-            <header><div><p>Parallel evidence</p><h2 id="parallel-title">Read-only batch</h2></div><span data-read-summary aria-live="polite">0 / 4</span></header>
+            <header><div><p data-read-kicker>Parallel evidence</p><h2 id="parallel-title" data-read-title>Read-only batch</h2></div><span data-read-summary aria-live="polite">0 / 4</span></header>
             <ol data-read-list>
               <li data-read="health"><i></i><span><strong>Service health</strong><small>Waiting</small></span><time>—</time></li>
               <li data-read="release"><i></i><span><strong>Release history</strong><small>Waiting</small></span><time>—</time></li>
@@ -154,9 +164,14 @@
 
         <div class="constellation-viewport" data-constellation-viewport role="region" aria-label="Interactive provider constellation. On small screens, scroll horizontally to inspect all nodes." tabindex="0">
           <div class="constellation-placeholder" data-constellation-placeholder>
-            <div class="placeholder-orbits" aria-hidden="true"><i></i><i></i><i></i><b></b></div>
-            <strong>One objective. Many origins. One accountable plan.</strong>
-            <p>Start the mission to discover native WebMCP tools and watch the execution graph assemble.</p>
+            <section class="mission-gallery" data-mission-gallery aria-labelledby="mission-gallery-title">
+              <header>
+                <div><p class="section-kicker">Three real control-plane proofs</p><h2 id="mission-gallery-title">Choose a mission</h2></div>
+                <span><i></i> Same live engine</span>
+              </header>
+              <div class="mission-gallery-grid" data-mission-gallery-grid></div>
+              <footer><span data-ui-icon="lock" aria-hidden="true"></span><p><strong>No simulated success paths</strong><small>Every card runs the real WebMCP registry, policy checks, receipts, and audit chain.</small></p></footer>
+            </section>
           </div>
           <div class="constellation-mount" data-constellation hidden></div>
         </div>
@@ -353,7 +368,7 @@
   <section class="command-menu" data-command-menu hidden role="dialog" aria-modal="true" aria-labelledby="command-menu-title" tabindex="-1">
     <h2 class="visually-hidden" id="command-menu-title">Command menu</h2>
     <label><span data-ui-icon="search" aria-hidden="true"></span><input type="search" data-command-input aria-label="Filter commands" placeholder="Type a command…" autocomplete="off"></label>
-    <div><button type="button" data-action="guided-tour"><span>Run guided preview</span><kbd>G</kbd></button><button type="button" data-action="start-mission"><span>Start production recovery</span><kbd>↵</kbd></button><button type="button" data-action="review-approval"><span>Review approvals</span><kbd>R</kbd></button><button type="button" data-action="reset"><span>Reset mission</span><kbd>⌫</kbd></button></div>
+    <div><button type="button" data-action="guided-tour"><span>Run guided judge mode</span><kbd>G</kbd></button><button type="button" data-action="start-mission"><span>Advance selected mission</span><kbd>↵</kbd></button><button type="button" data-action="choose-mission"><span>Choose another mission</span><kbd>M</kbd></button><button type="button" data-action="review-approval"><span>Review approvals</span><kbd>R</kbd></button><button type="button" data-action="reset"><span>Reset mission</span><kbd>⌫</kbd></button></div>
   </section>
 
   <div class="toast-region" data-toast-region role="status" aria-live="polite" aria-atomic="true"></div>

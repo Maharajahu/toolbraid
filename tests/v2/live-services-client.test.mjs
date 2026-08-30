@@ -78,3 +78,26 @@ test('surfaces bounded live API errors without leaking response bodies', async (
       && error.details.status === 403,
   );
 });
+
+test('sends the controlled incident fault only to the configured primary health provider', async () => {
+  const urls = [];
+  const services = createLiveRecoveryServices({
+    baseOrigin: 'https://signals.example',
+    healthScenario: 'primary-health-unavailable',
+    fetchImpl: async (url) => {
+      urls.push(new URL(url));
+      return jsonResponse({ accepted: true });
+    },
+  });
+
+  await services.health.probe({ service: 'checkout' });
+  assert.equal(urls[0].searchParams.get('scenario'), 'primary-health-unavailable');
+  assert.throws(
+    () => createLiveRecoveryServices({
+      baseOrigin: 'https://signals.example',
+      healthScenario: 'arbitrary-fault',
+      fetchImpl: async () => jsonResponse({}),
+    }),
+    /Unknown live health scenario/,
+  );
+});

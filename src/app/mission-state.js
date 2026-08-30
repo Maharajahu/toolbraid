@@ -29,6 +29,7 @@ export const MISSION_EVENTS = Object.freeze({
   EXECUTION_STARTED: 'execution.started',
   EXECUTION_NODE_COMPLETED: 'execution.node.completed',
   EXECUTION_FAILED: 'execution.failed',
+  MISSION_SEALED: 'mission.sealed',
   RESET: 'mission.reset',
 });
 
@@ -360,6 +361,7 @@ function resetOperationalState(state, { keepDiscovery = false } = {}) {
     publish: { granted: false, approvalId: null, revision: null },
   };
   state.execution = { nodeIds: [], completedNodeIds: [], failure: null };
+  state.completion = null;
   state.activity = clone(EMPTY_ACTIVITY);
 }
 
@@ -418,6 +420,7 @@ export function createMissionState({
       publish: { granted: false, approvalId: null, revision: null },
     },
     execution: { nodeIds: [], completedNodeIds: [], failure: null },
+    completion: null,
     activity: clone(EMPTY_ACTIVITY),
     audit: [],
   };
@@ -763,6 +766,32 @@ export function transitionMission(currentState, event) {
       break;
     }
 
+    case MISSION_EVENTS.MISSION_SEALED: {
+      const kind = event.kind;
+      if (!['read-only', 'security'].includes(kind)) {
+        fail('MISSION_COMPLETION_INVALID', 'A non-mutating mission must declare read-only or security completion.');
+      }
+      const expectedPhase = kind === 'read-only' ? MISSION_PHASES.PREPARING : MISSION_PHASES.MAPPING;
+      assertPhase(state, event, [expectedPhase]);
+      if (typeof event.sealHash !== 'string' || !/^[a-f0-9]{64}$/.test(event.sealHash)) {
+        fail('MISSION_SEAL_INVALID', 'Non-mutating completion requires a verified SHA-256 audit seal.');
+      }
+      for (const node of state.nodes) {
+        if (node.status === MISSION_NODE_STATUS.RUNNING) node.status = MISSION_NODE_STATUS.PENDING;
+      }
+      state.phase = MISSION_PHASES.COMPLETE;
+      state.completion = {
+        kind,
+        sealHash: event.sealHash,
+        resultNodeIds: event.resultNodeIds === undefined
+          ? []
+          : uniqueStrings(event.resultNodeIds, 'event.resultNodeIds'),
+      };
+      setActivity(state, event, state.completion.resultNodeIds, 'outgoing');
+      details = clone(state.completion, 'Mission completion');
+      break;
+    }
+
     case MISSION_EVENTS.EXECUTION_NODE_COMPLETED: {
       assertPhase(state, event, [MISSION_PHASES.EXECUTING]);
       const node = requireNode(state, event.nodeId);
@@ -778,7 +807,10 @@ export function transitionMission(currentState, event) {
       const complete = state.execution.nodeIds.every(
         (nodeId) => nodeById(state, nodeId).status === MISSION_NODE_STATUS.COMPLETED,
       );
-      if (complete) state.phase = MISSION_PHASES.COMPLETE;
+      if (complete) {
+        state.phase = MISSION_PHASES.COMPLETE;
+        state.completion = { kind: 'mutations', sealHash: null, resultNodeIds: [...state.execution.completedNodeIds] };
+      }
       setActivity(state, event, [node.id], 'outgoing');
       details = { nodeId: node.id, complete };
       break;

@@ -60,6 +60,83 @@ test('runs the real recovery engine from WebMCP discovery through sealed executi
   );
 });
 
+test('supports guided discovery, mapping, evidence, and preparation checkpoints', async () => {
+  const controller = createMissionController({
+    documentRef: null,
+    orchestratorOrigin: 'https://app.toolbraid.dev',
+    missionIdFactory: () => 'guided-recovery-0001',
+  });
+
+  let snapshot = await controller.discoverTools('Trace checkout without silently changing production.');
+  assert.equal(snapshot.discoveredTools.length, 9);
+  assert.equal(snapshot.normalization, null);
+  assert.equal(snapshot.plan, null);
+  assert.ok(snapshot.audit.some(({ event }) => event === 'discovery.completed'));
+
+  snapshot = await controller.mapCapabilities();
+  assert.equal(snapshot.normalization.mappings.length, 7);
+  assert.equal(snapshot.plan.mutationArgumentsFinalized, false);
+
+  snapshot = await controller.runEvidence();
+  assert.deepEqual(Object.keys(snapshot.results).sort(), [
+    'correlate-evidence',
+    'read-deployment-history',
+    'read-release-history',
+    'read-service-health',
+    'read-status-notice',
+  ]);
+  assert.equal(snapshot.plan.nodes.find(({ id }) => id === 'prepare-recovery-option').status, 'pending');
+  assert.equal(snapshot.seal, null);
+
+  snapshot = await controller.prepareSafe();
+  assert.equal(snapshot.plan.status, 'approval_required');
+  assert.equal(snapshot.plan.mutationArgumentsFinalized, true);
+  assert.equal(Object.keys(snapshot.results).length, 7);
+});
+
+test('seals a read-only incident trace before recovery staging or external mutation', async () => {
+  const controller = createMissionController({
+    documentRef: null,
+    orchestratorOrigin: 'https://app.toolbraid.dev',
+    missionIdFactory: () => 'incident-trace-0001',
+  });
+
+  await controller.discoverAndPlan('Trace the incident read-only and seal the fallback evidence.');
+  await controller.runEvidence();
+  const snapshot = await controller.completeReadOnly();
+
+  assert.equal(snapshot.plan.nodes.find(({ id }) => id === 'prepare-recovery-option').status, 'pending');
+  assert.equal(snapshot.providerState.appliedRequestCount, 0);
+  assert.equal(snapshot.providerState.publishedRequestCount, 0);
+  assert.equal(snapshot.auditVerified, true);
+  assert.equal(snapshot.audit.at(-1).event, 'mission.read_only_completed');
+  assert.match(snapshot.seal.head, /^[a-f0-9]{64}$/);
+  assert.ok(snapshot.audit.some(({ event }) => event === 'tool.failover_selected'));
+});
+
+test('proves hostile metadata, execution drift, and nonce replay fail closed without dispatch', async () => {
+  const controller = createMissionController({
+    documentRef: null,
+    orchestratorOrigin: 'https://app.toolbraid.dev',
+    missionIdFactory: () => 'authority-attack-0001',
+  });
+
+  await controller.discoverAndPlan('Reject authority attacks and execute no external action.');
+  const snapshot = await controller.verifyAuthorityBoundary();
+
+  assert.deepEqual(snapshot.securityChecks.map(({ challenge, code }) => ({ challenge, code })), [
+    { challenge: 'hostile-metadata', code: 'TOOL_METADATA_QUARANTINED' },
+    { challenge: 'origin-drift', code: 'APPROVAL_TOOL_ORIGIN_MISMATCH' },
+    { challenge: 'nonce-replay', code: 'APPROVAL_REPLAY_BLOCKED' },
+  ]);
+  assert.equal(Object.keys(snapshot.results).length, 0);
+  assert.equal(snapshot.providerState.appliedRequestCount, 0);
+  assert.equal(snapshot.providerState.publishedRequestCount, 0);
+  assert.equal(snapshot.auditVerified, true);
+  assert.equal(snapshot.audit.at(-1).event, 'mission.authority_completed');
+  assert.match(snapshot.seal.head, /^[a-f0-9]{64}$/);
+});
+
 test('uses a unique mission identity and idempotency keys after every reset', async () => {
   let sequence = 0;
   const controller = createMissionController({

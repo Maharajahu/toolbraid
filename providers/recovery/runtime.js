@@ -4,7 +4,7 @@ import {
   createRecoveryProviderCatalog,
   resolveRecoveryDeploymentProfile,
 } from '../../src/providers/recovery/catalog.js';
-import { createLiveRecoveryServices } from './live-services.js';
+import { CONTROLLED_HEALTH_FAULT, createLiveRecoveryServices } from './live-services.js';
 
 const ORCHESTRATOR_PORT = '4173';
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]']);
@@ -111,8 +111,12 @@ function isLiveProviderOrigin(providerId, locationHref) {
 }
 
 export function createProviderRuntime(providerId) {
+  const requestedScenario = new URL(globalThis.location?.href).searchParams.get('scenario');
+  const healthScenario = providerId === 'signals' && requestedScenario === CONTROLLED_HEALTH_FAULT
+    ? CONTROLLED_HEALTH_FAULT
+    : null;
   const liveServices = isLiveProviderOrigin(providerId, globalThis.location?.href)
-    ? createLiveRecoveryServices({ baseOrigin: globalThis.location.origin })
+    ? createLiveRecoveryServices({ baseOrigin: globalThis.location.origin, healthScenario })
     : null;
   const catalog = createRecoveryProviderCatalog({ liveServices });
   const provider = catalog.providers.find((candidate) => candidate.id === providerId);

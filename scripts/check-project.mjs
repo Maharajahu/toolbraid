@@ -156,7 +156,16 @@ for (const providerId of ['signals', 'pulse', 'source', 'deploy', 'status', 'mir
   }
 }
 const appSource = await readFile(path.join(root, 'src/app/main.js'), 'utf8');
-for (const signal of ['createMissionController', 'missionController.discoverAndPlan', 'missionController.runSafe', 'missionController.executeApproved']) {
+for (const signal of [
+  'createMissionController',
+  'missionController.discoverTools',
+  'missionController.mapCapabilities',
+  'missionController.runEvidence',
+  'missionController.prepareSafe',
+  'missionController.completeReadOnly',
+  'missionController.verifyAuthorityBoundary',
+  'missionController.executeApproved',
+]) {
   if (!appSource.includes(signal)) failures.push(`src/app/main.js: real controller integration missing ${signal}`);
 }
 const publicSurfaceStart = appSource.indexOf('window.__TOOLBRAID_V2__ = Object.freeze');

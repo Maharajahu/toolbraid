@@ -19,6 +19,12 @@ import {
 } from './mission-state.js';
 import { createMissionController } from './mission-controller.js';
 import {
+  MISSION_GUIDE_STEPS,
+  MISSION_PROFILES,
+  missionProfileById,
+  resolveMissionProfile,
+} from './mission-profiles.js';
+import {
   RECOVERY_CAPABILITIES,
   RECOVERY_CAPABILITY_IDS as CAPABILITY_ID,
 } from '../packs/recovery/ontology.js';
@@ -27,7 +33,7 @@ import {
   RECOVERY_PROVIDER_ORIGINS,
 } from '../providers/recovery/catalog.js';
 
-const DEFAULT_OBJECTIVE = 'Diagnose checkout after the latest deployment, prepare a safe recovery and a customer update. Do not change production or publish without my approval.';
+let activeProfile = resolveMissionProfile(window.location.search);
 
 const PROVIDERS = Object.freeze(RECOVERY_PROVIDER_DESCRIPTORS.map(({ id, origin, label }) => ({ id, origin, label })));
 
@@ -134,6 +140,7 @@ const ENGINE_EVENT_COPY = Object.freeze({
   'mission.started': 'Objective accepted',
   'tool.discovered': 'Native tool discovered',
   'tool.quarantined': 'Unsafe tool quarantined',
+  'discovery.completed': 'Registry discovery complete',
   'capability.mapped': 'Capability mapped',
   'plan.created': 'Recovery plan created',
   'node.started': 'Plan node started',
@@ -143,6 +150,10 @@ const ENGINE_EVENT_COPY = Object.freeze({
   'node.completed': 'Plan node completed',
   'node.failed': 'Plan node failed',
   'plan.mutations_finalized': 'Exact mutation arguments finalized',
+  'evidence.completed': 'Read-only evidence checkpoint complete',
+  'authority.challenge_rejected': 'Authority challenge rejected',
+  'mission.read_only_completed': 'Read-only mission sealed',
+  'mission.authority_completed': 'Security mission sealed',
   'approval.created': 'Human approval envelope created',
   'approval.claimed': 'Single-use approval claimed',
   'mission.completed': 'Mission completed',
@@ -210,7 +221,7 @@ const baseLayout = createConstellationLayout({
   providers: PROVIDERS,
   capabilities: CAPABILITIES,
   mutations: MUTATIONS,
-  hub: { id: 'toolbraid', label: 'Recovery plan', subtitle: 'Canonical capabilities' },
+  hub: { id: 'toolbraid', label: 'Mission plan', subtitle: 'Canonical capabilities' },
 });
 
 const nodeBySemantic = (semanticId, type) => baseLayout.nodes.find(
@@ -258,16 +269,21 @@ const TRAJECTORY_PHASE_INDEX = Object.freeze({
   [PHASE.COMPLETE]: 5,
 });
 
-function createState(objective = DEFAULT_OBJECTIVE) {
+function createState(objective = activeProfile.objective) {
+  const isProduction = activeProfile.completion === 'mutations';
+  const trackedCapabilities = new Set(activeProfile.completion === 'security'
+    ? []
+    : readNodeIds);
   return createMissionState({
-    missionId: 'checkout-production-recovery',
+    missionId: `checkout-${activeProfile.id}`,
     objective,
     nodes: baseLayout.nodes.map((node) => ({
       id: node.id,
       label: node.label,
       semanticId: node.semanticId,
       type: node.type,
-      trackProgress: (node.type === 'capability' && node.id !== unsafeNodeId) || node.type === 'mutation',
+      trackProgress: trackedCapabilities.has(node.id)
+        || (isProduction && (node.id === prepareNodeId || node.type === 'mutation')),
     })),
     edges: baseLayout.edges.map((edge) => ({ id: edge.id, from: edge.from, to: edge.to })),
     stages: {
@@ -281,7 +297,12 @@ function createState(objective = DEFAULT_OBJECTIVE) {
       publish: [publishNodeId],
     },
     mappableNodeIds,
-    metadata: { pack: 'toolbraid.production-recovery', visual: 'radial-provider-constellation' },
+    metadata: {
+      pack: 'toolbraid.production-recovery',
+      profile: activeProfile.id,
+      completion: activeProfile.completion,
+      visual: 'radial-provider-constellation',
+    },
   });
 }
 
@@ -311,7 +332,7 @@ const missionController = createMissionController({
 });
 
 let state = createState();
-let objective = DEFAULT_OBJECTIVE;
+let objective = activeProfile.objective;
 let missionStartedAt = null;
 let missionCompletedIn = null;
 let graphZoom = 1;
@@ -323,7 +344,7 @@ let editingObjective = false;
 let primaryView = 'topology';
 let pendingApprovalScope = null;
 let providerSwapRequested = false;
-let guidedTourActive = false;
+let guidedTourActive = new URLSearchParams(window.location.search).get('mode') !== 'auto';
 let auditTimes = new Map();
 let auditSealHash = null;
 let runtimeTools = [];
@@ -334,6 +355,7 @@ let controllerAuditEntries = [];
 let bridgeMode = 'idle';
 let operationRunning = false;
 let providerRuntimePromise = null;
+let providerRuntimeProfileId = null;
 let safeUiStarted = false;
 let executionUiStarted = false;
 let executionUiFailed = false;
@@ -373,6 +395,45 @@ function clearScheduledWork() {
 function clearGuidedWork() {
   for (const timer of guidedTimers) window.clearTimeout(timer);
   guidedTimers.clear();
+}
+
+function updateMissionUrl() {
+  const url = new URL(window.location.href);
+  url.searchParams.set('mission', activeProfile.id);
+  url.searchParams.set('mode', guidedTourActive ? 'guided' : 'auto');
+  window.history.replaceState(null, '', url);
+}
+
+function releaseProviderRuntime() {
+  providerRuntimePromise = null;
+  providerRuntimeProfileId = null;
+  q('[data-provider-runtime]')?.replaceChildren();
+}
+
+function selectMissionProfile(profileId) {
+  if (state.phase !== PHASE.IDLE || operationRunning) {
+    showToast('Reset before switching missions', 'A running or completed audit keeps its original mission profile.', 'warning');
+    return;
+  }
+  const profile = missionProfileById(profileId);
+  if (profile.id === activeProfile.id) return;
+  activeProfile = profile;
+  objective = profile.objective;
+  state = createState(objective);
+  releaseProviderRuntime();
+  updateMissionUrl();
+  render();
+  showToast('Mission selected', `${profile.title} is ready in ${guidedTourActive ? 'guided judge' : 'auto run'} mode.`, 'info');
+}
+
+async function chooseMission() {
+  if (operationRunning) return;
+  if (state.phase !== PHASE.IDLE) {
+    const reset = await resetMission();
+    if (!reset) return;
+  }
+  setPrimaryView('topology', { moveFocus: true });
+  schedule(0, () => q(`[data-mission-id="${activeProfile.id}"]`)?.focus({ preventScroll: true }));
 }
 
 function htmlEscape(value) {
@@ -469,7 +530,9 @@ function syncControllerSnapshot(snapshot = missionController.snapshot()) {
 
 async function ensureProviderRuntime() {
   if (!nativeWebMcpAvailable) return;
-  if (providerRuntimePromise) return providerRuntimePromise;
+  const profileRuntimeId = `${activeProfile.id}:${activeProfile.controlledFault ?? 'normal'}`;
+  if (providerRuntimePromise && providerRuntimeProfileId === profileRuntimeId) return providerRuntimePromise;
+  providerRuntimeProfileId = profileRuntimeId;
   providerRuntimePromise = new Promise((resolve, reject) => {
     let mount = q('[data-provider-runtime]');
     if (!mount) {
@@ -518,7 +581,12 @@ async function ensureProviderRuntime() {
       frame.setAttribute('allow', 'tools');
       frame.setAttribute('sandbox', 'allow-scripts allow-same-origin');
       frame.referrerPolicy = 'no-referrer';
-      frame.src = `${origin}/?orchestrator=${encodeURIComponent(window.location.origin)}`;
+      const providerUrl = new URL('/', origin);
+      providerUrl.searchParams.set('orchestrator', window.location.origin);
+      if (providerId === 'signals' && activeProfile.controlledFault) {
+        providerUrl.searchParams.set('scenario', activeProfile.controlledFault);
+      }
+      frame.src = providerUrl.href;
       mount.append(frame);
     }
   });
@@ -556,16 +624,21 @@ function handleControllerEvent({ event, details, entry }) {
       showToast('Threat quarantined', `${details.name} was excluded before semantic scoring.`, 'danger');
       return;
     }
-    if (event === 'plan.created' && state.phase === PHASE.DISCOVERING) {
+    if (event === 'discovery.completed' && state.phase === PHASE.DISCOVERING) {
       syncControllerSnapshot();
       dispatch({ type: EVENT.DISCOVERY_COMPLETED });
-      dispatch({
-        type: EVENT.MAPPING_COMPLETED,
-        mappings: runtimeMappings,
-        activeEdgeIds: providerCapabilityEdgeIds,
-      });
       return;
     }
+  }
+
+  if (bridgeMode === 'mapping' && event === 'plan.created' && state.phase === PHASE.MAPPING) {
+    syncControllerSnapshot();
+    dispatch({
+      type: EVENT.MAPPING_COMPLETED,
+      mappings: runtimeMappings,
+      activeEdgeIds: providerCapabilityEdgeIds,
+    });
+    return;
   }
 
   if (bridgeMode === 'approval' && event === 'approval.created' && state.phase === PHASE.REVIEW) {
@@ -588,7 +661,7 @@ function handleControllerEvent({ event, details, entry }) {
     return;
   }
 
-  if (bridgeMode === 'safe') {
+  if (bridgeMode === 'safe' || bridgeMode === 'preparation') {
     const uiNodeId = uiNodeIdForEngineNode(details.nodeId);
     const capabilityId = CAPABILITY_BY_ENGINE_NODE[details.nodeId];
     if (event === 'node.started' && readSemanticIds.includes(capabilityId) && !safeUiStarted) {
@@ -978,10 +1051,11 @@ function auditEntryDetail(entry) {
 }
 
 function controllerAuditPhaseId(entry) {
-  if (['runtime.ready', 'mission.started', 'tool.discovered', 'tool.quarantined'].includes(entry.event)) return 'discover';
+  if (['runtime.ready', 'mission.started', 'tool.discovered', 'tool.quarantined', 'discovery.completed'].includes(entry.event)) return 'discover';
   if (['capability.mapped', 'plan.created'].includes(entry.event)) return 'normalize';
+  if (entry.event === 'authority.challenge_rejected') return 'authorize';
   if (entry.event.startsWith('approval.')) return 'authorize';
-  if (entry.event === 'mission.completed') return 'execute';
+  if (['mission.completed', 'mission.read_only_completed', 'mission.authority_completed'].includes(entry.event)) return 'execute';
   if (['node.started', 'node.completed', 'node.failed', 'tool.execution_started', 'tool.execution_failed', 'tool.failover_selected'].includes(entry.event)) {
     return ['apply-recovery-option', 'publish-status-update'].includes(entry.details.nodeId) ? 'execute' : 'observe';
   }
@@ -1000,6 +1074,8 @@ function controllerAuditDetail(entry) {
       return `${details.origin ?? 'unknown origin'} · ${details.name ?? 'unknown tool'} · schema ${details.schemaFingerprint?.slice(0, 10) ?? '—'}…`;
     case 'tool.quarantined':
       return `${details.origin ?? 'unknown origin'} · ${details.name ?? 'tool'} · ${details.reasonCode ?? 'unsafe metadata'}`;
+    case 'discovery.completed':
+      return `${details.toolCount ?? 0} tools · ${details.originCount ?? 0} origins · ${details.quarantinedToolCount ?? 0} quarantined`;
     case 'capability.mapped':
       return `${details.capabilityId ?? 'capability'} → ${details.primary?.origin ?? 'origin'} · ${details.primary?.name ?? 'tool'}`;
     case 'plan.created':
@@ -1018,12 +1094,20 @@ function controllerAuditDetail(entry) {
       return `${details.nodeId ?? 'node'} · ${details.code ?? 'failure'} · ${details.error ?? 'failed closed'}`;
     case 'plan.mutations_finalized':
       return `${details.nodeIds?.length ?? 0} exact effects derived from completed evidence · revision ${details.revision ?? '—'}`;
+    case 'evidence.completed':
+      return `${details.resultCount ?? 0} correlated read-only results · no external dispatch`;
+    case 'authority.challenge_rejected':
+      return `${details.challenge ?? 'challenge'} · ${details.code ?? 'rejected'} · no provider mutation`;
     case 'approval.created':
       return `${details.scope ?? 'scope'} · ${details.origin ?? 'origin'} · ${details.tool ?? 'tool'} · ${details.fingerprint?.slice(0, 12) ?? '—'}…`;
     case 'approval.claimed':
       return `${details.nodeId ?? 'mutation'} · nonce ${details.nonce ?? '—'} · single use`;
     case 'mission.completed':
       return `${details.resultNodeIds?.length ?? 0} approved mutation receipts recorded before sealing.`;
+    case 'mission.read_only_completed':
+      return `${details.resultNodeIds?.length ?? 0} evidence results · ${details.mutationDispatchCount ?? 0} mutation dispatches`;
+    case 'mission.authority_completed':
+      return `${details.blockedChallenges?.length ?? 0} attacks blocked · ${details.mutationDispatchCount ?? 0} mutation dispatches`;
     case 'registry.toolchange':
       return `Generation ${details.generation ?? '—'} differs from planned generation ${details.plannedGeneration ?? '—'}.`;
     default:
@@ -1044,10 +1128,17 @@ function auditPhaseSummary(phaseId, entries) {
     return `${reads} / 4 reads${providerSwapRequested ? ' · Pulse substituted' : ''}`;
   }
   if (phaseId === 'authorize') {
+    if (activeProfile.completion === 'security') {
+      return `${controllerSnapshot.securityChecks?.length ?? 0} / 3 attacks blocked`;
+    }
     const approved = Number(state.approvals.apply.granted) + Number(state.approvals.publish.granted);
     return `${approved} / 2 exact scopes approved`;
   }
-  if (phaseId === 'execute') return `${state.execution.completedNodeIds.length} / 2 mutation receipts`;
+  if (phaseId === 'execute') {
+    if (activeProfile.completion === 'read-only') return `${Object.keys(runtimeEvidence).length} evidence records · sealed`;
+    if (activeProfile.completion === 'security') return `${controllerSnapshot.securityChecks?.length ?? 0} rejection receipts · sealed`;
+    return `${state.execution.completedNodeIds.length} / 2 mutation receipts`;
+  }
   return `${entries.length} lifecycle ${entries.length === 1 ? 'event' : 'events'}`;
 }
 
@@ -1055,7 +1146,19 @@ function renderHeader() {
   document.body.dataset.phase = state.phase;
   document.body.dataset.guided = guidedTourActive ? 'active' : 'idle';
   document.body.dataset.runtime = controllerSnapshot.mode;
-  qa('[data-phase-label]').forEach((element) => { element.textContent = PHASE_COPY[state.phase]; });
+  document.body.dataset.missionProfile = activeProfile.id;
+  q('[data-current-mission]').textContent = activeProfile.shortTitle;
+  const mappingsReady = Object.keys(state.mappings).length === mappableNodeIds.length;
+  const phaseCopy = state.phase === PHASE.MAPPING && mappingsReady
+    ? activeProfile.completion === 'security' ? 'Ready for authority checks' : 'Capabilities mapped'
+    : state.phase === PHASE.PREPARING
+      ? activeProfile.completion === 'read-only' ? 'Read-only evidence ready to seal' : 'Evidence correlated; effects remain unprepared'
+      : state.phase === PHASE.COMPLETE && activeProfile.completion === 'read-only'
+        ? 'Read-only mission complete · audit sealed'
+        : state.phase === PHASE.COMPLETE && activeProfile.completion === 'security'
+          ? 'Security mission complete · audit sealed'
+          : PHASE_COPY[state.phase];
+  qa('[data-phase-label]').forEach((element) => { element.textContent = phaseCopy; });
   q('[data-runtime-label]').textContent = controllerSnapshot.mode === 'native'
     ? 'Native WebMCP'
     : controllerSnapshot.mode === 'test'
@@ -1079,7 +1182,14 @@ function renderTrajectory() {
   const phaseIndex = TRAJECTORY_PHASE_INDEX[state.phase];
   const steps = qa('[data-phase-step]');
   steps.forEach((step, index) => {
-    const stepState = state.phase === PHASE.COMPLETE || index < phaseIndex
+    const readOnlySkip = activeProfile.completion === 'read-only' && index >= 3;
+    const securitySkip = activeProfile.completion === 'security' && [2, 4].includes(index);
+    const securityAuthorize = activeProfile.completion === 'security' && index === 3;
+    const stepState = readOnlySkip || securitySkip
+      ? 'skipped'
+      : securityAuthorize
+        ? (state.phase === PHASE.COMPLETE ? 'complete' : Object.keys(state.mappings).length ? 'active' : 'pending')
+        : state.phase === PHASE.COMPLETE || index < phaseIndex
       ? 'complete'
       : index === phaseIndex
         ? 'active'
@@ -1090,28 +1200,61 @@ function renderTrajectory() {
 }
 
 function renderGuidedControl() {
-  const control = q('[data-action="guided-tour"]', q('.stage-tools'));
+  const control = q('[data-action="toggle-guidance"]', q('.stage-tools'));
   if (!control) return;
   control.hidden = false;
   const icon = q('[data-guided-icon]', control);
   const label = q('[data-guided-label]', control);
   if (!icon || !label) return;
 
-  let iconName = 'play';
-  let copy = 'Guided preview';
-  if (guidedTourActive) {
-    iconName = 'pause';
-    copy = 'Pause guidance';
-  } else if (state.phase === PHASE.COMPLETE) {
-    iconName = 'reset';
-    copy = 'Replay mission';
-  } else if ([PHASE.REVIEW, PHASE.APPROVED].includes(state.phase)) {
-    iconName = 'lock';
-    copy = 'Human checkpoint';
-  }
+  const iconName = guidedTourActive ? 'mission' : 'play';
+  const copy = guidedTourActive ? 'Guided judge' : 'Auto run';
   icon.innerHTML = iconMarkup(iconName);
   label.textContent = copy;
   control.setAttribute('aria-pressed', String(guidedTourActive));
+}
+
+function guideCheckpointId() {
+  if (state.phase === PHASE.COMPLETE) return 'audit';
+  if (bridgeMode === 'discovery') return 'discovery';
+  if (bridgeMode === 'mapping') return 'mapping';
+  if (bridgeMode === 'safe' || bridgeMode === 'preparation') return 'evidence';
+  if (bridgeMode === 'sealing') return 'audit';
+  if (bridgeMode === 'security') return 'security';
+  if (bridgeMode === 'approval' || state.phase === PHASE.REVIEW) return 'approval';
+  if (bridgeMode === 'execution' || state.phase === PHASE.APPROVED || state.phase === PHASE.EXECUTING) return 'execution';
+  if (state.phase === PHASE.IDLE) return 'objective';
+  if (state.phase === PHASE.MAPPING && !Object.keys(state.mappings).length) return 'discovery';
+  if (state.phase === PHASE.MAPPING && activeProfile.completion === 'security') return 'security';
+  if ([PHASE.MAPPING, PHASE.READING, PHASE.PREPARING].includes(state.phase)) return 'evidence';
+  return 'objective';
+}
+
+function renderJudgeGuide() {
+  const current = guideCheckpointId();
+  const currentIndex = MISSION_GUIDE_STEPS.indexOf(current);
+  for (const item of qa('[data-guide-step]')) {
+    const id = item.dataset.guideStep;
+    const index = MISSION_GUIDE_STEPS.indexOf(id);
+    const irrelevant = (activeProfile.completion === 'read-only' && ['approval', 'execution'].includes(id))
+      || (activeProfile.completion === 'security' && ['evidence', 'approval', 'execution'].includes(id));
+    const independentlyComplete = id === 'security' && unsafeToolQuarantined();
+    const stepState = irrelevant
+      ? 'skipped'
+      : id === current
+        ? 'active'
+        : independentlyComplete || index < currentIndex
+          ? 'complete'
+          : 'pending';
+    item.dataset.state = stepState;
+    item.toggleAttribute('aria-current', stepState === 'active');
+  }
+}
+
+function guidedContext(context) {
+  if (!guidedTourActive || context.loading) return context;
+  const guide = activeProfile.guide[guideCheckpointId()];
+  return { ...context, current: guide[0], next: guide[1], requires: guide[2] };
 }
 
 function missionContextState() {
@@ -1127,10 +1270,46 @@ function missionContextState() {
     };
     if (bridgeMode === 'safe') return {
       current: state.phase === PHASE.PREPARING ? 'Preparing the recovery plan' : 'Reading evidence without mutation',
-      next: 'Present two exact changes for review',
+      next: activeProfile.completion === 'read-only' ? 'Seal the evidence without staging' : 'Present two exact changes for review',
       requires: 'Nothing while safe reads settle',
       label: state.phase === PHASE.PREPARING ? 'Preparing recovery…' : 'Reading evidence…',
       action: 'start-mission',
+      disabled: true,
+      loading: true,
+    };
+    if (bridgeMode === 'mapping') return {
+      current: 'Normalizing live tool contracts',
+      next: 'Bind one canonical provider-neutral plan',
+      requires: 'Nothing while mappings are verified',
+      label: 'Mapping capabilities…',
+      action: 'start-mission',
+      disabled: true,
+      loading: true,
+    };
+    if (bridgeMode === 'preparation') return {
+      current: 'Deriving two exact effects from completed evidence',
+      next: 'Stop at separate human approvals',
+      requires: 'Nothing while exact arguments are finalized',
+      label: 'Preparing exact effects…',
+      action: 'start-mission',
+      disabled: true,
+      loading: true,
+    };
+    if (bridgeMode === 'security') return {
+      current: 'Running real authority verifier challenges',
+      next: 'Seal the rejection receipts',
+      requires: 'Nothing; external dispatch is disabled',
+      label: 'Verifying fail-closed policy…',
+      action: 'start-mission',
+      disabled: true,
+      loading: true,
+    };
+    if (bridgeMode === 'sealing') return {
+      current: 'Verifying the read-only audit chain',
+      next: 'Publish a sealed evidence receipt',
+      requires: 'Nothing; no effect is prepared or dispatched',
+      label: 'Sealing evidence…',
+      action: 'open-audit',
       disabled: true,
       loading: true,
     };
@@ -1155,46 +1334,54 @@ function missionContextState() {
   }
 
   const mappingsReady = Object.keys(state.mappings).length === mappableNodeIds.length;
-  if (state.phase === PHASE.IDLE) return {
+  if (state.phase === PHASE.IDLE) return guidedContext({
     current: 'Objective ready',
     next: 'Discover verified provider origins',
-    requires: 'Start the judge walkthrough',
-    label: 'Start judge walkthrough',
+    requires: 'Start the selected mission',
+    label: guidedTourActive ? 'Begin guided mission' : 'Run to next human boundary',
     action: 'start-mission',
     disabled: false,
-  };
-  if (state.phase === PHASE.MAPPING) return {
-    current: mappingsReady ? 'Capabilities normalized' : 'Capability mapping incomplete',
-    next: 'Run four read-only evidence checks',
-    requires: mappingsReady ? 'Start the safe evidence batch' : 'Reset and retry discovery',
-    label: mappingsReady ? 'Run 4 safe reads' : 'Reset walkthrough',
-    action: mappingsReady ? 'start-mission' : 'reset',
+  });
+  if (state.phase === PHASE.MAPPING && !mappingsReady) return guidedContext({
+    current: 'Registry discovered and hostile metadata quarantined',
+    next: 'Normalize retained tools into canonical capabilities',
+    requires: 'Map the live tool contracts',
+    label: 'Map live capabilities',
+    action: 'start-mission',
     disabled: false,
-  };
-  if ([PHASE.READING, PHASE.PREPARING].includes(state.phase)) return {
-    current: 'Safe evidence stopped before review',
-    next: 'Return to a clean objective',
-    requires: 'Reset the walkthrough',
-    label: 'Reset walkthrough',
-    action: 'reset',
+  });
+  if (state.phase === PHASE.MAPPING) return guidedContext({
+    current: 'Capabilities normalized',
+    next: activeProfile.completion === 'security' ? 'Run real denial challenges' : 'Run four read-only evidence checks',
+    requires: 'Continue the selected mission',
+    label: activeProfile.completion === 'security' ? 'Run 3 security checks' : 'Run 4 safe reads',
+    action: 'start-mission',
     disabled: false,
-  };
-  if (state.phase === PHASE.REVIEW) return {
+  });
+  if (state.phase === PHASE.PREPARING) return guidedContext({
+    current: 'Read-only evidence is correlated',
+    next: activeProfile.completion === 'read-only' ? 'Seal without preparing an effect' : 'Prepare two exact effects',
+    requires: 'Continue from the evidence checkpoint',
+    label: activeProfile.completion === 'read-only' ? 'Seal read-only audit' : 'Prepare 2 exact effects',
+    action: 'start-mission',
+    disabled: false,
+  });
+  if (state.phase === PHASE.REVIEW) return guidedContext({
     current: 'Evidence complete; both changes remain locked',
     next: 'Review each exact effect separately',
     requires: 'Approve or leave each change locked',
     label: 'Review 2 exact changes',
     action: 'review-approval',
     disabled: false,
-  };
-  if (state.phase === PHASE.APPROVED) return {
+  });
+  if (state.phase === PHASE.APPROVED) return guidedContext({
     current: 'Both exact effects approved',
     next: 'Execute the bound pair once',
     requires: 'Review once more, then execute',
     label: 'Review approved actions',
     action: 'review-approval',
     disabled: false,
-  };
+  });
   if (state.phase === PHASE.EXECUTING) return {
     current: 'Execution stopped before a verified seal',
     next: 'Return to a clean objective',
@@ -1203,18 +1390,22 @@ function missionContextState() {
     action: 'open-audit',
     disabled: false,
   };
-  return {
-    current: 'Recovery complete; audit chain sealed',
+  return guidedContext({
+    current: `${activeProfile.outcome.title}; audit chain sealed`,
     next: 'Inspect receipts and proof',
     requires: 'No further action required',
     label: 'View sealed audit',
     action: 'open-audit',
     disabled: false,
-  };
+  });
 }
 
 function renderMissionContext() {
   const context = missionContextState();
+  q('[data-context-mission]').textContent = activeProfile.title;
+  q('[data-context-label="current"]').textContent = guidedTourActive ? 'What happened' : 'Current';
+  q('[data-context-label="next"]').textContent = guidedTourActive ? 'Why it matters' : 'Next';
+  q('[data-context-label="requires"]').textContent = guidedTourActive ? 'Next' : 'Requires you';
   q('[data-context-current]').textContent = context.current;
   q('[data-context-next]').textContent = context.next;
   q('[data-context-requires]').textContent = context.requires;
@@ -1232,17 +1423,19 @@ function renderMissionBrief() {
   const complete = state.phase === PHASE.COMPLETE;
   const applyReceipt = controllerSnapshot.results['apply-recovery-option'];
   const publishReceipt = controllerSnapshot.results['publish-status-update'];
-  q('[data-mission-kicker]').textContent = complete ? 'Verified outcome' : 'Recovery demo brief';
-  q('[data-mission-title]').textContent = complete ? 'Checkout restored' : 'Restore checkout safely';
-  q('[data-constraint="environment"]').textContent = complete ? formatMissionTime(missionCompletedIn ?? 0) : 'Production';
+  q('[data-mission-kicker]').textContent = complete ? 'Verified outcome' : activeProfile.kicker;
+  q('[data-mission-title]').textContent = complete ? activeProfile.outcome.title : activeProfile.title;
+  q('[data-constraint="environment"]').textContent = complete ? formatMissionTime(missionCompletedIn ?? 0) : activeProfile.constraints[0];
   q('[data-constraint="mode"]').textContent = complete
     ? `${new Set(runtimeTools.map(({ origin }) => origin)).size} origins consulted`
-    : 'Read first';
-  q('[data-constraint="authority"]').textContent = complete ? '2 explicit approvals' : 'Exact approval';
+    : activeProfile.constraints[1];
+  q('[data-constraint="authority"]').textContent = complete ? activeProfile.outcome.authority : activeProfile.constraints[2];
   copy.hidden = editingObjective;
   input.hidden = !editingObjective;
   if (!editingObjective) copy.textContent = complete
-    ? `${applyReceipt?.activeReleaseId ?? 'Verified release'} restored; ${publishReceipt?.noticeRevision ?? 'customer update'} published; audit chain sealed.`
+    ? activeProfile.completion === 'mutations'
+      ? `${applyReceipt?.activeReleaseId ?? 'Verified release'} restored; ${publishReceipt?.noticeRevision ?? 'customer update'} published; audit chain sealed.`
+      : activeProfile.outcome.summary
     : objective;
   const editButton = q('[data-action="edit-objective"]');
   const saveButton = q('[data-action="save-objective"]');
@@ -1253,6 +1446,28 @@ function renderMissionBrief() {
   editButton.disabled = state.phase !== PHASE.IDLE;
   saveButton.disabled = state.phase !== PHASE.IDLE;
   cancelButton.disabled = state.phase !== PHASE.IDLE;
+}
+
+function renderMissionGallery() {
+  const grid = q('[data-mission-gallery-grid]');
+  if (!grid) return;
+  if (!grid.children.length) {
+    grid.innerHTML = MISSION_PROFILES.map((profile, index) => `
+      <button class="mission-profile-card" type="button" data-action="select-mission" data-mission-id="${htmlEscape(profile.id)}">
+        <span class="mission-profile-index">0${index + 1}</span>
+        <span class="mission-profile-icon" data-accent="${htmlEscape(profile.accent)}">${iconMarkup(profile.icon)}</span>
+        <span class="mission-profile-copy"><small>${htmlEscape(profile.kicker)}</small><strong>${htmlEscape(profile.title)}</strong><em>${htmlEscape(profile.summary)}</em></span>
+        <span class="mission-profile-proof">${htmlEscape(profile.proof)}</span>
+        <i class="mission-profile-select" aria-hidden="true"></i>
+      </button>
+    `).join('');
+  }
+  for (const card of qa('[data-mission-id]', grid)) {
+    const selected = card.dataset.missionId === activeProfile.id;
+    card.dataset.selected = String(selected);
+    card.setAttribute('aria-pressed', String(selected));
+    card.disabled = state.phase !== PHASE.IDLE || operationRunning;
+  }
 }
 
 function renderProviderLegend() {
@@ -1282,8 +1497,8 @@ function renderConstellation() {
 
   const layout = createConstellationLayout(graphInput());
   mount.innerHTML = renderConstellationSvg(layout, {
-    title: 'ToolBraid production recovery provider constellation',
-    description: 'Independent WebMCP provider origins map to canonical recovery capabilities. Active edges pulse only while their real mission event is running.',
+    title: `ToolBraid ${activeProfile.shortTitle} provider constellation`,
+    description: 'Independent WebMCP provider origins map to canonical capabilities. Active edges pulse only while their real mission event is running.',
   });
   const graph = q('.tb-constellation', mount);
   const zoomWidth = layout.width / graphZoom;
@@ -1301,11 +1516,42 @@ function renderConstellation() {
 }
 
 function renderReads() {
+  if (activeProfile.completion === 'security') {
+    const checks = new Map((controllerSnapshot.securityChecks ?? []).map((check) => [check.challenge, check]));
+    const rows = [
+      ['health', 'Hostile metadata', checks.get('hostile-metadata')],
+      ['release', 'Origin drift', checks.get('origin-drift')],
+      ['deployment', 'Nonce replay', checks.get('nonce-replay')],
+      ['notice', 'Mutation dispatches', state.phase === PHASE.COMPLETE ? { code: '0 external effects' } : null],
+    ];
+    q('[data-read-kicker]').textContent = 'Authority evidence';
+    q('[data-read-title]').textContent = 'Rejection receipts';
+    q('[data-read-summary]').textContent = `${checks.size} / 3`;
+    for (const [rowId, title, check] of rows) {
+      const row = q(`[data-read="${rowId}"]`);
+      row.dataset.state = check ? 'complete' : 'idle';
+      q('strong', row).textContent = title;
+      q('small', row).textContent = check?.code ?? 'Waiting';
+      q('time', row).textContent = check ? 'blocked' : '—';
+    }
+    return;
+  }
+
+  q('[data-read-kicker]').textContent = 'Parallel evidence';
+  q('[data-read-title]').textContent = 'Read-only batch';
   let complete = 0;
+  const rowTitles = Object.freeze({
+    health: 'Service health',
+    release: 'Release history',
+    deployment: 'Deployment state',
+    notice: 'Status notice',
+  });
   for (const semanticId of readSemanticIds) {
-    const row = q(`[data-read="${semanticId.split('.')[0] === 'service' ? 'health' : semanticId.split('.')[0] === 'release' ? 'release' : semanticId.split('.')[0] === 'deployment' ? 'deployment' : 'notice'}"]`);
+    const rowId = semanticId.split('.')[0] === 'service' ? 'health' : semanticId.split('.')[0] === 'release' ? 'release' : semanticId.split('.')[0] === 'deployment' ? 'deployment' : 'notice';
+    const row = q(`[data-read="${rowId}"]`);
     const info = readUi[semanticId];
     row.dataset.state = info.state;
+    q('strong', row).textContent = rowTitles[rowId];
     q('small', row).textContent = info.detail;
     q('time', row).textContent = info.time;
     if (info.state === 'complete') complete += 1;
@@ -1389,14 +1635,39 @@ function renderInspector() {
     ? `sha256:${mappedTool.schemaFingerprint.slice(0, 12)}…`
     : '—';
 
+  const securityChecks = activeProfile.completion === 'security'
+    ? controllerSnapshot.securityChecks ?? []
+    : [];
+  const securityVerified = securityChecks.length === 3 && state.phase === PHASE.COMPLETE;
+  const securityQuarantined = activeProfile.completion === 'security'
+    && Object.keys(state.quarantine).length > 0;
+  const signalQuarantined = securityQuarantined && !securityVerified ? true : Boolean(quarantined);
   const signal = q('[data-signal-card]');
-  signal.classList.toggle('quarantine', Boolean(quarantined));
-  signal.classList.toggle('clean', !quarantined);
-  q('[data-signal-icon]').innerHTML = iconMarkup(quarantined ? 'quarantine' : 'shield');
-  q('[data-signal-status]').textContent = quarantined ? 'Quarantined before planning' : state.phase === PHASE.IDLE ? 'Awaiting discovery' : 'Metadata clean';
-  q('[data-signal-count]').textContent = quarantined ? '3 signals' : '0 signals';
+  signal.classList.toggle('quarantine', signalQuarantined);
+  signal.classList.toggle('clean', !signalQuarantined);
+  q('[data-signal-icon]').innerHTML = iconMarkup(signalQuarantined ? 'quarantine' : 'shield');
+  q('[data-signal-status]').textContent = securityVerified
+    ? 'Fail-closed verified'
+    : securityQuarantined
+      ? 'Hostile metadata quarantined'
+      : quarantined
+        ? 'Quarantined before planning'
+        : state.phase === PHASE.IDLE
+          ? 'Awaiting discovery'
+          : 'Metadata clean';
+  q('[data-signal-count]').textContent = securityChecks.length
+    ? `${securityChecks.length} attacks blocked`
+    : securityQuarantined || quarantined
+      ? `${Object.keys(state.quarantine).length || 1} signal`
+      : '0 signals';
 
-  const evidence = evidenceForNode(node);
+  const evidence = securityChecks.length
+    ? securityChecks.map((check) => ({
+      title: check.challenge.split('-').map((part) => `${part[0].toUpperCase()}${part.slice(1)}`).join(' '),
+      detail: `${check.code} · rejected before provider dispatch`,
+      time: 'blocked',
+    }))
+    : evidenceForNode(node);
   q('[data-evidence-count]').textContent = `${evidence.length} ${evidence.length === 1 ? 'item' : 'items'}`;
   q('[data-evidence-list]').innerHTML = evidence.length
     ? evidence.map((item) => `<article class="evidence-item"><i></i><span><strong>${htmlEscape(item.title)}</strong><small>${htmlEscape(item.detail)}</small></span><time>${htmlEscape(item.time)}</time></article>`).join('')
@@ -1459,6 +1730,28 @@ function renderAudit() {
 }
 
 function renderApprovals() {
+  const mutationMission = activeProfile.completion === 'mutations';
+  const approvalView = q('[data-approvals-view]');
+  if (!mutationMission) {
+    q('[data-approval-count]').hidden = true;
+    approvalDialogOpen = false;
+    for (const card of qa('[data-approval-view-card]', approvalView)) card.hidden = true;
+    const empty = q('[data-approval-view-empty]', approvalView);
+    empty.hidden = false;
+    q('strong', empty).textContent = 'No approval path in this mission';
+    q('p', empty).textContent = activeProfile.completion === 'read-only'
+      ? 'The incident trace terminates after correlated evidence and fallback receipts. ToolBraid never prepares or dispatches an external effect.'
+      : 'The security mission proves rejection inside the authority verifier. No production approval or provider mutation is created.';
+    q('[data-approval-view-status]', approvalView).textContent = state.phase === PHASE.COMPLETE ? 'No mutation · sealed' : 'Not required';
+    q('[data-approval-view-count]', approvalView).textContent = '0 external effects';
+    q('[data-approval-view-phase]', approvalView).textContent = state.phase === PHASE.COMPLETE ? 'Audit verified' : 'Policy enforced';
+    q('[data-approval-dialog]').hidden = true;
+    q('[data-dialog-backdrop]').hidden = !(commandMenuOpen || helpDrawerOpen);
+    q('[data-command-menu]').hidden = !commandMenuOpen;
+    q('.app-frame').toggleAttribute('inert', commandMenuOpen || helpDrawerOpen);
+    return;
+  }
+  for (const card of qa('[data-approval-view-card]', approvalView)) card.hidden = false;
   const applyApproved = state.approvals.apply.granted;
   const publishApproved = state.approvals.publish.granted;
   const complete = state.phase === PHASE.COMPLETE;
@@ -1476,7 +1769,6 @@ function renderApprovals() {
   q('[data-approval-count]').textContent = String(pendingApprovals);
   q('[data-approval-count]').hidden = pendingApprovals === 0;
 
-  const approvalView = q('[data-approvals-view]');
   if (approvalView) {
     const approvalViewReady = [PHASE.REVIEW, PHASE.APPROVED].includes(state.phase);
     const approvalViewComplete = state.phase === PHASE.COMPLETE;
@@ -1518,7 +1810,10 @@ function renderApprovals() {
       action.disabled = !approvalViewReady && !approvalViewComplete;
       action.innerHTML = approvalViewComplete ? 'View sealed audit <span aria-hidden="true">→</span>' : 'Open exact review <span aria-hidden="true">→</span>';
     }
-    q('[data-approval-view-empty]', approvalView).hidden = approvalViewReady || approvalViewComplete;
+    const empty = q('[data-approval-view-empty]', approvalView);
+    empty.hidden = approvalViewReady || approvalViewComplete;
+    q('strong', empty).textContent = 'No actionable approval yet';
+    q('p', empty).textContent = 'Start the walkthrough, complete the safe evidence batch, and ToolBraid will stop here before any external mutation.';
   }
 
   const applyCard = q('[data-node-target="apply-recovery"]');
@@ -1639,8 +1934,10 @@ function render() {
   renderHeader();
   renderTrajectory();
   renderGuidedControl();
+  renderJudgeGuide();
   renderMissionContext();
   renderMissionBrief();
+  renderMissionGallery();
   renderProviderLegend();
   renderConstellation();
   renderReads();
@@ -1671,11 +1968,13 @@ async function discoverySequence() {
   showToast('Connecting provider runtime', 'Loading the explicitly allowed WebMCP origins.', 'info');
   try {
     await ensureProviderRuntime();
-    const snapshot = await missionController.discoverAndPlan(objective);
+    const snapshot = await missionController.discoverTools(objective);
     if (epoch !== missionEpoch) return;
     syncControllerSnapshot(snapshot);
-    if (state.phase !== PHASE.MAPPING) throw new Error('The real discovery stream did not produce a complete capability map.');
-    showToast('Capabilities normalized', `${runtimeMappings ? Object.keys(runtimeMappings).length : 0} capabilities are bound to live tool contracts.`, 'success');
+    if (state.phase !== PHASE.MAPPING || Object.keys(state.mappings).length) {
+      throw new Error('The real discovery stream did not stop at the registry checkpoint.');
+    }
+    showToast('Registry verified', `${runtimeTools.length} tools were inspected; hostile metadata was quarantined before mapping.`, 'success');
   } catch (error) {
     if (epoch !== missionEpoch) return;
     showToast('Mission could not start', error?.message ?? 'WebMCP discovery failed.', 'danger');
@@ -1683,6 +1982,32 @@ async function discoverySequence() {
     syncControllerSnapshot();
     if (state.phase !== PHASE.IDLE) dispatch({ type: EVENT.RESET }, { silentError: true });
     missionStartedAt = null;
+  } finally {
+    if (epoch === missionEpoch) {
+      bridgeMode = 'idle';
+      operationRunning = false;
+      render();
+    }
+  }
+}
+
+async function mappingSequence() {
+  if (state.phase !== PHASE.MAPPING || Object.keys(state.mappings).length || operationRunning) return;
+  const epoch = missionEpoch;
+  operationRunning = true;
+  bridgeMode = 'mapping';
+  render();
+  try {
+    const snapshot = await missionController.mapCapabilities();
+    if (epoch !== missionEpoch) return;
+    syncControllerSnapshot(snapshot);
+    if (Object.keys(state.mappings).length !== mappableNodeIds.length) {
+      throw new Error('The real mapping stream did not bind every required capability.');
+    }
+    showToast('Capabilities normalized', `${Object.keys(runtimeMappings).length} capabilities are bound to live tool contracts.`, 'success');
+  } catch (error) {
+    if (epoch !== missionEpoch) return;
+    showToast('Mapping stopped safely', error?.message ?? 'Canonical capability mapping failed.', 'danger');
   } finally {
     if (epoch === missionEpoch) {
       bridgeMode = 'idle';
@@ -1706,16 +2031,17 @@ async function safeReadSequence() {
   }
   render();
   try {
-    const snapshot = await missionController.runSafe();
+    const snapshot = await missionController.runEvidence();
     if (epoch !== missionEpoch) return;
     syncControllerSnapshot(snapshot);
-    if (state.phase !== PHASE.REVIEW) throw new Error('Safe execution stopped before exact mutation arguments were finalized.');
-    showToast('Recovery prepared', 'Real evidence converged; both external effects remain locked for exact approval.', 'success');
-    if (guidedTourActive) {
-      clearGuidedWork();
-      guidedTourActive = false;
-      showToast('Human checkpoint reached', 'Guidance stopped. Review and approve each external effect separately.', 'warning');
-    }
+    if (state.phase !== PHASE.PREPARING) throw new Error('Read-only execution stopped before evidence correlation completed.');
+    showToast(
+      'Evidence checkpoint complete',
+      providerSwapRequested
+        ? 'The primary failed closed; a compatible read-only fallback completed the evidence batch.'
+        : 'Four independent reads converged without preparing or executing an external effect.',
+      'success',
+    );
   } catch (error) {
     if (epoch !== missionEpoch) return;
     if (state.phase === PHASE.PREPARING && missionNode(prepareNodeId)?.status !== NODE_STATUS.FAILED) {
@@ -1728,6 +2054,128 @@ async function safeReadSequence() {
       operationRunning = false;
       render();
     }
+  }
+}
+
+async function preparationSequence() {
+  if (activeProfile.completion !== 'mutations' || state.phase !== PHASE.PREPARING || operationRunning) return;
+  const epoch = missionEpoch;
+  operationRunning = true;
+  bridgeMode = 'preparation';
+  render();
+  try {
+    const snapshot = await missionController.prepareSafe();
+    if (epoch !== missionEpoch) return;
+    syncControllerSnapshot(snapshot);
+    if (state.phase !== PHASE.REVIEW) throw new Error('Preparation stopped before exact mutation arguments were finalized.');
+    showToast('Human checkpoint reached', 'Two exact external effects are prepared and remain locked for separate approvals.', 'warning');
+  } catch (error) {
+    if (epoch !== missionEpoch) return;
+    if (state.phase === PHASE.PREPARING && missionNode(prepareNodeId)?.status !== NODE_STATUS.FAILED) {
+      dispatch({ type: EVENT.PREPARATION_FAILED, error: error?.message ?? 'recovery preparation failed' });
+    }
+    showToast('Preparation stopped safely', error?.message ?? 'Exact effects could not be prepared.', 'danger');
+  } finally {
+    if (epoch === missionEpoch) {
+      bridgeMode = 'idle';
+      operationRunning = false;
+      render();
+    }
+  }
+}
+
+async function completeReadOnlySequence() {
+  if (activeProfile.completion !== 'read-only' || state.phase !== PHASE.PREPARING || operationRunning) return;
+  const epoch = missionEpoch;
+  operationRunning = true;
+  bridgeMode = 'sealing';
+  render();
+  try {
+    const snapshot = await missionController.completeReadOnly();
+    if (epoch !== missionEpoch) return;
+    syncControllerSnapshot(snapshot);
+    const sealHash = snapshot.seal?.head;
+    if (!sealHash || !snapshot.auditVerified) throw new Error('Read-only evidence completed without a verified audit seal.');
+    dispatch({
+      type: EVENT.MISSION_SEALED,
+      kind: 'read-only',
+      sealHash,
+      resultNodeIds: readNodeIds,
+    });
+    missionCompletedIn = missionStartedAt ? Date.now() - missionStartedAt : 0;
+    showToast('Incident trace sealed', 'Fallback evidence was verified; zero external effects were prepared or dispatched.', 'success');
+  } catch (error) {
+    if (epoch !== missionEpoch) return;
+    showToast('Read-only seal blocked', error?.message ?? 'The evidence chain could not be sealed.', 'danger');
+  } finally {
+    if (epoch === missionEpoch) {
+      bridgeMode = 'idle';
+      operationRunning = false;
+      render();
+    }
+  }
+}
+
+async function authoritySequence() {
+  if (activeProfile.completion !== 'security'
+      || state.phase !== PHASE.MAPPING
+      || Object.keys(state.mappings).length !== mappableNodeIds.length
+      || operationRunning) return;
+  const epoch = missionEpoch;
+  operationRunning = true;
+  bridgeMode = 'security';
+  render();
+  try {
+    const snapshot = await missionController.verifyAuthorityBoundary();
+    if (epoch !== missionEpoch) return;
+    syncControllerSnapshot(snapshot);
+    const sealHash = snapshot.seal?.head;
+    if (!sealHash || !snapshot.auditVerified || snapshot.securityChecks.length !== 3) {
+      throw new Error('Authority verification completed without three sealed rejection receipts.');
+    }
+    dispatch({ type: EVENT.MISSION_SEALED, kind: 'security', sealHash, resultNodeIds: [] });
+    missionCompletedIn = missionStartedAt ? Date.now() - missionStartedAt : 0;
+    showToast('Authority attack stopped', 'Hostile metadata, origin drift, and nonce replay were rejected before provider dispatch.', 'success');
+  } catch (error) {
+    if (epoch !== missionEpoch) return;
+    showToast('Authority verification blocked', error?.message ?? 'The fail-closed proof could not be sealed.', 'danger');
+  } finally {
+    if (epoch === missionEpoch) {
+      bridgeMode = 'idle';
+      operationRunning = false;
+      render();
+    }
+  }
+}
+
+async function advanceMission({ auto = !guidedTourActive } = {}) {
+  if (operationRunning) return;
+  if (state.phase === PHASE.COMPLETE) {
+    setPrimaryView('audit', { moveFocus: true });
+    return;
+  }
+  if (state.phase === PHASE.IDLE) {
+    await discoverySequence();
+    if (!auto || state.phase !== PHASE.MAPPING) return;
+  }
+  if (state.phase === PHASE.MAPPING && !Object.keys(state.mappings).length) {
+    await mappingSequence();
+    if (!auto || Object.keys(state.mappings).length !== mappableNodeIds.length) return;
+  }
+  if (state.phase === PHASE.MAPPING && activeProfile.completion === 'security') {
+    await authoritySequence();
+    return;
+  }
+  if (state.phase === PHASE.MAPPING) {
+    await safeReadSequence();
+    if (!auto || state.phase !== PHASE.PREPARING) return;
+  }
+  if (state.phase === PHASE.PREPARING && activeProfile.completion === 'read-only') {
+    await completeReadOnlySequence();
+    return;
+  }
+  if (state.phase === PHASE.PREPARING && activeProfile.completion === 'mutations') {
+    await preparationSequence();
   }
 }
 
@@ -1877,34 +2325,27 @@ async function executeApproved() {
 function stopGuidedTour({ announce = true } = {}) {
   clearGuidedWork();
   guidedTourActive = false;
+  updateMissionUrl();
   render();
-  if (announce) showToast('Guidance paused', 'The mission remains interactive at its current checkpoint.', 'info');
+  if (announce) showToast('Auto run selected', 'ToolBraid will continue through safe checkpoints until human authority is required.', 'info');
 }
 
 async function startGuidedTour() {
-  if (guidedTourActive) {
-    stopGuidedTour();
-    return;
-  }
-  if ([PHASE.REVIEW, PHASE.APPROVED].includes(state.phase)) {
-    openApprovalDialog();
-    return;
-  }
-  if (state.phase !== PHASE.IDLE) await resetMission();
-  if (state.phase !== PHASE.IDLE || operationRunning) return;
-
   guidedTourActive = true;
+  updateMissionUrl();
   commandMenuOpen = false;
   render();
-  showToast('Guided mission started', 'ToolBraid will run real discovery and safe evidence reads, then stop for human authority.', 'info');
-  await discoverySequence();
-  if (guidedTourActive && state.phase === PHASE.MAPPING) await safeReadSequence();
-  if (guidedTourActive) {
-    guidedTourActive = false;
+  showToast('Guided judge mode', 'The mission pauses after each real engine checkpoint and explains the proof.', 'info');
+  await advanceMission({ auto: false });
+}
+
+function toggleGuidance() {
+  if (guidedTourActive) stopGuidedTour();
+  else {
+    guidedTourActive = true;
+    updateMissionUrl();
     render();
-    if (state.phase === PHASE.REVIEW) {
-      showToast('Human checkpoint reached', 'Guidance stopped. Review and approve each external effect separately.', 'warning');
-    }
+    showToast('Guided judge mode', 'Each real checkpoint now pauses before the next operation.', 'info');
   }
 }
 
@@ -1929,7 +2370,6 @@ async function resetMission() {
   graphZoom = 1;
   providerSwapRequested = false;
   auditSealHash = null;
-  guidedTourActive = false;
   approvalDialogOpen = false;
   commandMenuOpen = false;
   overlayReturnFocus = null;
@@ -1978,7 +2418,7 @@ function renderPrimaryView() {
   const approvals = primaryView === 'approvals';
   document.body.dataset.appView = primaryView;
   q('[data-walkthrough-view]').hidden = primaryView !== 'topology';
-  q('[data-approval-dock]').hidden = primaryView !== 'topology';
+  q('[data-approval-dock]').hidden = primaryView !== 'topology' || activeProfile.completion !== 'mutations';
   q('[data-universal-view]').hidden = !live;
   q('[data-approvals-view]').hidden = !approvals;
   q('.evidence-panel').hidden = !(primaryView === 'topology' || inspector);
@@ -2032,15 +2472,15 @@ function setPanel(panelName) {
 function handleAction(action, source, { trusted = false } = {}) {
   switch (action) {
     case 'guided-tour': startGuidedTour(); break;
-    case 'start-mission':
-      if (state.phase === PHASE.IDLE) discoverySequence();
-      else if (state.phase === PHASE.MAPPING) safeReadSequence();
-      else if ([PHASE.REVIEW, PHASE.APPROVED].includes(state.phase)) openApprovalDialog();
-      break;
+    case 'toggle-guidance': toggleGuidance(); break;
+    case 'start-mission': advanceMission(); break;
+    case 'select-mission': selectMissionProfile(source?.dataset.missionId); break;
+    case 'choose-mission': void chooseMission(); break;
     case 'reset': resetMission(); break;
     case 'swap-provider': swapProvider(); break;
     case 'review-approval':
-      if (state.phase === PHASE.COMPLETE) setPrimaryView('audit', { moveFocus: true });
+      if (activeProfile.completion !== 'mutations') setPrimaryView('audit', { moveFocus: true });
+      else if (state.phase === PHASE.COMPLETE) setPrimaryView('audit', { moveFocus: true });
       else openApprovalDialog();
       break;
     case 'close-approval': closeOverlays(); break;
@@ -2237,6 +2677,17 @@ document.addEventListener('keydown', (event) => {
     event.preventDefault();
     handleAction('open-command');
   }
+  const typing = event.target.matches?.('input, textarea, select, [contenteditable="true"]');
+  if (!typing && !activeOverlay && !event.metaKey && !event.ctrlKey && !event.altKey) {
+    if (event.key.toLowerCase() === 'g') {
+      event.preventDefault();
+      startGuidedTour();
+    }
+    if (event.key.toLowerCase() === 'm') {
+      event.preventDefault();
+      void chooseMission();
+    }
+  }
   if (event.key === 'Escape' && editingObjective && !activeOverlay) cancelObjectiveEditing();
   else if (event.key === 'Escape') closeOverlays();
 });
@@ -2283,11 +2734,13 @@ window.setInterval(() => {
 window.__TOOLBRAID_V2__ = Object.freeze({
   getState: () => state,
   getEngineSnapshot: () => missionController.snapshot(),
-  start: discoverySequence,
+  getMissionProfile: () => activeProfile,
+  start: advanceMission,
   runSafeReads: safeReadSequence,
   swapProvider,
   executeApproved,
   startGuidedTour,
+  selectMission: selectMissionProfile,
   reset: resetMission,
 });
 

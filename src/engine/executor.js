@@ -225,7 +225,14 @@ async function executeNode(node, context) {
   }
 }
 
-export async function runPlanUntilBlocked(plan, services, { includeApprovedMutations = false } = {}) {
+export async function runPlanUntilBlocked(plan, services, {
+  includeApprovedMutations = false,
+  stopBeforeNodeIds = [],
+} = {}) {
+  if (!Array.isArray(stopBeforeNodeIds) || stopBeforeNodeIds.some((nodeId) => typeof nodeId !== 'string')) {
+    throw executionError('EXECUTION_OPTION_INVALID', 'stopBeforeNodeIds must be an array of node IDs.');
+  }
+  const stopBefore = new Set(stopBeforeNodeIds);
   const context = {
     ...services,
     plan,
@@ -241,7 +248,8 @@ export async function runPlanUntilBlocked(plan, services, { includeApprovedMutat
 
   let executed = 0;
   while (true) {
-    const batch = runnableNodes(plan, { includeApprovedMutations });
+    const batch = runnableNodes(plan, { includeApprovedMutations })
+      .filter((node) => !stopBefore.has(node.id));
     if (!batch.length) break;
     const settled = await Promise.allSettled(batch.map((node) => executeNode(node, context)));
     executed += batch.length;

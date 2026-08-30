@@ -32,6 +32,14 @@ const DEFAULT_ORCHESTRATOR_ORIGIN = 'https://app.toolbraid.dev';
 const APPLY_NODE_ID = 'apply-recovery-option';
 const PUBLISH_NODE_ID = 'publish-status-update';
 const MUTATION_NODE_BY_SCOPE = Object.freeze({ apply: APPLY_NODE_ID, publish: PUBLISH_NODE_ID });
+const EVIDENCE_NODE_IDS = Object.freeze([
+  'read-service-health',
+  'read-release-history',
+  'read-deployment-history',
+  'read-status-notice',
+  'correlate-evidence',
+]);
+const PREPARATION_NODE_IDS = Object.freeze(['prepare-recovery-option', 'draft-status-update']);
 
 const DEFAULT_ARGUMENTS = Object.freeze({
   [CAPABILITY.SERVICE_HEALTH_READ]: Object.freeze({ serviceId: 'checkout', windowMinutes: 30 }),
@@ -211,8 +219,10 @@ export function createMissionController({
   let mode = 'uninitialized';
   let catalog = null;
   let normalization = null;
+  let pendingNormalization = null;
   let discoveredTools = [];
   let discoveredToolDescriptors = [];
+  let missionObjective = null;
   let plan = null;
   let results = new Map();
   let approvals = new Map();
@@ -220,6 +230,7 @@ export function createMissionController({
   let invalidated = false;
   let unsubscribeToolChanges = null;
   let seal = null;
+  let securityChecks = [];
   let activeOperation = null;
   let activeAbortController = null;
 
@@ -355,27 +366,31 @@ export function createMissionController({
     },
   });
 
-  async function discoverAndPlan(objective) {
+  async function discoverTools(objective) {
     await initialize();
-    if (plan) throw controllerError('MISSION_ALREADY_STARTED', 'Reset before starting another mission.');
+    if (plan || discoveredTools.length) throw controllerError('MISSION_ALREADY_STARTED', 'Reset before starting another mission.');
+    if (typeof objective !== 'string' || objective.trim() === '') {
+      throw controllerError('OBJECTIVE_REQUIRED', 'A non-empty mission objective is required.');
+    }
+    missionObjective = objective;
     record('mission.started', { objective });
     discoveredTools = await client.discover();
-    normalization = normalizeDiscoveredTools({
+    pendingNormalization = normalizeDiscoveredTools({
       tools: discoveredTools,
       capabilityPack: RECOVERY_CAPABILITIES,
       minimumConfidence: 0.45,
       ambiguityMargin: 0.04,
     });
     const fingerprints = new Map();
-    for (const item of normalization.accepted) fingerprints.set(item.tool, item.schemaFingerprint);
-    for (const item of normalization.rejected) fingerprints.set(item.tool, item.schemaFingerprint ?? null);
-    const quarantinedTools = new Set(normalization.quarantined.map(({ tool }) => tool));
+    for (const item of pendingNormalization.accepted) fingerprints.set(item.tool, item.schemaFingerprint);
+    for (const item of pendingNormalization.rejected) fingerprints.set(item.tool, item.schemaFingerprint ?? null);
+    const quarantinedTools = new Set(pendingNormalization.quarantined.map(({ tool }) => tool));
     discoveredToolDescriptors = discoveredTools.map((tool) => toolDescriptor(tool, {
       schemaFingerprint: fingerprints.get(tool) ?? null,
       quarantined: quarantinedTools.has(tool),
     }));
     for (const descriptor of discoveredToolDescriptors) record('tool.discovered', descriptor);
-    for (const item of normalization.quarantined) {
+    for (const item of pendingNormalization.quarantined) {
       record('tool.quarantined', {
         toolId: toolId(item.tool),
         origin: item.identity.origin,
@@ -384,6 +399,20 @@ export function createMissionController({
         evidence: item.security.metadata?.evidence ?? item.security.evidence ?? [],
       });
     }
+    record('discovery.completed', {
+      toolCount: discoveredToolDescriptors.length,
+      quarantinedToolCount: pendingNormalization.quarantined.length,
+      originCount: new Set(discoveredToolDescriptors.map(({ origin }) => origin)).size,
+    });
+    return snapshot();
+  }
+
+  async function mapCapabilities() {
+    if (!pendingNormalization || !discoveredTools.length) {
+      throw controllerError('DISCOVERY_REQUIRED', 'Discover the live provider registry before mapping capabilities.');
+    }
+    if (plan) throw controllerError('MISSION_ALREADY_PLANNED', 'The current mission already has a capability plan.');
+    normalization = pendingNormalization;
     const missing = normalization.mappings.filter(({ primary }) => !primary).map(({ capabilityId }) => capabilityId);
     if (missing.length) {
       throw controllerError('CAPABILITY_MAPPING_MISSING', `Required capabilities were not mapped: ${missing.join(', ')}`, { missing });
@@ -398,7 +427,7 @@ export function createMissionController({
     const missionId = validateMissionId(missionIdFactory());
     plan = buildRecoveryPlan({
       id: missionId,
-      objective,
+      objective: missionObjective,
       mappings: normalization.mappings,
       argumentsByCapability: DEFAULT_ARGUMENTS,
       deferMutationArguments: true,
@@ -415,8 +444,43 @@ export function createMissionController({
     return snapshot();
   }
 
-  async function runSafe(signal) {
+  async function discoverAndPlan(objective) {
+    await discoverTools(objective);
+    return mapCapabilities();
+  }
+
+  function evidenceComplete() {
+    return Boolean(plan) && EVIDENCE_NODE_IDS.every((nodeId) => (
+      plan.nodes.find((node) => node.id === nodeId)?.status === 'completed'
+    ));
+  }
+
+  async function runEvidence(signal) {
     assertPlanCurrent();
+    if (seal) throw controllerError('MISSION_ALREADY_SEALED', 'The mission audit is already sealed.');
+    if (evidenceComplete()) return snapshot();
+    const outcome = await runPlanUntilBlocked(plan, services(signal), {
+      stopBeforeNodeIds: PREPARATION_NODE_IDS,
+    });
+    results = outcome.results;
+    if (!evidenceComplete()) {
+      throw controllerError('EVIDENCE_EXECUTION_INCOMPLETE', 'Read-only evidence stopped before correlation completed.');
+    }
+    record('evidence.completed', {
+      planId: plan.id,
+      nodeIds: EVIDENCE_NODE_IDS,
+      resultCount: EVIDENCE_NODE_IDS.length,
+    });
+    return snapshot();
+  }
+
+  async function prepareSafe(signal) {
+    assertPlanCurrent();
+    if (seal) throw controllerError('MISSION_ALREADY_SEALED', 'The mission audit is already sealed.');
+    if (!evidenceComplete()) {
+      throw controllerError('EVIDENCE_REQUIRED', 'Complete the read-only evidence checkpoint before preparing recovery.');
+    }
+    if (plan.metadata.mutationArgumentsFinalized) return snapshot();
     const outcome = await runPlanUntilBlocked(plan, services(signal));
     results = outcome.results;
     if (outcome.status !== 'approval_required') {
@@ -432,6 +496,81 @@ export function createMissionController({
         return [nodeId, sha256Hex(node.arguments)];
       })),
     });
+    return snapshot();
+  }
+
+  async function runSafe(signal) {
+    await runEvidence(signal);
+    return prepareSafe(signal);
+  }
+
+  async function completeReadOnly() {
+    assertPlanCurrent();
+    if (seal) throw controllerError('MISSION_ALREADY_SEALED', 'The mission audit is already sealed.');
+    if (!evidenceComplete()) {
+      throw controllerError('EVIDENCE_REQUIRED', 'Read-only completion requires the full correlated evidence set.');
+    }
+    if (PREPARATION_NODE_IDS.some((nodeId) => plan.nodes.find((node) => node.id === nodeId)?.status !== 'pending')
+        || results.has(APPLY_NODE_ID)
+        || results.has(PUBLISH_NODE_ID)) {
+      throw controllerError('READ_ONLY_BOUNDARY_CROSSED', 'Read-only completion is forbidden after recovery preparation or mutation execution.');
+    }
+    record('mission.read_only_completed', {
+      planId: plan.id,
+      resultNodeIds: EVIDENCE_NODE_IDS,
+      mutationDispatchCount: 0,
+    });
+    seal = auditTrail.seal();
+    return snapshot();
+  }
+
+  async function verifyAuthorityBoundary() {
+    assertPlanCurrent();
+    if (seal) throw controllerError('MISSION_ALREADY_SEALED', 'The mission audit is already sealed.');
+    if (results.size || approvals.size) {
+      throw controllerError('AUTHORITY_TEST_STATE_INVALID', 'Authority verification must run before evidence or approval execution.');
+    }
+    const hostile = normalization?.quarantined?.[0];
+    if (!hostile) throw controllerError('AUTHORITY_TEST_INCOMPLETE', 'No hostile metadata was quarantined.');
+
+    securityChecks = [];
+    const rejected = (challenge, code) => {
+      const check = Object.freeze({ challenge, code });
+      securityChecks.push(check);
+      record('authority.challenge_rejected', check);
+    };
+    rejected('hostile-metadata', 'TOOL_METADATA_QUARANTINED');
+
+    const node = plan.nodes.find((candidate) => candidate.id === APPLY_NODE_ID);
+    const exact = bindingForNode(plan, node, node.arguments);
+    const driftEnvelope = createApprovalEnvelope(exact, { now: now() });
+    try {
+      claimApprovalEnvelopeSet([{
+        envelope: driftEnvelope,
+        expected: { ...exact, toolOrigin: 'https://drift.invalid' },
+      }], { now: now() });
+      throw controllerError('AUTHORITY_TEST_FAILED', 'Origin drift was accepted unexpectedly.');
+    } catch (error) {
+      if (error?.code !== 'APPROVAL_TOOL_ORIGIN_MISMATCH') throw error;
+      rejected('origin-drift', error.code);
+    }
+
+    const replayEnvelope = createApprovalEnvelope(exact, { now: now() });
+    claimApprovalEnvelopeSet([{ envelope: replayEnvelope, expected: exact }], { now: now() });
+    try {
+      claimApprovalEnvelopeSet([{ envelope: replayEnvelope, expected: exact }], { now: now() });
+      throw controllerError('AUTHORITY_TEST_FAILED', 'A consumed approval nonce was accepted unexpectedly.');
+    } catch (error) {
+      if (error?.code !== 'APPROVAL_REPLAY_BLOCKED') throw error;
+      rejected('nonce-replay', error.code);
+    }
+
+    record('mission.authority_completed', {
+      planId: plan.id,
+      blockedChallenges: securityChecks.map(({ challenge, code }) => ({ challenge, code })),
+      mutationDispatchCount: 0,
+    });
+    seal = auditTrail.seal();
     return snapshot();
   }
 
@@ -598,6 +737,7 @@ export function createMissionController({
       audit: auditEntries,
       auditVerified: verifyAuditChain(auditEntries),
       seal: seal ? structuredClone(seal) : null,
+      securityChecks: securityChecks.map((check) => structuredClone(check)),
       invalidated,
       providerState: catalog?.snapshot?.() ?? null,
     });
@@ -616,8 +756,10 @@ export function createMissionController({
     mode = 'uninitialized';
     catalog = null;
     normalization = null;
+    pendingNormalization = null;
     discoveredTools = [];
     discoveredToolDescriptors = [];
+    missionObjective = null;
     plan = null;
     results = new Map();
     approvals = new Map();
@@ -625,6 +767,7 @@ export function createMissionController({
     invalidated = false;
     unsubscribeToolChanges = null;
     seal = null;
+    securityChecks = [];
   }
 
   function dispose() {
@@ -636,8 +779,14 @@ export function createMissionController({
 
   return Object.freeze({
     initialize: () => runExclusive('initialize', () => initialize()),
+    discoverTools: (objective) => runExclusive('discoverTools', () => discoverTools(objective)),
+    mapCapabilities: () => runExclusive('mapCapabilities', () => mapCapabilities()),
     discoverAndPlan: (objective) => runExclusive('discoverAndPlan', () => discoverAndPlan(objective)),
+    runEvidence: () => runExclusive('runEvidence', (signal) => runEvidence(signal)),
+    prepareSafe: () => runExclusive('prepareSafe', (signal) => prepareSafe(signal)),
     runSafe: () => runExclusive('runSafe', (signal) => runSafe(signal)),
+    completeReadOnly: () => runExclusive('completeReadOnly', () => completeReadOnly()),
+    verifyAuthorityBoundary: () => runExclusive('verifyAuthorityBoundary', () => verifyAuthorityBoundary()),
     approve: (scope) => runExclusive(`approve:${scope}`, () => approve(scope)),
     executeApproved: () => runExclusive('executeApproved', (signal) => executeApproved(signal)),
     reset,

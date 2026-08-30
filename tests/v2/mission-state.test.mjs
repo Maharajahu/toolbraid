@@ -228,6 +228,41 @@ test('runs discovery, quarantine, semantic mapping, parallel reads, failover, se
   assert.equal(state.audit.at(-1).phaseTo, PHASE.COMPLETE);
 });
 
+test('completes read-only and security missions only with a verified seal from their exact checkpoint', () => {
+  const sealHash = 'a'.repeat(64);
+  let readOnly = reduceMissionEvents(toMapping(), [
+    { type: EVENT.MAPPING_COMPLETED, mappings: MAPPINGS },
+    { type: EVENT.PARALLEL_READS_STARTED },
+    { type: EVENT.READ_NODE_COMPLETED, nodeId: 'health' },
+    { type: EVENT.READ_NODE_COMPLETED, nodeId: 'release' },
+    { type: EVENT.READ_NODE_COMPLETED, nodeId: 'deployment' },
+    { type: EVENT.READ_NODE_COMPLETED, nodeId: 'notice' },
+  ]);
+  readOnly = transitionMission(readOnly, {
+    type: EVENT.MISSION_SEALED,
+    kind: 'read-only',
+    sealHash,
+    resultNodeIds: ['health', 'release', 'deployment', 'notice'],
+  });
+  assert.equal(readOnly.phase, PHASE.COMPLETE);
+  assert.equal(readOnly.completion.kind, 'read-only');
+  assert.equal(readOnly.nodes.find(({ id }) => id === 'review').status, NODE_STATUS.PENDING);
+
+  let security = transitionMission(toMapping(), { type: EVENT.MAPPING_COMPLETED, mappings: MAPPINGS });
+  security = transitionMission(security, {
+    type: EVENT.MISSION_SEALED,
+    kind: 'security',
+    sealHash,
+  });
+  assert.equal(security.phase, PHASE.COMPLETE);
+  assert.equal(security.completion.kind, 'security');
+
+  assert.throws(
+    () => transitionMission(toMapping(), { type: EVENT.MISSION_SEALED, kind: 'security', sealHash: 'forged' }),
+    errorCode('MISSION_SEAL_INVALID'),
+  );
+});
+
 test('rejects invalid transitions without modifying the frozen source state', () => {
   const state = initialState();
   const snapshot = structuredClone(state);

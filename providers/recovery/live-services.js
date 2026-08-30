@@ -4,6 +4,7 @@ const ROUTES = Object.freeze({
   deploy: '/api/live-deploy',
   status: '/api/live-status',
 });
+const CONTROLLED_HEALTH_FAULT = 'primary-health-unavailable';
 
 function liveServiceError(code, message, details = {}) {
   const error = new Error(message);
@@ -91,17 +92,26 @@ async function request(fetchImpl, baseOrigin, route, {
 export function createLiveRecoveryServices({
   baseOrigin = globalThis.location?.origin,
   fetchImpl = globalThis.fetch,
+  healthScenario = null,
 } = {}) {
   if (typeof baseOrigin !== 'string' || !baseOrigin) {
     throw new TypeError('A live provider origin is required.');
   }
   const origin = new URL(baseOrigin).origin;
   if (typeof fetchImpl !== 'function') throw new TypeError('A fetch implementation is required.');
+  if (healthScenario !== null && healthScenario !== CONTROLLED_HEALTH_FAULT) {
+    throw new TypeError('Unknown live health scenario.');
+  }
 
   return Object.freeze({
     health: Object.freeze({
       probe: (input, options = {}) => request(fetchImpl, origin, ROUTES.health, {
-        method: 'GET', input: { service: input.service ?? input.target }, signal: options.signal,
+        method: 'GET',
+        input: {
+          service: input.service ?? input.target,
+          ...(healthScenario ? { scenario: healthScenario } : {}),
+        },
+        signal: options.signal,
       }),
     }),
     source: Object.freeze({
@@ -131,4 +141,4 @@ export function createLiveRecoveryServices({
   });
 }
 
-export { ROUTES as LIVE_RECOVERY_ROUTES };
+export { CONTROLLED_HEALTH_FAULT, ROUTES as LIVE_RECOVERY_ROUTES };

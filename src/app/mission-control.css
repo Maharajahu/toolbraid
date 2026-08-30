@@ -119,7 +119,7 @@ button:disabled { cursor: not-allowed; }
   display: grid;
   grid-template-columns: 68px minmax(0, 1fr);
   grid-template-rows: 66px minmax(0, 1fr) 46px;
-  width: 100vw;
+  width: 100%;
   height: 100vh;
   min-height: 720px;
 }
@@ -1188,6 +1188,190 @@ body[data-phase="complete"] .review-action { color: #03170a; border-color: rgb(1
   .reactive-lens,
   .tb-edge__packet,
   .tb-edge__packet-trail { display: none !important; }
+}
+
+/* Mission gallery and judge checkpoints. */
+.mission-context-strip {
+  grid-template-rows: auto auto;
+  min-height: 112px;
+}
+
+.judge-guide-track {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  gap: 4px;
+  margin: -2px 0 0;
+  padding: 7px 0 0;
+  border-top: 1px solid var(--border);
+  list-style: none;
+}
+
+.judge-guide-track li {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 8px;
+  font-weight: 760;
+  letter-spacing: .03em;
+  transition: color 180ms ease, opacity 180ms ease;
+}
+
+.judge-guide-track li::after {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  top: 50%;
+  right: -3px;
+  left: 19px;
+  height: 1px;
+  background: var(--border);
+}
+
+.judge-guide-track li:last-child::after { display: none; }
+.judge-guide-track i {
+  display: grid;
+  place-items: center;
+  flex: 0 0 18px;
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+  color: var(--muted);
+  background: #111318;
+  font-family: var(--font-mono);
+  font-size: 6px;
+  font-style: normal;
+}
+.judge-guide-track span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.judge-guide-track li[data-state="active"] { color: var(--cyan-bright); }
+.judge-guide-track li[data-state="active"] i { color: #071014; border-color: var(--cyan); background: var(--cyan-bright); box-shadow: 0 0 14px rgb(93 231 255 / 24%); }
+.judge-guide-track li[data-state="complete"] { color: var(--text-soft); opacity: .78; }
+.judge-guide-track li[data-state="complete"] i { color: var(--green-soft); border-color: rgb(137 233 165 / 30%); background: rgb(137 233 165 / 7%); }
+.judge-guide-track li[data-state="skipped"] { opacity: .32; }
+.judge-guide-track li[data-state="skipped"] i { border-style: dashed; }
+.mission-trajectory li[data-state="skipped"] { opacity: .28; }
+.mission-trajectory li[data-state="skipped"] > span { border-style: dashed; }
+
+.constellation-viewport { top: 188px; }
+body[data-phase="idle"] .constellation-placeholder {
+  top: 50%;
+  left: 61%;
+  width: min(820px, calc(100% - 286px));
+  max-height: calc(100% - 24px);
+  text-align: left;
+}
+
+.mission-gallery {
+  width: 100%;
+  padding: 16px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  background:
+    radial-gradient(520px 180px at 10% 0, rgb(93 231 255 / 7%), transparent 68%),
+    linear-gradient(145deg, rgb(20 22 27 / 92%), rgb(10 11 15 / 94%));
+  box-shadow: 0 28px 90px rgb(0 0 0 / 42%), inset 0 1px 0 rgb(255 255 255 / 5%);
+  backdrop-filter: blur(24px) saturate(112%);
+}
+
+.mission-gallery > header,
+.mission-gallery > footer { display: flex; align-items: center; justify-content: space-between; gap: 18px; }
+.mission-gallery > header { margin-bottom: 12px; }
+.mission-gallery h2 { margin: 3px 0 0; font-size: 22px; letter-spacing: -.035em; }
+.mission-gallery > header > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--green-soft);
+  font-size: 9px;
+  font-weight: 760;
+}
+.mission-gallery > header > span i { width: 6px; height: 6px; border-radius: 50%; background: var(--green); box-shadow: 0 0 9px rgb(137 233 165 / 52%); }
+
+.mission-gallery-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; }
+.mission-profile-card {
+  position: relative;
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr);
+  grid-template-rows: auto 1fr auto;
+  gap: 10px;
+  min-width: 0;
+  min-height: 220px;
+  padding: 13px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  background: rgb(255 255 255 / 2.5%);
+  text-align: left;
+  transition: border-color 180ms ease, background 180ms ease, transform 180ms var(--ease-out), box-shadow 180ms ease;
+}
+.mission-profile-card::before {
+  content: "";
+  position: absolute;
+  top: -1px;
+  right: 14px;
+  left: 14px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--cyan), transparent);
+  opacity: .22;
+}
+.mission-profile-card:hover:not(:disabled) { transform: translateY(-2px); border-color: rgb(93 231 255 / 32%); background: rgb(93 231 255 / 5%); box-shadow: 0 18px 42px rgb(0 0 0 / 26%); }
+.mission-profile-card[data-selected="true"] { border-color: rgb(93 231 255 / 48%); background: linear-gradient(145deg, rgb(93 231 255 / 9%), rgb(243 154 255 / 3%)); box-shadow: inset 0 0 0 1px rgb(93 231 255 / 8%); }
+.mission-profile-card[data-mission-id="incident-trace"]::before { background: linear-gradient(90deg, transparent, var(--amber), transparent); }
+.mission-profile-card[data-mission-id="authority-attack"]::before { background: linear-gradient(90deg, transparent, var(--coral), transparent); }
+.mission-profile-card:disabled { cursor: default; opacity: .64; }
+.mission-profile-index { position: absolute; top: 11px; right: 11px; color: var(--muted); font-family: var(--font-mono); font-size: 7px; }
+.mission-profile-icon { display: grid; place-items: center; width: 38px; height: 38px; border: 1px solid rgb(93 231 255 / 24%); border-radius: 50%; color: var(--cyan-bright); background: rgb(93 231 255 / 6%); }
+.mission-profile-icon[data-accent="amber"] { color: var(--amber-soft); border-color: rgb(255 210 120 / 28%); background: rgb(255 210 120 / 6%); }
+.mission-profile-icon[data-accent="coral"] { color: var(--coral); border-color: rgb(255 116 107 / 28%); background: rgb(255 116 107 / 6%); }
+.mission-profile-icon .ui-icon { width: 18px; height: 18px; }
+.mission-profile-copy { grid-column: 1 / -1; display: grid; align-content: start; }
+.mission-profile-copy small { color: var(--muted); font-size: 8px; font-weight: 800; letter-spacing: .09em; text-transform: uppercase; }
+.mission-profile-copy strong { margin-top: 5px; font-size: 16px; letter-spacing: -.025em; }
+.mission-profile-copy em { margin-top: 8px; color: var(--text-soft); font-size: 10px; font-style: normal; line-height: 1.5; }
+.mission-profile-proof { grid-column: 1 / -1; align-self: end; padding-top: 10px; border-top: 1px solid var(--border); color: var(--text-soft); font-family: var(--font-mono); font-size: 7px; line-height: 1.4; }
+.mission-profile-select { position: absolute; right: 12px; bottom: 12px; width: 9px; height: 9px; border: 1px solid var(--muted); border-radius: 50%; }
+.mission-profile-card[data-selected="true"] .mission-profile-select { border-color: var(--cyan); background: var(--cyan); box-shadow: 0 0 10px rgb(93 231 255 / 42%); }
+
+.mission-gallery > footer { justify-content: flex-start; margin-top: 12px; padding-top: 11px; border-top: 1px solid var(--border); }
+.mission-gallery > footer > span { display: grid; place-items: center; width: 28px; height: 28px; border: 1px solid rgb(137 233 165 / 22%); border-radius: 50%; color: var(--green-soft); }
+.mission-gallery > footer .ui-icon { width: 14px; height: 14px; }
+.mission-gallery > footer p { display: grid; margin: 0; }
+.mission-gallery > footer strong { font-size: 9px; }
+.mission-gallery > footer small { margin-top: 2px; color: var(--muted); font-size: 8px; }
+
+body[data-mission-profile="incident-trace"] .mission-context-strip::before { background: linear-gradient(90deg, transparent, var(--amber), var(--cyan), transparent); }
+body[data-mission-profile="authority-attack"] .mission-context-strip::before { background: linear-gradient(90deg, transparent, var(--coral), var(--purple), transparent); }
+
+@media (max-width: 1380px) {
+  body[data-phase="idle"] .constellation-placeholder { left: 60%; width: min(720px, calc(100% - 254px)); }
+  .judge-guide-track span { display: none; }
+}
+
+@media (max-width: 1160px) {
+  .mission-gallery { max-height: 100%; overflow: auto; }
+  .mission-gallery-grid { grid-template-columns: 1fr; }
+  .mission-profile-card { grid-template-columns: 38px minmax(0, 1fr); grid-template-rows: auto auto; min-height: 0; }
+  .mission-profile-copy { grid-column: 2; }
+  .mission-profile-copy em { display: none; }
+  .mission-profile-proof { grid-column: 1 / -1; }
+}
+
+@media (max-width: 680px) {
+  .mission-context-strip { grid-template-rows: auto auto auto auto; }
+  .judge-guide-track { grid-template-columns: repeat(4, minmax(0, 1fr)); row-gap: 7px; }
+  .judge-guide-track li::after { display: none; }
+  .mission-rail-stack { top: 378px; }
+  .constellation-viewport { top: 980px; }
+  body[data-phase="idle"] .constellation-placeholder { top: 50%; left: 50%; width: calc(100% - 24px); max-height: calc(100% - 18px); }
+  .mission-gallery { padding: 12px; }
+  .mission-gallery > header > span,
+  .mission-gallery > footer { display: none; }
+  .mission-gallery h2 { font-size: 18px; }
 }
 
 /* V4 perceptual polish: semantic hierarchy, sealed receipts and judge-scale type. */
