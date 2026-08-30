@@ -32,6 +32,7 @@ import {
   UI_MESSAGE_TYPES,
 } from './universal-runtime.js';
 import { clickVisibleCaptchaCheckbox } from './captcha-checkbox.js';
+import { createExtensionMcpEndpoint, installNativeMcpBridge } from './native-mcp-bridge.js';
 
 const PAGE_LIFECYCLE_PORT = 'toolbraid:page-lifecycle';
 const HANDOFF_KEY_STORAGE_KEY = 'toolbraid.extension.handoff.key.v1';
@@ -186,6 +187,8 @@ export function createServiceWorkerController({
   const surfaceLifecycle = new Map();
   const handoffSurfaces = new Map();
   const captchaAttemptPromises = new Map();
+  const reactivationOrigins = new Map();
+  const reactivationPromises = new Map();
   const lifecycleForHandoff = Object.freeze({
     get(tabId, frameId = 0) {
       return surfaceLifecycle.get(`${tabId}:${frameId}`) ?? registry.get(tabId, frameId);
@@ -566,6 +569,7 @@ export function createServiceWorkerController({
       pageInstanceId: message.pageInstanceId ?? null,
       url,
     });
+    reactivationOrigins.set(tabId, exactOrigin(url));
     if (!accepted.reused && previous) closeUniversalSessions([previous], 'document-replaced');
     const channel = createEnvelope({
       type: MESSAGE_TYPES.CHANNEL_INIT,
@@ -600,6 +604,7 @@ export function createServiceWorkerController({
     try {
       const universal = await ensureUniversalRuntime();
       const state = await universal.ingestPageSnapshot(message, sender);
+      mcpEndpoint.invalidate();
       if (missionPromise) {
         await missionPromise
           .then((mission) => mission.handlePageSnapshot({ tabId, frameId }, sender))
@@ -610,6 +615,24 @@ export function createServiceWorkerController({
       const normalized = asExtensionRuntimeError(error);
       return fail(normalized.code, normalized.message, normalized.details);
     }
+  }
+
+  async function withMissionAndHandoffState(response) {
+    if (response?.ok !== true) return response;
+    const [missionResult, handoffResult] = await Promise.allSettled([
+      ensureMissionRuntime().then((mission) => mission.list()),
+      ensureHandoffRuntime().then((handoff) => handoff.list()),
+    ]);
+    return {
+      ...response,
+      state: {
+        ...response.state,
+        missions: missionResult.status === 'fulfilled' ? missionResult.value : [],
+        handoffs: handoffResult.status === 'fulfilled' ? handoffResult.value : [],
+        ...(missionResult.status === 'rejected' ? { missionError: safeFailure(missionResult.reason).error } : {}),
+        ...(handoffResult.status === 'rejected' ? { handoffError: safeFailure(handoffResult.reason).error } : {}),
+      },
+    };
   }
 
   async function handleUiMessage(message, sender) {
@@ -648,20 +671,7 @@ export function createServiceWorkerController({
       if (actionForCleanup) missionBinding = await resolveMissionAction(actionForCleanup);
       if (missionBinding) return { ...response, missionBinding };
       if (message.type !== 'UI_GET_STATE' || response?.ok !== true) return response;
-      const [missionResult, handoffResult] = await Promise.allSettled([
-        ensureMissionRuntime().then((mission) => mission.list()),
-        ensureHandoffRuntime().then((handoff) => handoff.list()),
-      ]);
-      return {
-        ...response,
-        state: {
-          ...response.state,
-          missions: missionResult.status === 'fulfilled' ? missionResult.value : [],
-          handoffs: handoffResult.status === 'fulfilled' ? handoffResult.value : [],
-          ...(missionResult.status === 'rejected' ? { missionError: safeFailure(missionResult.reason).error } : {}),
-          ...(handoffResult.status === 'rejected' ? { handoffError: safeFailure(handoffResult.reason).error } : {}),
-        },
-      };
+      return withMissionAndHandoffState(response);
     } catch (error) {
       return safeFailure(error);
     }
@@ -688,6 +698,32 @@ export function createServiceWorkerController({
     }
   }
 
+  async function mcpGetState(payload = {}) {
+    const universal = await ensureUniversalRuntime();
+    return withMissionAndHandoffState(await universal.handleUiMessage(UI_MESSAGE_TYPES.UI_GET_STATE, payload));
+  }
+
+  async function mcpExecuteRead(payload = {}) {
+    const universal = await ensureUniversalRuntime();
+    return universal.handleUiMessage(UI_MESSAGE_TYPES.UI_EXECUTE_READ, payload);
+  }
+
+  async function mcpPrepareAction(payload = {}) {
+    const universal = await ensureUniversalRuntime();
+    const response = await universal.handleUiMessage(UI_MESSAGE_TYPES.UI_PREPARE_ACTION, payload);
+    if (response?.ok === true && response.result?.status === 'approval-required' && response.preparedAction) {
+      const missionBinding = await bindPreparedActionToMission(response.preparedAction);
+      return { ...response, missionBinding };
+    }
+    return response;
+  }
+
+  const mcpEndpoint = createExtensionMcpEndpoint({
+    getState: mcpGetState,
+    executeRead: mcpExecuteRead,
+    prepareAction: mcpPrepareAction,
+  });
+
   async function activateTab(tab) {
     const tabId = tab?.id;
     if (!validTabId(tabId)) return fail('TAB_ID_INVALID', 'An active tab id is required.');
@@ -709,14 +745,41 @@ export function createServiceWorkerController({
         world: 'ISOLATED',
         injectImmediately: true,
       });
+      reactivationOrigins.set(tabId, exactOrigin(tab.url));
       return { ok: true, tabId, provenance: PROVENANCE };
     } catch (error) {
       return fail(error?.code ?? 'INJECTION_FAILED', error?.message ?? 'ToolBraid could not initialize the active tab.');
     }
   }
 
+  function reactivateTabAfterNavigation(tabId, tab) {
+    if (reactivationPromises.has(tabId)) return;
+    const expectedOrigin = reactivationOrigins.get(tabId);
+    const actualOrigin = exactOrigin(tab?.url);
+    if (!expectedOrigin || actualOrigin !== expectedOrigin) return;
+    const pending = Promise.resolve(activateTab(tab))
+      .then((result) => {
+        if (result?.ok === true) return;
+        const invalidated = registry.invalidate(tabId, 'reactivation-failed');
+        closeUniversalSessions(invalidated, 'reactivation-failed');
+        reactivationOrigins.delete(tabId);
+      })
+      .catch(() => {
+        const invalidated = registry.invalidate(tabId, 'reactivation-failed');
+        closeUniversalSessions(invalidated, 'reactivation-failed');
+        reactivationOrigins.delete(tabId);
+      })
+      .finally(() => reactivationPromises.delete(tabId));
+    reactivationPromises.set(tabId, pending);
+  }
+
   function handleTabUpdated(tabId, changeInfo = {}, tab = {}) {
     if (!validTabId(tabId)) return [];
+    if (changeInfo.status === 'loading' || typeof changeInfo.url === 'string') {
+      mcpEndpoint.invalidate();
+      const currentOrigin = exactOrigin(registry.get(tabId, 0)?.url ?? tab.url);
+      if (currentOrigin) reactivationOrigins.set(tabId, currentOrigin);
+    }
     if (missionPromise) {
       void missionPromise
         .then((mission) => mission.handleTabUpdated(tabId, changeInfo, tab))
@@ -738,13 +801,23 @@ export function createServiceWorkerController({
     if (changeInfo.status === 'loading' && crossesOrigin(registry, tabId, changeInfo, tab)) {
       const invalidated = registry.invalidate(tabId, 'navigation');
       closeUniversalSessions(invalidated, 'navigation');
+      reactivationOrigins.delete(tabId);
       return invalidated;
     }
+    if (changeInfo.status === 'loading' && typeof changeInfo.url !== 'string') {
+      const invalidated = registry.invalidate(tabId, 'reload');
+      closeUniversalSessions(invalidated, 'reload');
+      return invalidated;
+    }
+    if (changeInfo.status === 'complete') reactivateTabAfterNavigation(tabId, tab);
     return [];
   }
 
   function handleTabRemoved(tabId) {
     if (!validTabId(tabId)) return [];
+    mcpEndpoint.invalidate();
+    reactivationOrigins.delete(tabId);
+    reactivationPromises.delete(tabId);
     if (missionPromise) {
       void missionPromise
         .then((mission) => mission.handleTabRemoved(tabId))
@@ -760,6 +833,10 @@ export function createServiceWorkerController({
     return invalidated;
   }
 
+  function handleActiveContextChanged() {
+    mcpEndpoint.invalidate();
+  }
+
   return Object.freeze({
     registry,
     bridge,
@@ -767,16 +844,19 @@ export function createServiceWorkerController({
     activateTab,
     handleTabUpdated,
     handleTabRemoved,
+    handleActiveContextChanged,
     sessionBinding,
     ensureUniversalRuntime,
     ensureMissionRuntime,
     ensureHandoffRuntime,
+    mcpEndpoint,
   });
 }
 
 export function installServiceWorker(chromeApi = globalThis.chrome) {
   if (!chromeApi?.runtime?.onMessage) return null;
   const controller = createServiceWorkerController({ chromeApi });
+  const nativeMcpBridge = installNativeMcpBridge({ chromeApi, endpoint: controller.mcpEndpoint });
   chromeApi.runtime.onMessage.addListener((message, sender, sendResponse) => {
     Promise.resolve(controller.handleRuntimeMessage(message, sender))
       .then((response) => sendResponse(response))
@@ -800,6 +880,7 @@ export function installServiceWorker(chromeApi = globalThis.chrome) {
     });
   });
   chromeApi.action?.onClicked?.addListener((tab) => {
+    nativeMcpBridge.connect();
     if (Number.isInteger(tab?.id)) {
       try {
         const opened = chromeApi.sidePanel?.open?.({ tabId: tab.id });
@@ -813,6 +894,12 @@ export function installServiceWorker(chromeApi = globalThis.chrome) {
   });
   chromeApi.tabs?.onRemoved?.addListener((tabId) => {
     controller.handleTabRemoved(tabId);
+  });
+  chromeApi.tabs?.onActivated?.addListener(() => {
+    controller.handleActiveContextChanged();
+  });
+  chromeApi.windows?.onFocusChanged?.addListener(() => {
+    controller.handleActiveContextChanged();
   });
   return controller;
 }

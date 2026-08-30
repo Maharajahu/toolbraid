@@ -186,6 +186,23 @@ Universal: real GitHub repository + issue reads passed (read-only)
 Universal fixture gate: real Chrome rendered video keyframes + audio + captions + bounded CAPTCHA click
 ```
 
+## Connect Codex through local MCP
+
+The Universal extension includes a fail-closed local MCP bridge. It uses Chrome
+Native Messaging plus an authenticated per-user named pipe; it does not expose
+an HTTP server or listen on a network interface. Codex receives one stable
+status tool and page-bound proxies for the tools active in Chrome.
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install-mcp-bridge.ps1
+```
+
+Read proxies may execute directly. A mutation proxy only prepares a
+fingerprint-bound action and returns `approval-required`; Codex cannot create
+approval or dispatch it. The human reviews, approves, and dispatches from the
+ToolBraid side panel. Any tab, session, origin, page, or descriptor drift
+invalidates the MCP proxy. See [the extension bridge documentation](extension/README.md#codex--mcp-bridge).
+
 ## Repository map
 
 ```text
@@ -204,6 +221,7 @@ src/multimodal/             volatile media capture, evidence normalization, and 
 src/runtime/                Universal session, dispatch, mission, and handoff lifecycle
 src/persistence/            bounded approvals, receipts, and audit persistence
 extension/                  MV3 worker, isolated runtime, MAIN registrar, media capture, missions, handoffs, and side panel
+bridge/                     Chrome Native Messaging host, authenticated local transport, and MCP stdio server
 tests/v2/                   unit, integration, security, and multi-origin contract tests
 tests/universal/            Universal unit, protocol, security, adapter, and build tests
 scripts/                    servers, checks, standalone/Vercel builds, capture, and browser E2E

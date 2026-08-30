@@ -221,6 +221,32 @@ test('classic extractor enforces traversal and collection bounds', () => {
   assert.ok(snapshot.mainText.length <= 12);
 });
 
+test('classic extractor discovers direct audio and video beyond the general traversal bound', () => {
+  const context = loadExtractor();
+  const html = new FakeNode('html');
+  const head = new FakeNode('head');
+  for (let index = 0; index < 40; index += 1) head.append(new FakeNode('script', {}, `filler-${index}`));
+  const body = new FakeNode('body');
+  const video = new FakeNode('video', { src: '/live.mp4', controls: true, duration: 12 });
+  body.append(video);
+  html.append(head, body);
+  const documentRef = new FakeDocument(html);
+  const api = context.ToolBraidUniversalPageExtractor;
+
+  const snapshot = api.extract({
+    documentRef,
+    maxNodes: 8,
+    maxElements: 4,
+    maxItems: 4,
+  });
+
+  assert.equal(snapshot.stats.truncated, true);
+  assert.equal(snapshot.mediaInventory.length, 1);
+  assert.equal(snapshot.mediaInventory[0].kind, 'video');
+  assert.equal(snapshot.mediaInventory[0].src, 'https://fixture.example.test/live.mp4');
+  assert.equal(api.getStableElementRef(documentRef, video, { maxNodes: 8, maxElements: 4, maxItems: 4 }), snapshot.mediaInventory[0].ref);
+});
+
 test('classic extractor prioritizes the current semantic article on a truncated X document', () => {
   const context = loadExtractor();
   const statusUrl = 'https://x.com/thsottiaux/status/2093515916076343774';

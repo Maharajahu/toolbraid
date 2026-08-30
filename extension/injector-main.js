@@ -246,7 +246,7 @@
     post(protocol.TYPES.MAIN_READY, { provenance: protocol.PROVENANCE });
   }
   state.reannounce = announceReady;
-  state.reinject = resetSession;
+  state.reinject = announceReady;
 
   function onMessage(event) {
     if (event.source !== global.window || event.origin !== pageOrigin()) return;

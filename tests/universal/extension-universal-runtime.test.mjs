@@ -1014,6 +1014,83 @@ test('explicit multimodal reanalysis captures rendered audio, loaded captions, a
   assert.equal(handleStore.stats().handles, 0);
 });
 
+test('explicit multimodal reanalysis bounds rendered capture to one target per media kind', async () => {
+  const mediaSnapshot = rawSnapshot();
+  mediaSnapshot.pageFingerprint = '9'.repeat(64);
+  mediaSnapshot.mediaInventory = [
+    { ref: 'id:primary-video', kind: 'video', src: 'https://example.test/primary.mp4' },
+    { ref: 'id:duplicate-video', kind: 'video', src: 'https://example.test/duplicate.mp4' },
+    { ref: 'id:primary-audio', kind: 'audio', src: 'https://example.test/primary.mp3' },
+    { ref: 'id:duplicate-audio', kind: 'audio', src: 'https://example.test/duplicate.mp3' },
+  ];
+  mediaSnapshot.elementRefs.push(...mediaSnapshot.mediaInventory.map((entry) => ({
+    ref: entry.ref,
+    tagName: entry.kind,
+    role: null,
+    name: '',
+  })));
+  const renderedCalls = [];
+  const h = harness({
+    onSend: async ({ message, defaultSendToContentScript }) => {
+      if (message.type === MESSAGE_TYPES.PAGE_EXTRACT_SNAPSHOT) return { ok: true, snapshot: mediaSnapshot };
+      if (message.type !== MESSAGE_TYPES.PAGE_CAPTURE_RENDERED_MEDIA) return defaultSendToContentScript(7, message);
+      renderedCalls.push({ elementRef: message.elementRef, kind: message.kind, mode: message.mode });
+      return {
+        ok: true,
+        provenance: PROVENANCE,
+        requestId: message.requestId,
+        tabId: message.tabId,
+        frameId: message.frameId,
+        sessionId: message.sessionId,
+        nonce: message.nonce,
+        documentId: message.documentId,
+        pageInstanceId: message.pageInstanceId,
+        pageFingerprint: message.pageFingerprint,
+        extractorPageFingerprint: message.extractorPageFingerprint,
+        result: {
+          ok: false,
+          code: 'MEDIA_NOT_PLAYING',
+          metadata: {
+            elementRef: message.elementRef,
+            sourceKind: message.kind,
+            ...(message.mode === 'frames' ? {} : { pageOrigin: 'https://example.test' }),
+          },
+          captions: [],
+        },
+      };
+    },
+  });
+  const integration = await createExtensionUniversalRuntime({
+    chromeApi: h.chromeApi,
+    registry: h.registry,
+    bridge: h.bridge,
+    sendToContentScript: h.sendToContentScript,
+    store: createMemoryKeyValueStore(),
+    localApprovalStore: h.localApprovalStore,
+    browserCapture: {
+      handleStore: { release() {} },
+      async captureVisibleScreenshot() { return null; },
+      async readCaptionTracks() { return []; },
+    },
+  });
+  await integration.ingestRaw({
+    tabId: 7,
+    frameId: 0,
+    sessionId: h.session.sessionId,
+    rawSnapshot: mediaSnapshot,
+  });
+
+  const response = await integration.handleUiMessage(UI_MESSAGE_TYPES.UI_REANALYZE_MULTIMODAL);
+
+  assert.equal(response.ok, true);
+  assert.deepEqual(renderedCalls, [
+    { elementRef: 'id:primary-video', kind: 'video', mode: 'frames' },
+    { elementRef: 'id:primary-audio', kind: 'audio', mode: 'captions' },
+    { elementRef: 'id:primary-video', kind: 'video', mode: 'audio' },
+    { elementRef: 'id:primary-audio', kind: 'audio', mode: 'audio' },
+  ]);
+});
+
 test('releases rendered video frame handles when the session drifts after a partial frame commit', async () => {
   const videoSnapshot = rawSnapshot();
   videoSnapshot.pageFingerprint = 'e'.repeat(64);

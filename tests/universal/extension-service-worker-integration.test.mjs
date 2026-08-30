@@ -428,6 +428,9 @@ test('binds prepared actions to the exact mission owner and clears them on execu
   assert.equal(state.ok, true);
   assert.equal(state.state.sessionId, ready.channel.sessionId);
   assert.deepEqual(state.state.missions[0].pendingActions.map((action) => action.actionId), [firstPrepared.preparedAction.actionId]);
+  const bridgeStatus = await controller.mcpEndpoint.handle('bridge.status', {});
+  assert.equal(bridgeStatus.missionCount, 1);
+  assert.equal(bridgeStatus.pendingActionCount, 1);
 
   const localApprovals = createApprovalStore({ storageArea: area, cryptoRef: fakeCrypto() });
   const localApproval = await localApprovals.createApproval({ event: { isTrusted: true }, action: firstPrepared.preparedAction });

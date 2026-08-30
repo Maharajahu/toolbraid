@@ -334,6 +334,39 @@
     return { elements, nodesVisited, shadowRootsVisited, truncated };
   }
 
+  function boundedQuery(documentRef, selector, limit) {
+    const collection = safeCall(documentRef, 'querySelectorAll', [selector], null);
+    const result = [];
+    let length = 0;
+    try { length = Math.min(Math.max(0, Number(collection?.length) || 0), limit); } catch { return result; }
+    for (let index = 0; index < length; index += 1) {
+      let element = null;
+      try { element = collection[index] ?? (typeof collection.item === 'function' ? collection.item(index) : null); } catch { element = null; }
+      if (isElement(element)) result.push(element);
+    }
+    return result;
+  }
+
+  function directMediaElements(documentRef, limit) {
+    const combined = boundedQuery(documentRef, 'audio,video', limit);
+    if (combined.length) return combined;
+    return [
+      ...boundedQuery(documentRef, 'audio', limit),
+      ...boundedQuery(documentRef, 'video', limit),
+    ].slice(0, limit);
+  }
+
+  function appendMissingElements(elements, additional) {
+    const result = elements.slice();
+    const seen = new Set(result);
+    for (const element of additional) {
+      if (seen.has(element)) continue;
+      seen.add(element);
+      result.push(element);
+    }
+    return result;
+  }
+
   function normalizeJson(value, path, seen) {
     if (value === null || typeof value === 'string' || typeof value === 'boolean') return value;
     if (typeof value === 'number') return finiteNumber(value) ? (Object.is(value, -0) ? 0 : value) : null;
@@ -760,8 +793,10 @@
     const location = locationFor(documentRef, source);
     const traversal = traverseDocument(documentRef, options);
     const elements = traversal.elements;
-    const byId = idMap(elements);
-    const { refs, reverse } = refTable(elements);
+    const directMedia = directMediaElements(documentRef, options.maxItems);
+    const referenceElements = appendMissingElements(elements, directMedia);
+    const byId = idMap(referenceElements);
+    const { refs, reverse } = refTable(referenceElements);
     const limitedElements = elements.slice(0, options.maxElements);
     if (elements.length > options.maxElements) traversal.truncated = true;
     const items = (values) => values.slice(0, options.maxItems);
@@ -822,9 +857,14 @@
     }
 
     const elementRefs = items(limitedElements.map((element) => elementRecord(element, refs, elements, byId, options)));
-    const mediaInventory = items(limitedElements
-      .filter((element) => ['img', 'audio', 'video'].includes(tagName(element)))
-      .map((element) => mediaRecord(element, refs, location.url, options)));
+    const boundedMedia = limitedElements.filter((element) => ['img', 'audio', 'video'].includes(tagName(element)));
+    const boundedMediaSet = new Set(boundedMedia);
+    const missingDirectMedia = directMedia.filter((element) => !boundedMediaSet.has(element));
+    const mediaElements = [
+      ...boundedMedia.slice(0, Math.max(0, options.maxItems - missingDirectMedia.length)),
+      ...missingDirectMedia.slice(0, options.maxItems),
+    ].slice(0, options.maxItems);
+    const mediaInventory = mediaElements.map((element) => mediaRecord(element, refs, location.url, options));
     const core = {
       version: VERSION,
       metadata,
@@ -859,8 +899,13 @@
   }
 
   function stableElementRef(documentRef, element, options) {
-    const traversal = traverseDocument(documentRef || safeGet(global, 'document', null), normalizeOptions(options));
-    const table = refTable(traversal.elements);
+    const activeDocument = documentRef || safeGet(global, 'document', null);
+    const normalized = normalizeOptions(options);
+    const traversal = traverseDocument(activeDocument, normalized);
+    const table = refTable(appendMissingElements(
+      traversal.elements,
+      directMediaElements(activeDocument, normalized.maxItems),
+    ));
     return table.refs.get(element) || null;
   }
 

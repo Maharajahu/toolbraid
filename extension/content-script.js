@@ -59,6 +59,16 @@
   const MAX_RENDERED_VIDEO_FRAME_INTERVAL_MS = 30_000;
   const PAGE_FINGERPRINT = /^[a-f0-9]{64}$/i;
 
+  function liveRuntime() {
+    try {
+      const runtime = global.chrome?.runtime;
+      if (!runtime?.id || typeof runtime.sendMessage !== 'function' || typeof runtime.getManifest !== 'function') return null;
+      return runtime.getManifest() && runtime;
+    } catch {
+      return null;
+    }
+  }
+
   function sameBinding(left, right) {
     return Boolean(left && right
       && left.nonce === right.nonce
@@ -94,28 +104,39 @@
   function forwardPageEvent(envelope) {
     const requestSession = state.session;
     if (!requestSession) return;
-    global.chrome.runtime.sendMessage({ type: protocol.TYPES.PAGE_EVENT, envelope }, (response) => {
-      // Reading lastError is required in Chrome to consume a disconnected
-      // receiver error without emitting an unhandled console warning.
-      const runtimeError = global.chrome.runtime.lastError;
-      if (runtimeError) {
-        if (envelope.type === protocol.TYPES.EXECUTE_REQUEST) postErrorFor(envelope, null, requestSession);
-        return;
-      }
-      if (response?.ok === false && response?.error?.code === 'SESSION_NOT_FOUND') {
-        if (envelope.type === protocol.TYPES.EXECUTE_REQUEST) postErrorFor(envelope, response, requestSession);
-        requestReady();
-        return;
-      }
-      if (!sameBinding(state.session, requestSession)) return;
-      if (response?.envelope) {
-        const parsed = protocol.parseEnvelope(response.envelope, requestSession);
-        if (parsed.ok) postToMain(parsed.value);
-        else if (envelope.type === protocol.TYPES.EXECUTE_REQUEST) postErrorFor(envelope, response, requestSession);
-      } else if (envelope.type === protocol.TYPES.EXECUTE_REQUEST) {
-        postErrorFor(envelope, response, requestSession);
-      }
-    });
+    const runtime = liveRuntime();
+    if (!runtime) return;
+    try {
+      const returned = runtime.sendMessage({ type: protocol.TYPES.PAGE_EVENT, envelope }, (response) => {
+        try {
+          // Reading lastError is required in Chrome to consume a disconnected
+          // receiver error without emitting an unhandled console warning.
+          const runtimeError = runtime.lastError;
+          if (runtimeError) {
+            if (envelope.type === protocol.TYPES.EXECUTE_REQUEST) postErrorFor(envelope, null, requestSession);
+            return;
+          }
+          if (response?.ok === false && response?.error?.code === 'SESSION_NOT_FOUND') {
+            if (envelope.type === protocol.TYPES.EXECUTE_REQUEST) postErrorFor(envelope, response, requestSession);
+            requestReady();
+            return;
+          }
+          if (!sameBinding(state.session, requestSession)) return;
+          if (response?.envelope) {
+            const parsed = protocol.parseEnvelope(response.envelope, requestSession);
+            if (parsed.ok) postToMain(parsed.value);
+            else if (envelope.type === protocol.TYPES.EXECUTE_REQUEST) postErrorFor(envelope, response, requestSession);
+          } else if (envelope.type === protocol.TYPES.EXECUTE_REQUEST) {
+            postErrorFor(envelope, response, requestSession);
+          }
+        } catch {
+          if (envelope.type === protocol.TYPES.EXECUTE_REQUEST) postErrorFor(envelope, null, requestSession);
+        }
+      });
+      if (returned && typeof returned.catch === 'function') returned.catch(() => {});
+    } catch {
+      if (envelope.type === protocol.TYPES.EXECUTE_REQUEST) postErrorFor(envelope, null, requestSession);
+    }
   }
 
   function boundExtensionMessage(message) {
@@ -377,6 +398,8 @@
 
   function sendSnapshot(reason = 'page-change', force = false) {
     if (!state.session) return;
+    const runtime = liveRuntime();
+    if (!runtime) return;
     const requestSession = state.session;
     let snapshot;
     try {
@@ -388,24 +411,33 @@
     if (fingerprint === state.snapshotInFlightFingerprint) return;
     if (!force && fingerprint === state.lastSnapshotFingerprint) return;
     state.snapshotInFlightFingerprint = fingerprint;
-    global.chrome.runtime.sendMessage({
-      type: protocol.TYPES.PAGE_SNAPSHOT,
-      sessionId: requestSession.sessionId,
-      nonce: requestSession.nonce,
-      snapshot,
-      reason,
-    }, (response) => {
-      const runtimeError = global.chrome.runtime.lastError;
-      if (!sameBinding(state.session, requestSession)) return;
-      if (state.snapshotInFlightFingerprint !== fingerprint) return;
-      state.snapshotInFlightFingerprint = null;
-      abortRenderedCaptures();
-      if (!runtimeError && response?.ok === false && response?.error?.code === 'SESSION_NOT_FOUND') {
-        requestReady();
-        return;
-      }
-      if (!runtimeError && response?.ok === true) state.lastSnapshotFingerprint = fingerprint;
-    });
+    try {
+      const returned = runtime.sendMessage({
+        type: protocol.TYPES.PAGE_SNAPSHOT,
+        sessionId: requestSession.sessionId,
+        nonce: requestSession.nonce,
+        snapshot,
+        reason,
+      }, (response) => {
+        try {
+          const runtimeError = runtime.lastError;
+          if (!sameBinding(state.session, requestSession)) return;
+          if (state.snapshotInFlightFingerprint !== fingerprint) return;
+          state.snapshotInFlightFingerprint = null;
+          abortRenderedCaptures();
+          if (!runtimeError && response?.ok === false && response?.error?.code === 'SESSION_NOT_FOUND') {
+            requestReady();
+            return;
+          }
+          if (!runtimeError && response?.ok === true) state.lastSnapshotFingerprint = fingerprint;
+        } catch {
+          if (state.snapshotInFlightFingerprint === fingerprint) state.snapshotInFlightFingerprint = null;
+        }
+      });
+      if (returned && typeof returned.catch === 'function') returned.catch(() => {});
+    } catch {
+      if (state.snapshotInFlightFingerprint === fingerprint) state.snapshotInFlightFingerprint = null;
+    }
   }
 
   function scheduleSnapshot(reason = 'page-change') {
@@ -444,10 +476,11 @@
   }
 
   function connectLifecyclePort() {
-    if (!state.readyEnabled || state.lifecyclePort || typeof global.chrome.runtime.connect !== 'function') return;
+    const runtime = liveRuntime();
+    if (!state.readyEnabled || state.lifecyclePort || !runtime || typeof runtime.connect !== 'function') return;
     let port;
     try {
-      port = global.chrome.runtime.connect({ name: LIFECYCLE_PORT_NAME });
+      port = runtime.connect({ name: LIFECYCLE_PORT_NAME });
     } catch {
       return;
     }
@@ -461,7 +494,8 @@
     });
     port.onDisconnect.addListener(() => {
       // Consume Chrome's connection error before scheduling a bounded recovery.
-      const runtimeError = global.chrome.runtime.lastError;
+      let runtimeError;
+      try { runtimeError = runtime.lastError; } catch { runtimeError = { message: 'Extension context invalidated.' }; }
       void runtimeError;
       if (state.lifecyclePort !== port) return;
       state.lifecyclePort = null;
@@ -508,11 +542,20 @@
         } catch { /* fall through to one-time messaging */ }
       }
     }
+    const runtime = liveRuntime();
+    if (!runtime) {
+      state.readyInFlight = false;
+      return;
+    }
     try {
-      global.chrome.runtime.sendMessage(message, (response) => {
-        const runtimeError = global.chrome.runtime.lastError;
-        finishReady(response, runtimeError, null);
+      const returned = runtime.sendMessage(message, (response) => {
+        try {
+          finishReady(response, runtime.lastError, null);
+        } catch {
+          state.readyInFlight = false;
+        }
       });
+      if (returned && typeof returned.catch === 'function') returned.catch(() => {});
     } catch {
       state.readyInFlight = false;
       scheduleReady();
@@ -717,8 +760,10 @@
   }
 
   if (!state.listenersAttached) {
+    const runtime = liveRuntime();
+    if (!runtime?.onMessage || typeof runtime.onMessage.addListener !== 'function') return;
     global.window.addEventListener('message', onWindowMessage);
-    global.chrome.runtime.onMessage.addListener(onRuntimeMessage);
+    runtime.onMessage.addListener(onRuntimeMessage);
     state.listenersAttached = true;
   }
   // A repeated dynamic injection is a safe way to re-handshake after the

@@ -120,7 +120,7 @@ test('page-fingerprint provenance replaces callbacks even when the visible tool 
   assert.equal(h.registrations[1].signal.aborted, false);
 });
 
-test('reinjection resets the old session atomically and stale handles reject after the new handshake', async () => {
+test('reinjection preserves the active session and reannounces MAIN readiness', async () => {
   const h = makeHarness();
   const register = (tools, requestId) => h.dispatch(h.envelope(
     h.protocol.TYPES.REGISTER_TOOLS,
@@ -130,29 +130,23 @@ test('reinjection resets the old session atomically and stale handles reject aft
 
   register([descriptor()], 'register-request-one');
   await flush();
-  const staleExecute = h.registrations[0].definition.execute;
-  const pendingExecution = staleExecute();
-  const pendingRejection = assert.rejects(pendingExecution, (error) => error.name === 'AbortError');
+  const execute = h.registrations[0].definition.execute;
+  const pendingExecution = execute();
   await flush();
+  const executeRequest = h.messages.find((message) => message.type === h.protocol.TYPES.EXECUTE_REQUEST);
+  const readyBeforeReinject = h.messages.filter((message) => message.type === h.protocol.TYPES.MAIN_READY).length;
 
   vm.runInContext(injectorSource, h.context);
-  assert.equal(h.registrations[0].signal.aborted, true);
-  await pendingRejection;
+  assert.equal(h.registrations[0].signal.aborted, false);
+  assert.equal(
+    h.messages.filter((message) => message.type === h.protocol.TYPES.MAIN_READY).length,
+    readyBeforeReinject + 1,
+  );
 
-  const nextSession = vm.runInContext(`({
-    nonce: 'abcdefab-cdef-4abc-8def-abcdefabcdef',
-    sessionId: 'tab-1-injector-session-next',
-    tabId: 1,
-    frameId: 0,
-  })`, h.context);
-  h.context.__tbSession = nextSession;
-  h.dispatch(h.envelope(h.protocol.TYPES.CHANNEL_INIT, { provenance: h.protocol.PROVENANCE }));
-  await flush();
-
-  await assert.rejects(staleExecute({}), (error) => error.name === 'AbortError');
-  register([descriptor('Read the exact page.', 'b'.repeat(64))], 'register-request-two');
-  await flush();
-  assert.equal(h.registrations.length, 2);
-  assert.equal(h.registrations[1].signal.aborted, false);
-  assert.equal(h.registrations[1].definition.name, 'read_page');
+  h.dispatch(h.envelope(
+    h.protocol.TYPES.EXECUTE_RESULT,
+    { ok: true, result: { preserved: true }, provenance: h.protocol.PROVENANCE },
+    executeRequest.requestId,
+  ));
+  assert.equal((await pendingExecution).preserved, true);
 });

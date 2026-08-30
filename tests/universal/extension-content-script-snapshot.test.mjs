@@ -58,6 +58,8 @@ test('retries an unacknowledged snapshot fingerprint and caches it only after ac
   };
   context.chrome = {
     runtime: {
+      id: 'toolbraid-test-extension',
+      getManifest() { return { manifest_version: 3 }; },
       lastError: undefined,
       onMessage: { addListener() {} },
       sendMessage(message, callback) {

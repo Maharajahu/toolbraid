@@ -33,6 +33,7 @@ const MAX_TEXT = 512;
 const MAX_MISSION_OBJECTIVE = 280;
 const MISSION_OBJECTIVE_FALLBACK = 'Inspect the active page and recover safely.';
 const INITIAL_REFRESH_DELAYS_MS = Object.freeze([100, 250, 500, 900, 1500]);
+const MULTIMODAL_REANALYZE_TIMEOUT_MS = 35_000;
 const TERMINAL_MISSION_PHASES = new Set(['completed', 'failed', 'cancelled']);
 
 function activeMission(mission) {
@@ -609,6 +610,7 @@ export function createUiController({
   store = createApprovalStore(),
   multimodalSettings = createMultimodalSettingsStore(),
   now = () => Date.now(),
+  reanalyzeTimeoutMs = MULTIMODAL_REANALYZE_TIMEOUT_MS,
 } = {}) {
   let state = normalizeState({ connection: 'error', error: 'Bridge unavailable.' });
   const prepared = new Map();
@@ -637,6 +639,26 @@ export function createUiController({
       } catch { /* the worker falls back to its legacy active-tab lookup */ }
     }
     return sendUiMessage(type, { ...safeJson(payload), ...target }, runtime);
+  }
+
+  async function sendReanalysisMessage() {
+    const timeoutMs = Number.isInteger(reanalyzeTimeoutMs) && reanalyzeTimeoutMs > 0
+      ? reanalyzeTimeoutMs
+      : MULTIMODAL_REANALYZE_TIMEOUT_MS;
+    let timer = null;
+    try {
+      return await Promise.race([
+        sendBoundUiMessage(UI_MESSAGE_TYPES.UI_REANALYZE_MULTIMODAL),
+        new Promise((resolve) => {
+          timer = globalThis.setTimeout(() => resolve(errorResult(
+            'MULTIMODAL_ANALYSIS_TIMEOUT',
+            'Page media analysis exceeded its bounded time window.',
+          )), timeoutMs);
+        }),
+      ]);
+    } finally {
+      if (timer !== null) globalThis.clearTimeout(timer);
+    }
   }
 
   async function refresh() {
@@ -772,7 +794,7 @@ export function createUiController({
     if (!trustedEvent(event)) return errorResult('TRUSTED_ACTIVATION_REQUIRED', 'Analysis provider changes require a trusted user activation.');
     try {
       const provider = await multimodalSettings.save(input);
-      const response = await sendBoundUiMessage(UI_MESSAGE_TYPES.UI_REANALYZE_MULTIMODAL);
+      const response = await sendReanalysisMessage();
       if (response.ok !== true) return { ...response, provider };
       await refresh();
       return { ok: true, provider, result: response.result, provenance: PROVENANCE };
@@ -785,7 +807,7 @@ export function createUiController({
     if (!trustedEvent(event)) return errorResult('TRUSTED_ACTIVATION_REQUIRED', 'Analysis provider changes require a trusted user activation.');
     try {
       const provider = await multimodalSettings.disable();
-      const response = await sendBoundUiMessage(UI_MESSAGE_TYPES.UI_REANALYZE_MULTIMODAL);
+      const response = await sendReanalysisMessage();
       if (response.ok !== true) return { ...response, provider };
       await refresh();
       return { ok: true, provider, result: response.result, provenance: PROVENANCE };
@@ -796,7 +818,7 @@ export function createUiController({
 
   async function analyzeMultimodal(event) {
     if (!trustedEvent(event)) return errorResult('TRUSTED_ACTIVATION_REQUIRED', 'Analyzing the current page requires a trusted user activation.');
-    const response = await sendBoundUiMessage(UI_MESSAGE_TYPES.UI_REANALYZE_MULTIMODAL);
+    const response = await sendReanalysisMessage();
     if (response.ok === true) await refresh();
     return response;
   }

@@ -81,7 +81,33 @@ export function createUniversalBridge({
     try {
       const response = await sendToContentScript(tabId, envelope, { frameId });
       if (response && typeof response === 'object' && response.ok === false) return response;
-      if (response?.envelope) return response;
+      if (response?.envelope) {
+        const parsed = parseEnvelope(response.envelope, target.session);
+        if (!parsed.ok) return fail(parsed.error.code, parsed.error.message, parsed.error.details);
+        if (parsed.value.type !== MESSAGE_TYPES.REGISTER_RESULT
+          || parsed.value.requestId !== envelope.requestId) {
+          return fail('REGISTRATION_RESPONSE_INVALID', 'The MAIN registration response did not match its request.');
+        }
+        const payload = parsed.value.payload;
+        if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+          return fail('REGISTRATION_RESPONSE_INVALID', 'The MAIN registration response payload is invalid.');
+        }
+        if (payload.ok !== true) {
+          return fail(
+            payload.error?.code ?? 'REGISTRATION_FAILED',
+            payload.error?.message ?? 'WebMCP registration failed.',
+            { results: payload.results ?? [] },
+          );
+        }
+        return {
+          ...payload,
+          tabId,
+          frameId,
+          sessionId: target.session.sessionId,
+          count: normalized.length,
+          provenance: PROVENANCE,
+        };
+      }
       return {
         ok: true,
         tabId,

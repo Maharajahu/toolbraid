@@ -3,9 +3,11 @@
   "name": "ToolBraid Universal",
   "version": "0.1.0",
   "description": "User-activated WebMCP tool registration and execution bridge for ToolBraid.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAkUP7t3TZSIcrCg6Blei+Awe9kgnf7eTIwDIkwv6dFiQX882eZE+p2XfjKsUgioHF+G+mckRcXlb8kh/PYO+MIP1xxImklWflzwmlS1rVEpW+E3IyVZsh/JGbZypzmRh7OgeMsz2+u4bh5A+J4DTvq6pHn6ZQZyOQ9SA6We5V3EN9g4MNrp0mIywQh+BGJKb5ZL7qRUu8kNDZJW/fr8RYbxqlsMD0a/i/Og+KCF/2BmWyMLIZchJietVw0PAuVSFgk+L0U9GEuZ19zVTg9iZdQ3ylKq0DP21KTmZnjP9HkHklczN2jbL59XWkbHGyUbnZaGQtLE0QXcp0iO7OgN3EjQIDAQAB",
   "minimum_chrome_version": "120",
   "permissions": [
     "activeTab",
+    "nativeMessaging",
     "scripting",
     "storage",
     "sidePanel"

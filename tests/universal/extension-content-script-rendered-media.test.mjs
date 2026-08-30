@@ -50,6 +50,8 @@ function harness() {
   };
   context.chrome = {
     runtime: {
+      id: 'toolbraid-test-extension',
+      getManifest() { return { manifest_version: 3 }; },
       lastError: undefined,
       onMessage: { addListener(listener) { context.__runtimeListener = listener; } },
       sendMessage(message, callback) {

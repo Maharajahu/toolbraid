@@ -34,7 +34,7 @@ const syntheticClick = { isTrusted: false };
 
 test('side panel permission surface is explicit and points to its default document', () => {
   assert.equal(manifest.manifest_version, 3);
-  assert.deepEqual(new Set(manifest.permissions), new Set(['activeTab', 'scripting', 'storage', 'sidePanel']));
+  assert.deepEqual(new Set(manifest.permissions), new Set(['activeTab', 'nativeMessaging', 'scripting', 'storage', 'sidePanel']));
   assert.deepEqual(manifest.side_panel, { default_path: 'sidepanel.html' });
   assert.equal('host_permissions' in manifest, false);
   assert.equal('externally_connectable' in manifest, false);
@@ -194,6 +194,24 @@ test('UI client allows only declared messages and fails closed without the worke
   assert.equal(response.ok, false);
   assert.equal(response.error.code, 'NOT_INTEGRATED');
   assert.deepEqual(calls, [{ type: UI_MESSAGE_TYPES.UI_GET_STATE, payload: { ignored: '<page text>' } }]);
+});
+
+test('multimodal reanalysis fails closed when the worker does not respond', async () => {
+  const controller = createUiController({
+    runtime: {
+      sendMessage(message) {
+        if (message.type === UI_MESSAGE_TYPES.UI_REANALYZE_MULTIMODAL) return new Promise(() => {});
+        return Promise.resolve({ ok: true });
+      },
+    },
+    store: createApprovalStore({ storageArea: memoryStorage(), cryptoRef: fakeCrypto() }),
+    reanalyzeTimeoutMs: 5,
+  });
+
+  const response = await controller.analyzeMultimodal(trustedClick);
+
+  assert.equal(response.ok, false);
+  assert.equal(response.error.code, 'MULTIMODAL_ANALYSIS_TIMEOUT');
 });
 
 test('controller binds every side-panel request to the active tab in its current window', async () => {

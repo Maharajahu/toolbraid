@@ -92,6 +92,8 @@ function makeHarness({ readyResponses, onSnapshot, onPageEvent } = {}) {
   };
   context.chrome = {
     runtime: {
+      id: 'toolbraid-test-extension',
+      getManifest() { return { manifest_version: 3 }; },
       lastError: undefined,
       onMessage: { addListener(listener) { context.__tbRuntimeListener = listener; } },
       connect({ name }) {
@@ -258,6 +260,105 @@ test('SESSION_NOT_FOUND fails an in-flight mutation once and re-handshakes witho
   assert.equal(result.message.payload.ok, false);
   assert.equal(result.message.payload.error.code, 'SESSION_NOT_FOUND');
   assert.equal(context.__TOOLBRAID_UNIVERSAL_CONTENT__.session.sessionId, nextBinding.sessionId);
+});
+
+test('an invalidated extension context does not throw from an old page event listener', () => {
+  const harness = makeHarness({ readyResponses: [{ binding: firstBinding, reused: false }] });
+  const { context } = harness;
+  context.chrome.runtime.sendMessage = () => {
+    throw new Error('Extension context invalidated.');
+  };
+  const ready = makePageEnvelope(
+    context,
+    context.ToolBraidUniversalProtocol.TYPES.MAIN_READY,
+    firstBinding,
+    { provenance: context.ToolBraidUniversalProtocol.PROVENANCE },
+  );
+
+  assert.doesNotThrow(() => harness.dispatch(ready));
+});
+
+test('an invalidated runtime without an extension id is ignored before sendMessage', () => {
+  const harness = makeHarness({ readyResponses: [{ binding: firstBinding, reused: false }] });
+  const { context } = harness;
+  let calls = 0;
+  delete context.chrome.runtime.id;
+  context.chrome.runtime.sendMessage = () => {
+    calls += 1;
+    throw new Error('Extension context invalidated.');
+  };
+  const ready = makePageEnvelope(
+    context,
+    context.ToolBraidUniversalProtocol.TYPES.MAIN_READY,
+    firstBinding,
+    { provenance: context.ToolBraidUniversalProtocol.PROVENANCE },
+  );
+
+  assert.doesNotThrow(() => harness.dispatch(ready));
+  assert.equal(calls, 0);
+});
+
+test('an invalidated runtime that rejects getManifest is ignored before sendMessage', () => {
+  const harness = makeHarness({ readyResponses: [{ binding: firstBinding, reused: false }] });
+  const { context } = harness;
+  let calls = 0;
+  context.chrome.runtime.getManifest = () => { throw new Error('Extension context invalidated.'); };
+  context.chrome.runtime.sendMessage = () => {
+    calls += 1;
+    throw new Error('Extension context invalidated.');
+  };
+  const ready = makePageEnvelope(
+    context,
+    context.ToolBraidUniversalProtocol.TYPES.MAIN_READY,
+    firstBinding,
+    { provenance: context.ToolBraidUniversalProtocol.PROVENANCE },
+  );
+
+  assert.doesNotThrow(() => harness.dispatch(ready));
+  assert.equal(calls, 0);
+});
+
+test('an invalidated extension context does not throw from a late page event callback', () => {
+  const harness = makeHarness({ readyResponses: [{ binding: firstBinding, reused: false }] });
+  const { context } = harness;
+  let reply = null;
+  context.chrome.runtime.sendMessage = (_message, callback) => { reply = callback; };
+  const ready = makePageEnvelope(
+    context,
+    context.ToolBraidUniversalProtocol.TYPES.MAIN_READY,
+    firstBinding,
+    { provenance: context.ToolBraidUniversalProtocol.PROVENANCE },
+  );
+  harness.dispatch(ready);
+  Object.defineProperty(context.chrome, 'runtime', {
+    configurable: true,
+    get() { throw new Error('Extension context invalidated.'); },
+  });
+
+  assert.equal(typeof reply, 'function');
+  assert.doesNotThrow(() => reply({ ok: true }));
+});
+
+test('a rejected runtime message promise is consumed after an extension reload', () => {
+  const harness = makeHarness({ readyResponses: [{ binding: firstBinding, reused: false }] });
+  const { context } = harness;
+  let caught = 0;
+  context.chrome.runtime.sendMessage = () => ({
+    catch(handler) {
+      caught += 1;
+      handler(new Error('Extension context invalidated.'));
+    },
+  });
+  const ready = makePageEnvelope(
+    context,
+    context.ToolBraidUniversalProtocol.TYPES.MAIN_READY,
+    firstBinding,
+    { provenance: context.ToolBraidUniversalProtocol.PROVENANCE },
+  );
+
+  harness.dispatch(ready);
+
+  assert.equal(caught, 1);
 });
 
 test('an explicit CHANNEL_CLOSE cancels the heartbeat instead of resurrecting authority', () => {

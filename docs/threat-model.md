@@ -38,6 +38,9 @@ Trusted authority is limited to a genuine top-level human UI activation. Agent c
 | Cross-origin data leakage | explicit origin allowlist, scoped arguments, provider CSP, frame sandbox, `exposedTo` policy |
 | Audit rewriting | local previous-hash chain and final seal expose edits inside the retained session record; no authenticity claim |
 | Hanging execution | abort signals propagate through client and providers |
+| Ambient local access to the Codex bridge | no TCP listener; Native Messaging allowlists one stable extension origin; the named pipe requires a 256-bit token stored in an ACL-restricted per-user directory |
+| Stale MCP tool replay | every proxy is held extension-side and exact-bound to tab, session, origin, page fingerprint, descriptor fingerprint, and tool name; lifecycle changes clear the handle set |
+| Agent mutation authority through MCP | the MCP contract exposes status, listing, safe reads, and action preparation only; approval creation and dispatch are absent and remain trusted side-panel gestures |
 
 ## Adversarial provider
 

@@ -190,6 +190,29 @@ test('a same-origin document navigation replaces authority when the new document
   assert.equal(controller.registry.get(7)?.sessionId, next.channel.sessionId);
 });
 
+test('an exact-page reload drops stale authority and reinjects the activated tab on completion', async () => {
+  const { api, calls } = mockChrome();
+  const controller = createServiceWorkerController({ chromeApi: api });
+  await ready(controller);
+
+  const invalidated = controller.handleTabUpdated(7, {
+    status: 'loading',
+  }, { id: 7, url: PAGE, status: 'loading' });
+
+  assert.equal(invalidated.length, 1);
+  assert.equal(controller.registry.get(7), null);
+
+  controller.handleTabUpdated(7, {
+    status: 'complete',
+  }, { id: 7, url: PAGE, status: 'complete' });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(
+    calls.filter((call) => call.operation === 'executeScript').map((call) => call.details.world),
+    ['MAIN', 'ISOLATED'],
+  );
+});
+
 test('activation refuses non-HTTP(S) pages and only then injects explicit worlds', async () => {
   const { api, calls } = mockChrome();
   const controller = createServiceWorkerController({ chromeApi: api });

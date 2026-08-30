@@ -9,7 +9,7 @@ test('ToolBraid Universal is a minimal MV3 action extension', () => {
   assert.equal(manifest.manifest_version, 3);
   assert.equal(manifest.background.service_worker, 'service-worker.js');
   assert.equal(manifest.background.type, 'module');
-  assert.deepEqual(manifest.permissions, ['activeTab', 'scripting', 'storage', 'sidePanel']);
+  assert.deepEqual(manifest.permissions, ['activeTab', 'nativeMessaging', 'scripting', 'storage', 'sidePanel']);
   assert.equal('host_permissions' in manifest, false);
   assert.deepEqual(manifest.optional_host_permissions, ['https://*/*', 'http://localhost/*', 'http://127.0.0.1/*']);
   assert.equal('content_scripts' in manifest, false);
@@ -17,6 +17,8 @@ test('ToolBraid Universal is a minimal MV3 action extension', () => {
   assert.equal('tabs' in manifest.permissions, false);
   assert.equal(manifest.permissions.includes('storage'), true);
   assert.equal(manifest.permissions.includes('sidePanel'), true);
+  assert.equal(manifest.permissions.includes('nativeMessaging'), true);
+  assert.equal(typeof manifest.key, 'string');
   assert.equal(manifest.action.default_title, 'Connect ToolBraid Universal');
 });
 

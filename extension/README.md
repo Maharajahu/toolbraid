@@ -53,6 +53,36 @@ the built-in GitHub and Vercel page-snapshot verifiers plus X like/repost
 verifiers; generic actions remain postcondition-unverified and X reply is
 stage-only.
 
+## Codex / MCP bridge
+
+ToolBraid can expose the exact tools active in Chrome to a local MCP client such
+as Codex without opening a localhost port. The extension connects to the
+allowlisted `com.toolbraid.mcp_bridge` Chrome Native Messaging host. That host
+relays only three bounded operations over a per-user authenticated named pipe:
+bridge status, live tool listing, and a live tool call.
+
+Each MCP proxy is bound to the exact tab, session, origin, page fingerprint,
+descriptor fingerprint, and current tool name. Navigation, SPA drift,
+descriptor drift, extension restart, or a changed active tab makes the proxy
+stale. Safe reads may execute directly. Mutation calls can only prepare an
+exact pending action; the MCP surface has no approval creator and no dispatch
+operation. Approval and execution remain trusted clicks in the extension side
+panel.
+
+On Windows, install the per-user native host and Codex entry with:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install-mcp-bridge.ps1
+```
+
+The installer derives the stable unpacked-extension ID from `manifest.key`,
+creates a 256-bit local token, ACL-restricts its configuration directory to the
+current Windows user and SYSTEM, registers the native host under HKCU, backs up
+the Codex configuration, adds `[mcp_servers.toolbraid]`, and rebuilds the
+extension. Reload `dist/toolbraid-universal-extension` once and restart Codex.
+The MCP server then advertises `toolbraid_status` plus the exact page-bound tools
+currently available in Chrome.
+
 The shipped MV3 runtime selects three statically trusted, lazily loaded
 capability packs — `site.x`, `site.github`, and `site.vercel` — by exact HTTPS
 host/path and objective hints. Page snapshots cannot add or replace loaders;

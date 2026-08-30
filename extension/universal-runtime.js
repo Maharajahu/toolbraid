@@ -40,11 +40,11 @@ export const UI_MESSAGE_TYPES = Object.freeze({
 const UI_MESSAGE_SET = new Set(Object.values(UI_MESSAGE_TYPES));
 const MAX_SNAPSHOT_BYTES = 2 * 1024 * 1024;
 const MAX_CAPTURE_TRACKS = 24;
-const MAX_RENDERED_MEDIA_TARGETS = 8;
+const MAX_RENDERED_MEDIA_TARGETS = 2;
 const MAX_RENDERED_AUDIO_TARGETS = 2;
 const MAX_RENDERED_AUDIO_BYTES = 4 * 1024 * 1024;
 const RENDERED_AUDIO_DURATION_MS = 3_000;
-const RENDERED_CAPTURE_TIMEOUT_MS = 10_000;
+const RENDERED_CAPTURE_TIMEOUT_MS = 8_000;
 const REANALYZE_VIDEO_FRAMES = 3;
 const VIDEO_FRAME_INTERVAL_MS = 500;
 const MAX_RENDERED_VIDEO_FRAME_BYTES = 2 * 1024 * 1024;
@@ -219,12 +219,18 @@ function captionTextFor(entry, captions) {
 function renderedMediaCandidates(mediaInventory, limit = MAX_RENDERED_MEDIA_TARGETS) {
   const candidates = [];
   const seen = new Set();
+  const selectedKinds = new Set();
   for (const entry of mediaInventory ?? []) {
     if (candidates.length >= limit) break;
     const kind = entry?.kind;
     const elementRef = entry?.ref;
-    if (!['audio', 'video'].includes(kind) || typeof elementRef !== 'string' || !elementRef || seen.has(elementRef)) continue;
+    if (!['audio', 'video'].includes(kind)
+      || selectedKinds.has(kind)
+      || typeof elementRef !== 'string'
+      || !elementRef
+      || seen.has(elementRef)) continue;
     seen.add(elementRef);
+    selectedKinds.add(kind);
     candidates.push(Object.freeze({ elementRef, kind }));
   }
   return candidates;
@@ -433,6 +439,7 @@ function uiState(tab, state, { audit = null, capture = null, multimodalProvider 
     mode: state.multimodal ? 'Universal + multimodal' : 'Universal',
     tab: Object.freeze({
       id: tab.id,
+      windowId: tab.windowId,
       url: state.url,
       origin: state.origin,
       title: tab.title ?? '',
@@ -495,6 +502,7 @@ export async function createExtensionUniversalRuntime({
     documentRef: null,
     fetchImpl: globalThis.fetch?.bind(globalThis),
     captureVisibleTab: chromeApi.tabs?.captureVisibleTab?.bind(chromeApi.tabs),
+    limits: { requestTimeoutMs: renderedCaptureTimeoutMs },
     now: () => captureClock(now),
   });
   const multimodalSettings = createMultimodalSettingsStore({

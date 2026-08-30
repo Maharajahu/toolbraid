@@ -1172,7 +1172,10 @@ async function verifyLiveReadOnlyTarget({ options, report, page, extensionPage, 
       && typeof mutation.target?.ref === 'string'
       && mutation.pageFingerprint === state.snapshot.pageFingerprint
       && mutation.postcondition?.adapterId === ({ github: 'github', vercel: 'vercel', x: 'x-post' }[target.kind] ?? target.kind),
-    'E2E_LIVE_MUTATION_UNBOUND', 'A live mutation descriptor was not exact, approval-gated, and postcondition-bound.', { mutation });
+    'E2E_LIVE_MUTATION_UNBOUND', 'A live mutation descriptor was not exact, approval-gated, and postcondition-bound.', {
+      mutation,
+      statePageFingerprint: state.snapshot?.pageFingerprint ?? null,
+    });
     const prepared = await callRegisteredTool(page, mutation.name, {});
     assert(prepared?.ok === true && prepared.result?.status === 'approval-required' && prepared.result?.preparedAction,
       'E2E_LIVE_APPROVAL_BYPASS', 'A live mutation did not stop at the ToolBraid approval boundary.', { mutation, prepared });
