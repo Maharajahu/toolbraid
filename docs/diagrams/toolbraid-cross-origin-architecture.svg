@@ -106,8 +106,8 @@
   <path d="M372 341H414Q426 341 426 353V361H436" fill="none" stroke="#7fe36a" stroke-width="2.5" marker-end="url(#arrowGreen)"/>
   <path d="M372 551H414Q426 551 426 539V531H436" fill="none" stroke="#38c7ff" stroke-width="2.5" marker-end="url(#arrowCyan)"/>
   <g class="sans">
-    <rect x="385" y="380" width="101" height="24" rx="12" fill="#020914" stroke="#0e2238"/>
-    <text x="435.5" y="396" text-anchor="middle" class="tiny" fill="#b8c7d5">OBJECTIVE</text>
+    <rect x="376" y="380" width="56" height="24" rx="12" fill="#020914" stroke="#0e2238"/>
+    <text x="404" y="396" text-anchor="middle" fill="#b8c7d5" font-size="9" font-weight="700" letter-spacing="0.5">OBJECTIVE</text>
   </g>
 
   <!-- Mission control -->
@@ -122,8 +122,8 @@
 
     <rect x="458" y="390" width="496" height="76" rx="16" fill="#061322" stroke="#3f7cff" stroke-opacity="0.45"/>
     <text x="478" y="416" class="tiny" fill="#77e1ff">NATIVE LIVE REGISTRY</text>
-    <text x="478" y="443" class="cardCopy mono" fill="#f2f7fb">getTools({ fromOrigins })</text>
-    <text x="927" y="443" text-anchor="end" class="small" fill="#b8c7d5">9 live tools · opaque references retained</text>
+    <text x="927" y="416" text-anchor="end" class="small" fill="#b8c7d5">9 live tools · opaque references retained</text>
+    <text x="478" y="447" class="cardCopy mono" fill="#f2f7fb">getTools({ fromOrigins })</text>
 
     <rect x="458" y="480" width="496" height="128" rx="16" fill="#061322" stroke="#38c7ff" stroke-opacity="0.48"/>
     <text x="478" y="506" class="tiny" fill="#77e1ff">EXPLICIT ORIGIN ALLOWLIST</text>
@@ -156,12 +156,10 @@
     <text x="1045" y="272" class="small mono" fill="#f2f7fb">document.modelContext.registerTool(...)</text>
     <text x="1506" y="272" text-anchor="end" class="tiny" fill="#77e1ff">IN EACH DOCUMENT</text>
 
-    <path d="M976 441H1017" fill="none" stroke="url(#cyanLine)" stroke-width="3" marker-end="url(#arrowBlue)"/>
-    <path d="M976 476H1017" fill="none" stroke="#77e1ff" stroke-width="2" stroke-dasharray="6 6" marker-end="url(#arrowCyan)"/>
-    <rect x="974" y="391" width="70" height="29" rx="14.5" fill="#020914" stroke="#3f7cff" stroke-opacity="0.7"/>
-    <text x="1009" y="410" text-anchor="middle" class="tiny" fill="#77e1ff">DISCOVER</text>
-    <rect x="976" y="495" width="68" height="29" rx="14.5" fill="#020914" stroke="#38c7ff" stroke-opacity="0.7"/>
-    <text x="1010" y="514" text-anchor="middle" class="tiny" fill="#77e1ff">EXECUTE</text>
+    <text x="982" y="443" text-anchor="middle" class="tiny" fill="#77e1ff">DISCOVER</text>
+    <path d="M954 458H1009" fill="none" stroke="url(#cyanLine)" stroke-width="3" marker-end="url(#arrowBlue)"/>
+    <text x="982" y="660" text-anchor="middle" class="tiny" fill="#77e1ff">EXECUTE</text>
+    <path d="M954 675H1009" fill="none" stroke="#77e1ff" stroke-width="2.5" stroke-dasharray="6 6" marker-end="url(#arrowCyan)"/>
   </g>
 
   <!-- Provider connection bus -->
@@ -170,6 +168,7 @@
     <circle cx="1017" cy="342" r="5"/>
     <circle cx="1017" cy="458" r="5"/>
     <circle cx="1017" cy="574" r="5"/>
+    <circle cx="1017" cy="675" r="5"/>
   </g>
   <path d="M1017 342H1058" stroke="#3f7cff" stroke-width="2"/>
   <path d="M1017 458H1058" stroke="#3f7cff" stroke-width="2"/>
