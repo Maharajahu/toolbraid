@@ -134,10 +134,10 @@
 
       <text x="504" y="177" class="eyebrow">SOLE APPROVAL AUTHORITY</text>
       <text x="504" y="208" class="panelTitle">Trusted human DOM activation</text>
-      <g transform="translate(949 166)">
-        <rect width="149" height="42" rx="21" fill="#7fe36a" fill-opacity="0.11" stroke="#7fe36a" stroke-opacity="0.42"/>
-        <circle cx="22" cy="21" r="7" fill="#7fe36a" filter="url(#softGlow)"/>
-        <text x="39" y="26" fill="#7fe36a" font-size="14" font-weight="700" class="mono">isTrusted = true</text>
+      <g transform="translate(884 168)">
+        <rect width="160" height="38" rx="19" fill="#7fe36a" fill-opacity="0.11" stroke="#7fe36a" stroke-opacity="0.42"/>
+        <circle cx="20" cy="19" r="6" fill="#7fe36a" filter="url(#softGlow)"/>
+        <text x="35" y="24" fill="#7fe36a" font-size="13.5" font-weight="700" class="mono">isTrusted = true</text>
       </g>
 
       <path d="M800 222v31" stroke="#38c7ff" stroke-width="2" marker-end="url(#arrowCyan)"/>

@@ -73,7 +73,7 @@
   <g class="sans">
     <text x="72" y="222" class="section" fill="#73889d">01 · INTENT + AUTHORITY</text>
     <text x="436" y="222" class="section" fill="#73889d">02 · POLICY CONTROL PLANE</text>
-    <text x="1058" y="222" class="section" fill="#73889d">03 · INDEPENDENT PROVIDER ORIGINS</text>
+    <text x="1048" y="222" class="section" fill="#73889d">03 · INDEPENDENT PROVIDER ORIGINS</text>
   </g>
 
   <!-- Human + browser agent -->
@@ -103,29 +103,25 @@
   </g>
 
   <!-- Intent links -->
-  <path d="M372 341H414Q426 341 426 353V361H436" fill="none" stroke="#7fe36a" stroke-width="2.5" marker-end="url(#arrowGreen)"/>
-  <path d="M372 551H414Q426 551 426 539V531H436" fill="none" stroke="#38c7ff" stroke-width="2.5" marker-end="url(#arrowCyan)"/>
-  <g class="sans">
-    <rect x="376" y="380" width="56" height="24" rx="12" fill="#020914" stroke="#0e2238"/>
-    <text x="404" y="396" text-anchor="middle" fill="#b8c7d5" font-size="9" font-weight="700" letter-spacing="0.5">OBJECTIVE</text>
-  </g>
+  <path d="M372 341H436" fill="none" stroke="#7fe36a" stroke-width="2.5" marker-end="url(#arrowGreen)"/>
+  <path d="M372 551H436" fill="none" stroke="#38c7ff" stroke-width="2.5" marker-end="url(#arrowCyan)"/>
 
   <!-- Mission control -->
   <g class="sans">
-    <rect x="436" y="246" width="540" height="510" rx="30" fill="url(#controlSurface)" stroke="url(#cyanLine)" stroke-width="2"/>
+    <rect x="436" y="246" width="524" height="510" rx="30" fill="url(#controlSurface)" stroke="url(#cyanLine)" stroke-width="2"/>
     <rect x="456" y="267" width="116" height="28" rx="14" fill="#38c7ff" opacity="0.12"/>
     <text x="514" y="286" text-anchor="middle" class="tiny" fill="#77e1ff">MISSION CONTROL</text>
     <text x="458" y="333" class="cardTitle" fill="#f2f7fb" style="font-size:29px">ToolBraid</text>
     <text x="458" y="361" class="port mono" fill="#77e1ff">http://127.0.0.1:4173</text>
-    <circle cx="931" cy="311" r="17" fill="#38c7ff" opacity="0.11"/>
-    <path d="M923 311L929 317L940 304" fill="none" stroke="#77e1ff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="915" cy="311" r="17" fill="#38c7ff" opacity="0.11"/>
+    <path d="M907 311L913 317L924 304" fill="none" stroke="#77e1ff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
 
-    <rect x="458" y="390" width="496" height="76" rx="16" fill="#061322" stroke="#3f7cff" stroke-opacity="0.45"/>
+    <rect x="458" y="390" width="480" height="76" rx="16" fill="#061322" stroke="#3f7cff" stroke-opacity="0.45"/>
     <text x="478" y="416" class="tiny" fill="#77e1ff">NATIVE LIVE REGISTRY</text>
-    <text x="927" y="416" text-anchor="end" class="small" fill="#b8c7d5">9 live tools · opaque references retained</text>
+    <text x="911" y="416" text-anchor="end" class="small" fill="#b8c7d5">9 live tools · opaque references retained</text>
     <text x="478" y="447" class="cardCopy mono" fill="#f2f7fb">getTools({ fromOrigins })</text>
 
-    <rect x="458" y="480" width="496" height="128" rx="16" fill="#061322" stroke="#38c7ff" stroke-opacity="0.48"/>
+    <rect x="458" y="480" width="480" height="128" rx="16" fill="#061322" stroke="#38c7ff" stroke-opacity="0.48"/>
     <text x="478" y="506" class="tiny" fill="#77e1ff">EXPLICIT ORIGIN ALLOWLIST</text>
     <g class="mono small" fill="#b8c7d5">
       <text x="478" y="535">http://127.0.0.1:4174</text>
@@ -135,98 +131,100 @@
       <text x="720" y="562">http://127.0.0.1:4178</text>
       <text x="720" y="589">http://127.0.0.1:4179</text>
     </g>
-    <rect x="881" y="493" width="56" height="21" rx="10.5" fill="#7fe36a" opacity="0.12"/>
-    <text x="909" y="508" text-anchor="middle" class="tiny" fill="#7fe36a">EXACT</text>
+    <rect x="865" y="493" width="56" height="21" rx="10.5" fill="#7fe36a" opacity="0.12"/>
+    <text x="893" y="508" text-anchor="middle" class="tiny" fill="#7fe36a">EXACT</text>
 
-    <rect x="458" y="622" width="238" height="100" rx="16" fill="#061322" stroke="#0e2238" stroke-width="2"/>
+    <rect x="458" y="622" width="230" height="100" rx="16" fill="#061322" stroke="#0e2238" stroke-width="2"/>
     <text x="478" y="648" class="tiny" fill="#9a8cff">POLICY + SEMANTICS</text>
     <text x="478" y="675" class="cardCopy" fill="#f2f7fb">Scan · quarantine · normalize</text>
     <text x="478" y="700" class="small" fill="#73889d">Rank canonical capabilities</text>
 
-    <rect x="710" y="622" width="244" height="100" rx="16" fill="#061322" stroke="#0e2238" stroke-width="2"/>
-    <text x="730" y="648" class="tiny" fill="#f6b941">EXECUTION GATE</text>
-    <text x="730" y="675" class="cardCopy" fill="#f2f7fb">Reads flow · writes stop</text>
-    <text x="730" y="700" class="small" fill="#73889d">Exact approval before mutation</text>
+    <rect x="702" y="622" width="236" height="100" rx="16" fill="#061322" stroke="#0e2238" stroke-width="2"/>
+    <text x="722" y="648" class="tiny" fill="#f6b941">EXECUTION GATE</text>
+    <text x="722" y="675" class="cardCopy" fill="#f2f7fb">Reads flow · writes stop</text>
+    <text x="722" y="700" class="small" fill="#73889d">Exact approval before mutation</text>
   </g>
 
   <!-- Native WebMCP registration bus -->
   <g class="sans">
-    <rect x="1007" y="246" width="521" height="42" rx="14" fill="#061322" stroke="#38c7ff" stroke-opacity="0.38"/>
-    <circle cx="1030" cy="267" r="5" fill="#38c7ff" filter="url(#softGlow)"/>
-    <text x="1045" y="272" class="small mono" fill="#f2f7fb">document.modelContext.registerTool(...)</text>
+    <rect x="1048" y="246" width="480" height="42" rx="14" fill="#061322" stroke="#38c7ff" stroke-opacity="0.38"/>
+    <circle cx="1070" cy="267" r="5" fill="#38c7ff" filter="url(#softGlow)"/>
+    <text x="1085" y="272" class="small mono" fill="#f2f7fb">document.modelContext.registerTool(...)</text>
     <text x="1506" y="272" text-anchor="end" class="tiny" fill="#77e1ff">IN EACH DOCUMENT</text>
 
-    <text x="982" y="443" text-anchor="middle" class="tiny" fill="#77e1ff">DISCOVER</text>
-    <path d="M954 458H1009" fill="none" stroke="url(#cyanLine)" stroke-width="3" marker-end="url(#arrowBlue)"/>
-    <text x="982" y="660" text-anchor="middle" class="tiny" fill="#77e1ff">EXECUTE</text>
-    <path d="M954 675H1009" fill="none" stroke="#77e1ff" stroke-width="2.5" stroke-dasharray="6 6" marker-end="url(#arrowCyan)"/>
+    <rect x="1048" y="296" width="480" height="460" rx="24" fill="#03101d" stroke="#0e2238" stroke-width="2"/>
+
+    <text x="992" y="443" text-anchor="middle" class="tiny" fill="#77e1ff">DISCOVER</text>
+    <path d="M960 458H1016" fill="none" stroke="url(#cyanLine)" stroke-width="3" marker-end="url(#arrowBlue)"/>
+    <text x="992" y="660" text-anchor="middle" class="tiny" fill="#77e1ff">EXECUTE</text>
+    <path d="M960 675H1016" fill="none" stroke="#77e1ff" stroke-width="2.5" stroke-dasharray="6 6" marker-end="url(#arrowCyan)"/>
   </g>
 
   <!-- Provider connection bus -->
-  <path d="M1017 322V704" fill="none" stroke="#3f7cff" stroke-width="2" stroke-opacity="0.7"/>
+  <path d="M1024 322V704" fill="none" stroke="#3f7cff" stroke-width="2" stroke-opacity="0.7"/>
   <g fill="#020914" stroke="#77e1ff" stroke-width="2">
-    <circle cx="1017" cy="342" r="5"/>
-    <circle cx="1017" cy="458" r="5"/>
-    <circle cx="1017" cy="574" r="5"/>
-    <circle cx="1017" cy="675" r="5"/>
+    <circle cx="1024" cy="342" r="5"/>
+    <circle cx="1024" cy="458" r="5"/>
+    <circle cx="1024" cy="574" r="5"/>
+    <circle cx="1024" cy="675" r="5"/>
   </g>
-  <path d="M1017 342H1058" stroke="#3f7cff" stroke-width="2"/>
-  <path d="M1017 458H1058" stroke="#3f7cff" stroke-width="2"/>
-  <path d="M1017 574H1058" stroke="#3f7cff" stroke-width="2"/>
+  <path d="M1024 342H1064" stroke="#3f7cff" stroke-width="2"/>
+  <path d="M1024 458H1064" stroke="#3f7cff" stroke-width="2"/>
+  <path d="M1024 574H1064" stroke="#3f7cff" stroke-width="2"/>
 
   <!-- Provider cards, row 1 -->
   <g class="sans">
-    <rect x="1058" y="307" width="225" height="101" rx="18" fill="#061322" stroke="#38c7ff" stroke-width="1.5"/>
-    <circle cx="1082" cy="331" r="8" fill="none" stroke="#38c7ff" stroke-width="2"/>
-    <text x="1099" y="335" class="tiny" fill="#77e1ff">READ · PRIMARY</text>
-    <text x="1080" y="367" class="cardTitle" fill="#f2f7fb">Service Signals</text>
-    <text x="1080" y="392" class="port mono" fill="#73889d">127.0.0.1:4174 · 1 tool</text>
+    <rect x="1064" y="307" width="216" height="101" rx="18" fill="#061322" stroke="#38c7ff" stroke-width="1.5"/>
+    <circle cx="1088" cy="331" r="8" fill="none" stroke="#38c7ff" stroke-width="2"/>
+    <text x="1105" y="335" class="tiny" fill="#77e1ff">READ · PRIMARY</text>
+    <text x="1086" y="367" class="cardTitle" fill="#f2f7fb">Service Signals</text>
+    <text x="1086" y="392" class="port mono" fill="#73889d">127.0.0.1:4174 · 1 tool</text>
 
-    <rect x="1303" y="307" width="225" height="101" rx="18" fill="#061322" stroke="#9a8cff" stroke-width="1.5" stroke-dasharray="8 5"/>
-    <path d="M1320 331H1336M1331 326L1336 331L1331 336" fill="none" stroke="#9a8cff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-    <text x="1346" y="335" class="tiny" fill="#9a8cff">FALLBACK READ</text>
-    <text x="1325" y="367" class="cardTitle" fill="#f2f7fb">Service Pulse</text>
-    <text x="1325" y="392" class="port mono" fill="#73889d">127.0.0.1:4175 · 1 tool</text>
+    <rect x="1296" y="307" width="216" height="101" rx="18" fill="#061322" stroke="#9a8cff" stroke-width="1.5" stroke-dasharray="8 5"/>
+    <path d="M1313 331H1329M1324 326L1329 331L1324 336" fill="none" stroke="#9a8cff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="1339" y="335" class="tiny" fill="#9a8cff">FALLBACK READ</text>
+    <text x="1318" y="367" class="cardTitle" fill="#f2f7fb">Service Pulse</text>
+    <text x="1318" y="392" class="port mono" fill="#73889d">127.0.0.1:4175 · 1 tool</text>
   </g>
 
   <!-- Provider cards, row 2 -->
   <g class="sans">
-    <rect x="1058" y="423" width="225" height="101" rx="18" fill="#061322" stroke="#38c7ff" stroke-width="1.5"/>
-    <circle cx="1082" cy="447" r="8" fill="none" stroke="#38c7ff" stroke-width="2"/>
-    <text x="1099" y="451" class="tiny" fill="#77e1ff">READ ONLY</text>
-    <text x="1080" y="483" class="cardTitle" fill="#f2f7fb">Release Source</text>
-    <text x="1080" y="508" class="port mono" fill="#73889d">127.0.0.1:4176 · 1 tool</text>
+    <rect x="1064" y="423" width="216" height="101" rx="18" fill="#061322" stroke="#38c7ff" stroke-width="1.5"/>
+    <circle cx="1088" cy="447" r="8" fill="none" stroke="#38c7ff" stroke-width="2"/>
+    <text x="1105" y="451" class="tiny" fill="#77e1ff">READ ONLY</text>
+    <text x="1086" y="483" class="cardTitle" fill="#f2f7fb">Release Source</text>
+    <text x="1086" y="508" class="port mono" fill="#73889d">127.0.0.1:4176 · 1 tool</text>
 
-    <rect x="1303" y="423" width="225" height="101" rx="18" fill="#061322" stroke="#f6b941" stroke-width="1.5"/>
-    <path d="M1328 438L1337 447L1328 456L1319 447Z" fill="none" stroke="#f6b941" stroke-width="2"/>
-    <text x="1347" y="451" class="tiny" fill="#f6b941">MUTATION DOMAIN</text>
-    <text x="1325" y="483" class="cardTitle" fill="#f2f7fb">Deploy Control</text>
-    <text x="1325" y="508" class="port mono" fill="#73889d">127.0.0.1:4177 · 3 tools</text>
+    <rect x="1296" y="423" width="216" height="101" rx="18" fill="#061322" stroke="#f6b941" stroke-width="1.5"/>
+    <path d="M1321 438L1330 447L1321 456L1312 447Z" fill="none" stroke="#f6b941" stroke-width="2"/>
+    <text x="1340" y="451" class="tiny" fill="#f6b941">MUTATION DOMAIN</text>
+    <text x="1318" y="483" class="cardTitle" fill="#f2f7fb">Deploy Control</text>
+    <text x="1318" y="508" class="port mono" fill="#73889d">127.0.0.1:4177 · 3 tools</text>
   </g>
 
   <!-- Provider cards, row 3 -->
   <g class="sans">
-    <rect x="1058" y="539" width="225" height="101" rx="18" fill="#061322" stroke="#f6b941" stroke-width="1.5"/>
-    <path d="M1082 554L1091 563L1082 572L1073 563Z" fill="none" stroke="#f6b941" stroke-width="2"/>
-    <text x="1101" y="567" class="tiny" fill="#f6b941">MUTATION DOMAIN</text>
-    <text x="1080" y="599" class="cardTitle" fill="#f2f7fb">Customer Status</text>
-    <text x="1080" y="624" class="port mono" fill="#73889d">127.0.0.1:4178 · 2 tools</text>
+    <rect x="1064" y="539" width="216" height="101" rx="18" fill="#061322" stroke="#f6b941" stroke-width="1.5"/>
+    <path d="M1088 554L1097 563L1088 572L1079 563Z" fill="none" stroke="#f6b941" stroke-width="2"/>
+    <text x="1107" y="567" class="tiny" fill="#f6b941">MUTATION DOMAIN</text>
+    <text x="1086" y="599" class="cardTitle" fill="#f2f7fb">Customer Status</text>
+    <text x="1086" y="624" class="port mono" fill="#73889d">127.0.0.1:4178 · 2 tools</text>
 
-    <rect x="1303" y="539" width="225" height="101" rx="18" fill="#061322" stroke="#ff6b55" stroke-width="1.5"/>
-    <rect x="1303" y="539" width="225" height="101" rx="18" fill="url(#quarantineHatch)"/>
-    <path d="M1320 555L1336 571M1336 555L1320 571" stroke="#ff6b55" stroke-width="2.4" stroke-linecap="round"/>
-    <text x="1347" y="567" class="tiny" fill="#ff6b55">QUARANTINED</text>
-    <text x="1325" y="599" class="cardTitle" fill="#f2f7fb">Mirage Fixture</text>
-    <text x="1325" y="624" class="port mono" fill="#73889d">127.0.0.1:4179 · blocked</text>
+    <rect x="1296" y="539" width="216" height="101" rx="18" fill="#061322" stroke="#ff6b55" stroke-width="1.5"/>
+    <rect x="1296" y="539" width="216" height="101" rx="18" fill="url(#quarantineHatch)"/>
+    <path d="M1313 555L1329 571M1329 555L1313 571" stroke="#ff6b55" stroke-width="2.4" stroke-linecap="round"/>
+    <text x="1340" y="567" class="tiny" fill="#ff6b55">QUARANTINED</text>
+    <text x="1318" y="599" class="cardTitle" fill="#f2f7fb">Mirage Fixture</text>
+    <text x="1318" y="624" class="port mono" fill="#73889d">127.0.0.1:4179 · blocked</text>
   </g>
 
   <!-- Isolation note -->
   <g class="sans">
-    <rect x="1058" y="664" width="470" height="92" rx="20" fill="#061322" stroke="#0e2238" stroke-width="2"/>
-    <path d="M1081 700V687L1092 681L1103 687V700C1103 710 1092 716 1092 716S1081 710 1081 700Z" fill="none" stroke="#7fe36a" stroke-width="2"/>
-    <text x="1120" y="690" class="tiny" fill="#7fe36a">ORIGIN ISOLATION</text>
-    <text x="1120" y="716" class="cardCopy" fill="#f2f7fb">sandbox · CSP · exposedTo :4173 · no provider network</text>
-    <text x="1120" y="739" class="small" fill="#73889d">Unknown origins and hostile metadata fail closed.</text>
+    <rect x="1064" y="652" width="448" height="88" rx="20" fill="#061322" stroke="#0e2238" stroke-width="2"/>
+    <path d="M1087 688V675L1098 669L1109 675V688C1109 698 1098 704 1098 704S1087 698 1087 688Z" fill="none" stroke="#7fe36a" stroke-width="2"/>
+    <text x="1126" y="678" class="tiny" fill="#7fe36a">ORIGIN ISOLATION</text>
+    <text x="1126" y="704" class="cardCopy" fill="#f2f7fb">sandbox · CSP · exposedTo :4173 · no provider network</text>
+    <text x="1126" y="727" class="small" fill="#73889d">Unknown origins and hostile metadata fail closed.</text>
   </g>
 
   <!-- Legend / footer -->
