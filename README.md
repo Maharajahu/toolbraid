@@ -143,7 +143,7 @@ The complete design and authority boundary are documented in [Universal Architec
 
 ## Runtime topology
 
-[![ToolBraid cross-origin architecture showing the mission-control origin, six isolated WebMCP provider origins, read-only fallback, mutation domains, and a quarantined hostile fixture](docs/diagrams/toolbraid-runtime-topology.svg)](docs/diagrams/toolbraid-runtime-topology.svg)
+[![ToolBraid cross-origin architecture showing the mission-control origin, six isolated WebMCP provider origins, read-only fallback, mutation domains, and a quarantined hostile fixture](docs/diagrams/toolbraid-runtime-topology.png)](docs/diagrams/toolbraid-runtime-topology.png)
 
 In a supported browser, each provider calls `document.modelContext.registerTool(...)` from its own document. ToolBraid discovers the returned live registrations with an explicit origin allowlist and executes those opaque tool references.
 
@@ -273,7 +273,7 @@ docs/                       architecture, threat model, test evidence, and chall
 
 ## Human authority boundary
 
-[![ToolBraid human-authority model showing the agent surface, trusted human approval creation, exact execution bindings, fail-closed invalidation, atomic nonce claim, ordered mutations, and audit sealing](docs/diagrams/toolbraid-human-authority-boundary.svg)](docs/diagrams/toolbraid-human-authority-boundary.svg)
+[![ToolBraid human-authority model showing the agent surface, trusted human approval creation, exact execution bindings, fail-closed invalidation, atomic nonce claim, ordered mutations, and audit sealing](docs/diagrams/toolbraid-human-authority-boundary.png)](docs/diagrams/toolbraid-human-authority-boundary.png)
 
 Agent-callable actions may start discovery, execute safe reads, inspect state, or attempt execution of already approved nodes. They cannot create approval.
 
