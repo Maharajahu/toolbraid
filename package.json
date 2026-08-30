@@ -4,6 +4,22 @@
   "private": true,
   "type": "module",
   "description": "A browser-native semantic and policy control plane for safe, explainable, human-approved WebMCP execution across sites.",
+  "keywords": [
+    "webmcp",
+    "mcp",
+    "ai-agents",
+    "browser-extension",
+    "human-in-the-loop"
+  ],
+  "homepage": "https://toolbraid-webmcp.vercel.app",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Maharajahu/toolbraid.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Maharajahu/toolbraid/issues"
+  },
+  "author": "Maharajahu",
   "scripts": {
     "dev": "node scripts/serve.mjs",
     "dev:native": "node scripts/serve-multi-origin.mjs",

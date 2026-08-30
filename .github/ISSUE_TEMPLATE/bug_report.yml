@@ -1,0 +1,52 @@
+name: Bug report
+description: Report a reproducible ToolBraid defect
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Do not include credentials, cookies, OTPs, private URLs, or security vulnerabilities in a public issue.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - WebMCP recovery application
+        - Universal browser extension
+        - Codex / MCP bridge
+        - Live deployment
+        - Documentation or build
+    validations:
+      required: true
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened?
+      description: Describe the observed behavior and its user impact.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: Provide the smallest safe sequence that reproduces the issue.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: input
+    id: commit
+    attributes:
+      label: Commit or version
+      placeholder: d8cf5fa or 0.2.0
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Safety check
+      options:
+        - label: This report contains no credentials or private data and is not a vulnerability disclosure.
+          required: true

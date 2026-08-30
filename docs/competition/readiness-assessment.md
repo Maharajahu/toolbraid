@@ -1,6 +1,6 @@
 # ToolBraid Readiness Assessment
 
-**Assessment date:** 28 August 2026
+**Assessment date:** 30 August 2026
 **Product state:** Native-validated release candidate
 **Submission state:** Not ready to submit
 
@@ -17,14 +17,17 @@
 - local documentation, source, and MIT license.
 - anonymous seven-origin public Vercel deployment;
 - public native Chrome 151 read-only validation through the human review checkpoint.
+- secure local Codex/MCP bridge with extension-owned approval authority;
+- 137/137 recovery-product tests and 320/320 Universal tests;
+- explicit compatibility evidence across 500 public sites;
+- repository metadata, contribution guidance, security reporting, and GitHub templates prepared for publication.
 
 ## Remaining before submission
 
-1. Confirm the live UI in ChatGPT's in-app browser; native cross-origin evidence is already validated in Chrome 151.
-2. Promote the synchronized private competition branch, make the repository public, and verify license/About visibility from a clean clone.
-3. Complete an assistive-technology pass on the deployed build.
-4. Prepare the English Devpost description, images, and final links.
-5. Publish the required sub-three-minute YouTube demo with audio.
-6. Complete and submit the Devpost entry before the deadline.
+1. Make the synchronized repository public only after explicit owner approval, then verify license/About visibility and an anonymous clean clone.
+2. Complete an assistive-technology pass on the deployed build.
+3. Add the final public YouTube URL for the validated sub-three-minute demo with audio.
+4. Copy the prepared English description, images, live URL, repository URL, and video URL into Devpost.
+5. Complete and submit the Devpost entry before the deadline.
 
-The public deployment and native Chrome gate are complete. Repository publication, final video publication, accessibility review, and the Devpost submission remain open, so the competition entry cannot honestly be called submission-ready yet.
+The public deployment, native Chrome gate, and repository contents are complete. Repository publication, final video publication, accessibility review, and the Devpost submission remain open, so the competition entry cannot honestly be called submission-ready yet.

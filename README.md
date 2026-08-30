@@ -20,6 +20,8 @@ The judge-facing interface has five functional views — Walkthrough, Live Works
 
 **Live demo:** [toolbraid-webmcp.vercel.app](https://toolbraid-webmcp.vercel.app)
 
+**Source:** [github.com/Maharajahu/toolbraid](https://github.com/Maharajahu/toolbraid) · **License:** [MIT](LICENSE)
+
 ## Why this matters
 
 Most browser agents must infer what a website can do from page text, DOM structure, screenshots, and screen coordinates. That approach is fragile: a small interface change can break the workflow, and the agent may not know the exact arguments or side effects of the action it is attempting.
@@ -184,6 +186,7 @@ Latest checked E2E outcome:
 recovery release-1841 · notice notice-r9 · 54 audit entries
 Universal: real GitHub repository + issue reads passed (read-only)
 Universal fixture gate: real Chrome rendered video keyframes + audio + captions + bounded CAPTCHA click
+Compatibility audit: [500 public sites, with explicit pass/partial/blocked results](artifacts/compatibility-audit-500-sites-2026-08-30.md)
 ```
 
 ## Connect Codex through local MCP
@@ -222,6 +225,7 @@ src/runtime/                Universal session, dispatch, mission, and handoff li
 src/persistence/            bounded approvals, receipts, and audit persistence
 extension/                  MV3 worker, isolated runtime, MAIN registrar, media capture, missions, handoffs, and side panel
 bridge/                     Chrome Native Messaging host, authenticated local transport, and MCP stdio server
+artifacts/                  bounded compatibility evidence from real public-site checks
 tests/v2/                   unit, integration, security, and multi-origin contract tests
 tests/universal/            Universal unit, protocol, security, adapter, and build tests
 scripts/                    servers, checks, standalone/Vercel builds, capture, and browser E2E
@@ -239,7 +243,7 @@ Approval creation is accepted only from a trusted human DOM activation. A synthe
 
 ## Current scope
 
-The engineering build is a native-validated release candidate. The public seven-origin profile can run entirely against the disposable GitHub/Vercel recovery lab; the local profile remains deterministic for repeatable tests. Public repository visibility, the public YouTube upload, and the final Devpost entry remain release gates tracked in [Challenge Requirements](docs/challenge-requirements.md).
+The engineering build is a native-validated release candidate. The public seven-origin profile can run entirely against the disposable GitHub/Vercel recovery lab; the local profile remains deterministic for repeatable tests. The repository is release-prepared but intentionally remains private until the owner authorizes publication. Public repository visibility, the public YouTube upload, and the final Devpost entry remain submission gates tracked in [Challenge Requirements](docs/challenge-requirements.md).
 
 See [Start Here](START-HERE.md), [Architecture](docs/architecture.md), [Threat Model](docs/threat-model.md), and [Testing](docs/testing.md).
 

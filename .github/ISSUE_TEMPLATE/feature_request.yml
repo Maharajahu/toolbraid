@@ -1,0 +1,33 @@
+name: Feature request
+description: Propose a focused ToolBraid capability or UX improvement
+title: "[Feature]: "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user or agent workflow is currently difficult or impossible?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Describe the smallest useful outcome, including the human authority boundary.
+    validations:
+      required: true
+  - type: textarea
+    id: webmcp
+    attributes:
+      label: WebMCP fit
+      description: Which structured tool or cross-site capability would this improve?
+    validations:
+      required: true
+  - type: textarea
+    id: security
+    attributes:
+      label: Security and approval impact
+      description: Identify any new origin, permission, credential, mutation, or approval requirement.
+    validations:
+      required: true
