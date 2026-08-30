@@ -1,0 +1,251 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" role="img" aria-labelledby="title desc" focusable="false">
+  <title id="title">ToolBraid native cross-origin WebMCP architecture</title>
+  <desc id="desc">A human and browser agent send an objective to ToolBraid Mission Control on port 4173. An explicit allowlist connects Mission Control to six independent provider documents on ports 4174 through 4179. Service Signals and Release Source are read providers, Service Pulse is a read fallback, Deploy Control and Customer Status contain external mutations, and Mirage Fixture is quarantined. Each provider registers tools through document.modelContext.registerTool.</desc>
+
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#020914"/>
+      <stop offset="1" stop-color="#01060d"/>
+    </linearGradient>
+    <linearGradient id="controlSurface" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0e2238"/>
+      <stop offset="1" stop-color="#061322"/>
+    </linearGradient>
+    <linearGradient id="cyanLine" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#3f7cff"/>
+      <stop offset="1" stop-color="#38c7ff"/>
+    </linearGradient>
+    <pattern id="grid" width="48" height="48" patternUnits="userSpaceOnUse">
+      <path d="M48 0H0V48" fill="none" stroke="#73889d" stroke-width="1" opacity="0.055"/>
+    </pattern>
+    <pattern id="quarantineHatch" width="10" height="10" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <line x1="0" y1="0" x2="0" y2="10" stroke="#ff6b55" stroke-width="3" opacity="0.18"/>
+    </pattern>
+    <filter id="softGlow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="8" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <marker id="arrowCyan" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth">
+      <path d="M0 0L10 5L0 10Z" fill="#38c7ff"/>
+    </marker>
+    <marker id="arrowBlue" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth">
+      <path d="M0 0L10 5L0 10Z" fill="#3f7cff"/>
+    </marker>
+    <marker id="arrowGreen" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth">
+      <path d="M0 0L10 5L0 10Z" fill="#7fe36a"/>
+    </marker>
+    <style>
+      .sans { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .mono { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; }
+      .eyebrow { font-size: 14px; font-weight: 700; letter-spacing: 2.4px; }
+      .section { font-size: 13px; font-weight: 700; letter-spacing: 2px; }
+      .title { font-size: 42px; font-weight: 720; letter-spacing: -1.2px; }
+      .subtitle { font-size: 18px; font-weight: 430; }
+      .cardTitle { font-size: 21px; font-weight: 700; letter-spacing: -0.25px; }
+      .cardCopy { font-size: 15px; font-weight: 430; }
+      .small { font-size: 13px; font-weight: 500; }
+      .tiny { font-size: 11px; font-weight: 700; letter-spacing: 1.2px; }
+      .port { font-size: 14px; font-weight: 650; }
+    </style>
+  </defs>
+
+  <rect width="1600" height="900" fill="url(#background)"/>
+  <rect width="1600" height="900" fill="url(#grid)"/>
+  <circle cx="1005" cy="430" r="310" fill="#38c7ff" opacity="0.025"/>
+  <circle cx="1005" cy="430" r="215" fill="#3f7cff" opacity="0.022"/>
+
+  <!-- Header -->
+  <g class="sans">
+    <rect x="72" y="50" width="272" height="30" rx="15" fill="#061322" stroke="#38c7ff" stroke-opacity="0.38"/>
+    <circle cx="90" cy="65" r="4" fill="#7fe36a"/>
+    <text x="104" y="70" class="eyebrow" fill="#77e1ff">TOOLBRAID · NATIVE WEBMCP</text>
+    <text x="72" y="127" class="title" fill="#f2f7fb">Cross-origin execution, under human control</text>
+    <text x="72" y="163" class="subtitle" fill="#b8c7d5">Six independent provider documents. One explicit trust boundary. No silent mutation.</text>
+
+    <rect x="1281" y="55" width="247" height="37" rx="18.5" fill="#061322" stroke="#73889d" stroke-opacity="0.5"/>
+    <text x="1404.5" y="79" text-anchor="middle" class="small mono" fill="#b8c7d5">7 ORIGINS · PORTS 4173–4179</text>
+  </g>
+
+  <!-- Column headings -->
+  <g class="sans">
+    <text x="72" y="222" class="section" fill="#73889d">01 · INTENT + AUTHORITY</text>
+    <text x="436" y="222" class="section" fill="#73889d">02 · POLICY CONTROL PLANE</text>
+    <text x="1058" y="222" class="section" fill="#73889d">03 · INDEPENDENT PROVIDER ORIGINS</text>
+  </g>
+
+  <!-- Human + browser agent -->
+  <g class="sans">
+    <rect x="72" y="252" width="300" height="178" rx="24" fill="#061322" stroke="#0e2238" stroke-width="2"/>
+    <circle cx="115" cy="298" r="21" fill="#0e2238" stroke="#7fe36a" stroke-width="1.5"/>
+    <circle cx="115" cy="292" r="6" fill="none" stroke="#7fe36a" stroke-width="2"/>
+    <path d="M102 312C104 302 126 302 128 312" fill="none" stroke="#7fe36a" stroke-width="2" stroke-linecap="round"/>
+    <text x="151" y="291" class="tiny" fill="#7fe36a">TRUSTED HUMAN</text>
+    <text x="151" y="318" class="cardTitle" fill="#f2f7fb">Human authority</text>
+    <text x="96" y="355" class="cardCopy" fill="#b8c7d5">Defines the objective.</text>
+    <text x="96" y="380" class="cardCopy" fill="#b8c7d5">Approves each exact mutation.</text>
+    <rect x="96" y="396" width="215" height="22" rx="11" fill="#7fe36a" opacity="0.09"/>
+    <text x="203.5" y="412" text-anchor="middle" class="tiny" fill="#7fe36a">APPROVAL CANNOT BE AUTOMATED</text>
+
+    <rect x="72" y="468" width="300" height="166" rx="24" fill="#061322" stroke="#0e2238" stroke-width="2"/>
+    <rect x="94" y="491" width="43" height="34" rx="9" fill="#0e2238" stroke="#38c7ff" stroke-width="1.5"/>
+    <circle cx="104" cy="502" r="2.5" fill="#38c7ff"/>
+    <circle cx="113" cy="502" r="2.5" fill="#38c7ff"/>
+    <circle cx="122" cy="502" r="2.5" fill="#38c7ff"/>
+    <path d="M101 513H130" stroke="#38c7ff" stroke-width="2" stroke-linecap="round"/>
+    <text x="151" y="501" class="tiny" fill="#77e1ff">BROWSER AGENT</text>
+    <text x="151" y="528" class="cardTitle" fill="#f2f7fb">Objective runner</text>
+    <text x="96" y="565" class="cardCopy" fill="#b8c7d5">Discovers and composes tools.</text>
+    <text x="96" y="590" class="cardCopy" fill="#b8c7d5">May run reads, never mint approval.</text>
+    <text x="96" y="615" class="small mono" fill="#73889d">agent → public automation surface</text>
+  </g>
+
+  <!-- Intent links -->
+  <path d="M372 341H414Q426 341 426 353V361H436" fill="none" stroke="#7fe36a" stroke-width="2.5" marker-end="url(#arrowGreen)"/>
+  <path d="M372 551H414Q426 551 426 539V531H436" fill="none" stroke="#38c7ff" stroke-width="2.5" marker-end="url(#arrowCyan)"/>
+  <g class="sans">
+    <rect x="376" y="380" width="56" height="24" rx="12" fill="#020914" stroke="#0e2238"/>
+    <text x="404" y="396" text-anchor="middle" fill="#b8c7d5" font-size="9" font-weight="700" letter-spacing="0.5">OBJECTIVE</text>
+  </g>
+
+  <!-- Mission control -->
+  <g class="sans">
+    <rect x="436" y="246" width="540" height="510" rx="30" fill="url(#controlSurface)" stroke="url(#cyanLine)" stroke-width="2"/>
+    <rect x="456" y="267" width="116" height="28" rx="14" fill="#38c7ff" opacity="0.12"/>
+    <text x="514" y="286" text-anchor="middle" class="tiny" fill="#77e1ff">MISSION CONTROL</text>
+    <text x="458" y="333" class="cardTitle" fill="#f2f7fb" style="font-size:29px">ToolBraid</text>
+    <text x="458" y="361" class="port mono" fill="#77e1ff">http://127.0.0.1:4173</text>
+    <circle cx="931" cy="311" r="17" fill="#38c7ff" opacity="0.11"/>
+    <path d="M923 311L929 317L940 304" fill="none" stroke="#77e1ff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+
+    <rect x="458" y="390" width="496" height="76" rx="16" fill="#061322" stroke="#3f7cff" stroke-opacity="0.45"/>
+    <text x="478" y="416" class="tiny" fill="#77e1ff">NATIVE LIVE REGISTRY</text>
+    <text x="927" y="416" text-anchor="end" class="small" fill="#b8c7d5">9 live tools · opaque references retained</text>
+    <text x="478" y="447" class="cardCopy mono" fill="#f2f7fb">getTools({ fromOrigins })</text>
+
+    <rect x="458" y="480" width="496" height="128" rx="16" fill="#061322" stroke="#38c7ff" stroke-opacity="0.48"/>
+    <text x="478" y="506" class="tiny" fill="#77e1ff">EXPLICIT ORIGIN ALLOWLIST</text>
+    <g class="mono small" fill="#b8c7d5">
+      <text x="478" y="535">http://127.0.0.1:4174</text>
+      <text x="478" y="562">http://127.0.0.1:4175</text>
+      <text x="478" y="589">http://127.0.0.1:4176</text>
+      <text x="720" y="535">http://127.0.0.1:4177</text>
+      <text x="720" y="562">http://127.0.0.1:4178</text>
+      <text x="720" y="589">http://127.0.0.1:4179</text>
+    </g>
+    <rect x="881" y="493" width="56" height="21" rx="10.5" fill="#7fe36a" opacity="0.12"/>
+    <text x="909" y="508" text-anchor="middle" class="tiny" fill="#7fe36a">EXACT</text>
+
+    <rect x="458" y="622" width="238" height="100" rx="16" fill="#061322" stroke="#0e2238" stroke-width="2"/>
+    <text x="478" y="648" class="tiny" fill="#9a8cff">POLICY + SEMANTICS</text>
+    <text x="478" y="675" class="cardCopy" fill="#f2f7fb">Scan · quarantine · normalize</text>
+    <text x="478" y="700" class="small" fill="#73889d">Rank canonical capabilities</text>
+
+    <rect x="710" y="622" width="244" height="100" rx="16" fill="#061322" stroke="#0e2238" stroke-width="2"/>
+    <text x="730" y="648" class="tiny" fill="#f6b941">EXECUTION GATE</text>
+    <text x="730" y="675" class="cardCopy" fill="#f2f7fb">Reads flow · writes stop</text>
+    <text x="730" y="700" class="small" fill="#73889d">Exact approval before mutation</text>
+  </g>
+
+  <!-- Native WebMCP registration bus -->
+  <g class="sans">
+    <rect x="1007" y="246" width="521" height="42" rx="14" fill="#061322" stroke="#38c7ff" stroke-opacity="0.38"/>
+    <circle cx="1030" cy="267" r="5" fill="#38c7ff" filter="url(#softGlow)"/>
+    <text x="1045" y="272" class="small mono" fill="#f2f7fb">document.modelContext.registerTool(...)</text>
+    <text x="1506" y="272" text-anchor="end" class="tiny" fill="#77e1ff">IN EACH DOCUMENT</text>
+
+    <text x="982" y="443" text-anchor="middle" class="tiny" fill="#77e1ff">DISCOVER</text>
+    <path d="M954 458H1009" fill="none" stroke="url(#cyanLine)" stroke-width="3" marker-end="url(#arrowBlue)"/>
+    <text x="982" y="660" text-anchor="middle" class="tiny" fill="#77e1ff">EXECUTE</text>
+    <path d="M954 675H1009" fill="none" stroke="#77e1ff" stroke-width="2.5" stroke-dasharray="6 6" marker-end="url(#arrowCyan)"/>
+  </g>
+
+  <!-- Provider connection bus -->
+  <path d="M1017 322V704" fill="none" stroke="#3f7cff" stroke-width="2" stroke-opacity="0.7"/>
+  <g fill="#020914" stroke="#77e1ff" stroke-width="2">
+    <circle cx="1017" cy="342" r="5"/>
+    <circle cx="1017" cy="458" r="5"/>
+    <circle cx="1017" cy="574" r="5"/>
+    <circle cx="1017" cy="675" r="5"/>
+  </g>
+  <path d="M1017 342H1058" stroke="#3f7cff" stroke-width="2"/>
+  <path d="M1017 458H1058" stroke="#3f7cff" stroke-width="2"/>
+  <path d="M1017 574H1058" stroke="#3f7cff" stroke-width="2"/>
+
+  <!-- Provider cards, row 1 -->
+  <g class="sans">
+    <rect x="1058" y="307" width="225" height="101" rx="18" fill="#061322" stroke="#38c7ff" stroke-width="1.5"/>
+    <circle cx="1082" cy="331" r="8" fill="none" stroke="#38c7ff" stroke-width="2"/>
+    <text x="1099" y="335" class="tiny" fill="#77e1ff">READ · PRIMARY</text>
+    <text x="1080" y="367" class="cardTitle" fill="#f2f7fb">Service Signals</text>
+    <text x="1080" y="392" class="port mono" fill="#73889d">127.0.0.1:4174 · 1 tool</text>
+
+    <rect x="1303" y="307" width="225" height="101" rx="18" fill="#061322" stroke="#9a8cff" stroke-width="1.5" stroke-dasharray="8 5"/>
+    <path d="M1320 331H1336M1331 326L1336 331L1331 336" fill="none" stroke="#9a8cff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="1346" y="335" class="tiny" fill="#9a8cff">FALLBACK READ</text>
+    <text x="1325" y="367" class="cardTitle" fill="#f2f7fb">Service Pulse</text>
+    <text x="1325" y="392" class="port mono" fill="#73889d">127.0.0.1:4175 · 1 tool</text>
+  </g>
+
+  <!-- Provider cards, row 2 -->
+  <g class="sans">
+    <rect x="1058" y="423" width="225" height="101" rx="18" fill="#061322" stroke="#38c7ff" stroke-width="1.5"/>
+    <circle cx="1082" cy="447" r="8" fill="none" stroke="#38c7ff" stroke-width="2"/>
+    <text x="1099" y="451" class="tiny" fill="#77e1ff">READ ONLY</text>
+    <text x="1080" y="483" class="cardTitle" fill="#f2f7fb">Release Source</text>
+    <text x="1080" y="508" class="port mono" fill="#73889d">127.0.0.1:4176 · 1 tool</text>
+
+    <rect x="1303" y="423" width="225" height="101" rx="18" fill="#061322" stroke="#f6b941" stroke-width="1.5"/>
+    <path d="M1328 438L1337 447L1328 456L1319 447Z" fill="none" stroke="#f6b941" stroke-width="2"/>
+    <text x="1347" y="451" class="tiny" fill="#f6b941">MUTATION DOMAIN</text>
+    <text x="1325" y="483" class="cardTitle" fill="#f2f7fb">Deploy Control</text>
+    <text x="1325" y="508" class="port mono" fill="#73889d">127.0.0.1:4177 · 3 tools</text>
+  </g>
+
+  <!-- Provider cards, row 3 -->
+  <g class="sans">
+    <rect x="1058" y="539" width="225" height="101" rx="18" fill="#061322" stroke="#f6b941" stroke-width="1.5"/>
+    <path d="M1082 554L1091 563L1082 572L1073 563Z" fill="none" stroke="#f6b941" stroke-width="2"/>
+    <text x="1101" y="567" class="tiny" fill="#f6b941">MUTATION DOMAIN</text>
+    <text x="1080" y="599" class="cardTitle" fill="#f2f7fb">Customer Status</text>
+    <text x="1080" y="624" class="port mono" fill="#73889d">127.0.0.1:4178 · 2 tools</text>
+
+    <rect x="1303" y="539" width="225" height="101" rx="18" fill="#061322" stroke="#ff6b55" stroke-width="1.5"/>
+    <rect x="1303" y="539" width="225" height="101" rx="18" fill="url(#quarantineHatch)"/>
+    <path d="M1320 555L1336 571M1336 555L1320 571" stroke="#ff6b55" stroke-width="2.4" stroke-linecap="round"/>
+    <text x="1347" y="567" class="tiny" fill="#ff6b55">QUARANTINED</text>
+    <text x="1325" y="599" class="cardTitle" fill="#f2f7fb">Mirage Fixture</text>
+    <text x="1325" y="624" class="port mono" fill="#73889d">127.0.0.1:4179 · blocked</text>
+  </g>
+
+  <!-- Isolation note -->
+  <g class="sans">
+    <rect x="1058" y="664" width="470" height="92" rx="20" fill="#061322" stroke="#0e2238" stroke-width="2"/>
+    <path d="M1081 700V687L1092 681L1103 687V700C1103 710 1092 716 1092 716S1081 710 1081 700Z" fill="none" stroke="#7fe36a" stroke-width="2"/>
+    <text x="1120" y="690" class="tiny" fill="#7fe36a">ORIGIN ISOLATION</text>
+    <text x="1120" y="716" class="cardCopy" fill="#f2f7fb">sandbox · CSP · exposedTo :4173 · no provider network</text>
+    <text x="1120" y="739" class="small" fill="#73889d">Unknown origins and hostile metadata fail closed.</text>
+  </g>
+
+  <!-- Legend / footer -->
+  <g class="sans">
+    <line x1="72" y1="804" x2="1528" y2="804" stroke="#0e2238" stroke-width="2"/>
+    <text x="72" y="848" class="section" fill="#73889d">POLICY KEY</text>
+
+    <circle cx="207" cy="843" r="8" fill="none" stroke="#38c7ff" stroke-width="2"/>
+    <text x="225" y="848" class="small" fill="#b8c7d5">READ ONLY</text>
+
+    <rect x="339" y="835" width="17" height="17" rx="4" fill="none" stroke="#9a8cff" stroke-width="2" stroke-dasharray="4 3"/>
+    <text x="367" y="848" class="small" fill="#b8c7d5">FALLBACK READ</text>
+
+    <path d="M535 835L544 844L535 853L526 844Z" fill="none" stroke="#f6b941" stroke-width="2"/>
+    <text x="558" y="848" class="small" fill="#b8c7d5">EXTERNAL MUTATION · HUMAN APPROVAL</text>
+
+    <path d="M856 836L872 852M872 836L856 852" stroke="#ff6b55" stroke-width="2.4" stroke-linecap="round"/>
+    <text x="887" y="848" class="small" fill="#b8c7d5">QUARANTINED · NEVER EXECUTED</text>
+
+    <text x="1528" y="848" text-anchor="end" class="small mono" fill="#73889d">native provider plane / local proof topology</text>
+  </g>
+</svg>
