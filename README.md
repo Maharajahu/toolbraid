@@ -1,8 +1,28 @@
-# ToolBraid
+<p align="center"><img src="assets/favicon.svg" width="88" height="88" alt="ToolBraid braid mark"></p>
 
-**A browser-native semantic and policy control plane for safe, explainable, human-approved WebMCP execution across sites.**
+<h1 align="center">ToolBraid</h1>
+
+<p align="center"><strong>A browser-native semantic and policy control plane for safe, explainable, human-approved WebMCP execution across sites.</strong></p>
+
+<p align="center"><strong><a href="https://toolbraid-webmcp.vercel.app">Launch live deployment</a></strong> · <a href="docs/JUDGING.md">Judge Guide</a> · <a href="START-HERE.md">Start Here</a> · <a href="LICENSE">MIT License</a></p>
 
 ToolBraid turns one human objective spanning several websites into a visible, explainable execution graph. It discovers live WebMCP tools, quarantines hostile metadata, maps incompatible contracts into canonical capabilities, executes safe reads, and stops before each external mutation until the human approves the exact origin, tool, arguments, and effect.
+
+## Capabilities at a glance
+
+| Operational capability | What ToolBraid does today |
+|---|---|
+| Native multi-origin WebMCP | Discovers and executes nine live tools across six isolated provider origins, then maps them into seven canonical capabilities. |
+| Universal WebMCP layer | Turns bounded DOM/ARIA evidence from ordinary sites into clearly labelled local read, navigation, control, and form tools. |
+| Verified site packs | Recognizes exact GitHub, Vercel, and X page shapes; supported mutations include browser-observed postconditions instead of claiming success after a click. |
+| Human authority | Binds every external mutation to an exact origin, tab, session, page, target, arguments, predicted effect, expiry, and single-use nonce. The agent cannot approve itself. |
+| Multi-page missions | Carries one sanitized objective across as many as 16 exact tab/frame members, with drift detection, explicit rebind, pending-action ownership, and terminal release. |
+| Secure human handoff | Opens exact-origin login, 2FA, and CAPTCHA surfaces without retaining credentials; eligible CAPTCHA checkbox assistance is single-attempt and user-authorized. |
+| Multimodal evidence | Captures bounded visible screenshots, rendered video keyframes, optional rendered audio, and loaded captions behind short-lived extension-owned handles. |
+| Codex/MCP bridge | Exposes page-bound read and prepare-action proxies through Chrome Native Messaging and an authenticated per-user named pipe; mutations still require side-panel approval and dispatch. |
+| Receipts and audit | Quarantines hostile metadata, verifies supported postconditions, redacts sensitive values, records receipts, and seals the retained audit chain with SHA-256. |
+
+[![Current ToolBraid capability map: native WebMCP, Universal browser tooling, trusted site packs, multimodal evidence, human authority, multi-page missions, secure handoffs, and the Codex MCP bridge](docs/diagrams/toolbraid-capabilities.svg)](docs/diagrams/toolbraid-capabilities.svg)
 
 The current proof mission is production recovery:
 
@@ -16,11 +36,7 @@ The judge deployment targets a disposable recovery lab: GitHub commit/incident d
 
 The judge-facing interface has five functional views — Walkthrough, Live Workspace, Evidence, Approvals, and Audit — plus a persistent Help drawer. Each view projects the same live mission state rather than presenting decorative panels: provider substitutions, exact approval scope, receipts, and audit proof remain inspectable throughout the run.
 
-**Judge path:** [Judge Guide](docs/JUDGING.md) · [Start Here](START-HERE.md) · [Live mutation receipt](docs/live-mutation-validation.json) · [Architecture](docs/architecture.md) · [Threat Model](docs/threat-model.md) · [Testing](docs/testing.md)
-
-**Live demo:** [toolbraid-webmcp.vercel.app](https://toolbraid-webmcp.vercel.app)
-
-**Source:** [github.com/Maharajahu/toolbraid](https://github.com/Maharajahu/toolbraid) · **License:** [MIT](LICENSE)
+**Judge evidence:** [Live mutation receipt](docs/live-mutation-validation.json) · [Architecture](docs/architecture.md) · [Threat Model](docs/threat-model.md) · [Testing](docs/testing.md) · [Source](https://github.com/Maharajahu/toolbraid)
 
 ## Why this matters
 

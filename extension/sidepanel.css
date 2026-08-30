@@ -117,33 +117,16 @@ summary:focus-visible,
 .brand-lockup { min-width: 0; gap: 10px; }
 
 .brand-mark {
-  position: relative;
   display: grid;
   width: 38px;
   height: 38px;
   flex: 0 0 auto;
   place-items: center;
-  overflow: hidden;
-  border: 1px solid var(--line-strong);
   border-radius: 12px;
-  background: linear-gradient(145deg, rgba(255, 255, 255, 0.075), rgba(255, 255, 255, 0.025));
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 9px 24px rgba(0, 0, 0, 0.32);
+  filter: drop-shadow(0 9px 24px rgba(0, 0, 0, 0.32));
 }
 
-.brand-mark::before {
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  background: linear-gradient(135deg, rgba(119, 231, 244, 0.13), transparent 42%, rgba(255, 140, 200, 0.09));
-  content: "";
-  pointer-events: none;
-}
-
-.brand-mark svg { position: relative; width: 31px; height: 31px; }
-.braid-path { fill: none; stroke-linecap: round; stroke-linejoin: round; stroke-width: 2.25; }
-.braid-cyan { stroke: var(--cyan); }
-.braid-pink { stroke: var(--pink); }
-.braid-amber { stroke: var(--amber); }
+.brand-mark img { display: block; width: 38px; height: 38px; border-radius: 12px; }
 
 .eyebrow {
   margin: 0 0 2px;

@@ -57,6 +57,7 @@ async function bundle(entryRelative) {
 }
 await rm(output, { recursive: true, force: true });
 await mkdir(output, { recursive: true });
+await mkdir(path.join(output, 'assets'), { recursive: true });
 let html = await readFile(path.join(root, 'index.html'), 'utf8');
 const css = await readFile(path.join(root, 'src/app/mission-control.css'), 'utf8');
 const favicon = await readFile(path.join(root, 'assets/favicon.svg'), 'utf8');
@@ -69,5 +70,6 @@ html = html
 if (/<iframe\b/i.test(html)) throw new Error('V4 standalone must not contain provider iframes');
 if (/src=["']\.\/src\/app\/main\.js["']/i.test(html)) throw new Error('V4 application bundle was not inlined');
 await writeFile(path.join(output, 'index.html'), html);
+await copyFile(path.join(root, 'assets', 'favicon.svg'), path.join(output, 'assets', 'favicon.svg'));
 for (const filename of ['vercel.json', 'robots.txt', 'llms.txt', '.nojekyll']) await copyFile(path.join(root, filename), path.join(output, filename));
 console.log(`Standalone ToolBraid build written to ${output} (${Buffer.byteLength(html).toLocaleString()} HTML bytes).`);

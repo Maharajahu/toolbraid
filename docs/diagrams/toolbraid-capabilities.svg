@@ -1,0 +1,128 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" role="img" aria-labelledby="title desc">
+  <title id="title">ToolBraid capabilities</title>
+  <desc id="desc">A symmetrical map of ToolBraid's shipped WebMCP, browser, human-authority, multimodal, mission, handoff, Codex bridge, receipt, and audit capabilities.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#08090c"/>
+      <stop offset="0.5" stop-color="#0d0f14"/>
+      <stop offset="1" stop-color="#07080b"/>
+    </linearGradient>
+    <linearGradient id="card" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#151820"/>
+      <stop offset="1" stop-color="#101218"/>
+    </linearGradient>
+    <linearGradient id="rule" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#77e7f4" stop-opacity="0"/>
+      <stop offset="0.18" stop-color="#77e7f4" stop-opacity="0.35"/>
+      <stop offset="0.5" stop-color="#ff8cc8" stop-opacity="0.32"/>
+      <stop offset="0.82" stop-color="#ffd278" stop-opacity="0.28"/>
+      <stop offset="1" stop-color="#ffd278" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="glow" x="-80%" y="-80%" width="260%" height="260%">
+      <feGaussianBlur stdDeviation="9" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <rect width="1600" height="900" rx="32" fill="url(#background)"/>
+  <path d="M0 0h1600v900H0z" fill="none" stroke="#262a34" stroke-width="2"/>
+  <circle cx="800" cy="88" r="66" fill="#77e7f4" opacity="0.035"/>
+  <circle cx="800" cy="88" r="50" fill="#ff8cc8" opacity="0.025"/>
+  <g transform="translate(760 48)" filter="url(#glow)">
+    <rect width="80" height="80" rx="24" fill="#101116" stroke="#2b303a" stroke-width="2"/>
+    <g transform="scale(2)">
+      <path d="M8 12.5c0-3 2.4-5.5 5.5-5.5S19 9.5 19 12.5 16.6 18 13.5 18H12c-3.1 0-5.5 2.5-5.5 5.5S8.9 29 12 29h7" fill="none" stroke="#77e7f4" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M32 12.5c0-3-2.4-5.5-5.5-5.5S21 9.5 21 12.5s2.4 5.5 5.5 5.5H28c3.1 0 5.5 2.5 5.5 5.5S31.1 29 28 29h-7" fill="none" stroke="#ff8cc8" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M15 33c0-3 2.2-5 5-5s5 2 5 5" fill="none" stroke="#ffd278" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+  </g>
+
+  <text x="800" y="174" fill="#f4f7fb" font-family="Inter, Segoe UI, sans-serif" font-size="42" font-weight="750" text-anchor="middle" letter-spacing="-1.5">What ToolBraid can do today</text>
+  <text x="800" y="211" fill="#9aa4b4" font-family="Inter, Segoe UI, sans-serif" font-size="18" text-anchor="middle">One control plane · native WebMCP and ordinary websites · human authority preserved</text>
+  <rect x="798" y="238" width="4" height="584" rx="2" fill="url(#rule)"/>
+
+  <g font-family="Inter, Segoe UI, sans-serif">
+    <g transform="translate(68 238)">
+      <rect width="700" height="122" rx="20" fill="url(#card)" stroke="#2c323c"/>
+      <rect x="1" y="1" width="5" height="120" rx="3" fill="#77e7f4"/>
+      <circle cx="56" cy="61" r="26" fill="#77e7f4" fill-opacity="0.08" stroke="#77e7f4" stroke-opacity="0.42"/>
+      <path d="M44 61h24M56 49v24M48 53l16 16M64 53 48 69" fill="none" stroke="#77e7f4" stroke-width="2" stroke-linecap="round"/>
+      <text x="101" y="48" fill="#f4f7fb" font-size="22" font-weight="720">Native multi-origin WebMCP</text>
+      <text x="101" y="80" fill="#9aa4b4" font-size="16">6 isolated origins · 9 live tools · 7 canonical capabilities</text>
+      <text x="650" y="34" fill="#77e7f4" font-size="12" font-weight="750" text-anchor="end" letter-spacing="1.4">SHIPPED</text>
+    </g>
+
+    <g transform="translate(68 384)">
+      <rect width="700" height="122" rx="20" fill="url(#card)" stroke="#2c323c"/>
+      <rect x="1" y="1" width="5" height="120" rx="3" fill="#77e7f4"/>
+      <circle cx="56" cy="61" r="26" fill="#77e7f4" fill-opacity="0.08" stroke="#77e7f4" stroke-opacity="0.42"/>
+      <rect x="43" y="48" width="26" height="22" rx="4" fill="none" stroke="#77e7f4" stroke-width="2"/>
+      <path d="M47 54h18M47 60h12M47 66h8" stroke="#77e7f4" stroke-width="2" stroke-linecap="round"/>
+      <text x="101" y="48" fill="#f4f7fb" font-size="22" font-weight="720">Universal browser layer</text>
+      <text x="101" y="80" fill="#9aa4b4" font-size="16">Bounded DOM/ARIA discovery · local read, navigation, control and form tools</text>
+      <text x="650" y="34" fill="#77e7f4" font-size="12" font-weight="750" text-anchor="end" letter-spacing="1.4">SHIPPED</text>
+    </g>
+
+    <g transform="translate(68 530)">
+      <rect width="700" height="122" rx="20" fill="url(#card)" stroke="#2c323c"/>
+      <rect x="1" y="1" width="5" height="120" rx="3" fill="#77e7f4"/>
+      <circle cx="56" cy="61" r="26" fill="#77e7f4" fill-opacity="0.08" stroke="#77e7f4" stroke-opacity="0.42"/>
+      <path d="M44 50h24v18H44zM49 45h14M50 57h12M50 63h8" fill="none" stroke="#77e7f4" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      <text x="101" y="48" fill="#f4f7fb" font-size="22" font-weight="720">Verified site packs</text>
+      <text x="101" y="80" fill="#9aa4b4" font-size="16">GitHub · Vercel · X · browser-observed postconditions for supported actions</text>
+      <text x="650" y="34" fill="#77e7f4" font-size="12" font-weight="750" text-anchor="end" letter-spacing="1.4">SHIPPED</text>
+    </g>
+
+    <g transform="translate(68 676)">
+      <rect width="700" height="122" rx="20" fill="url(#card)" stroke="#2c323c"/>
+      <rect x="1" y="1" width="5" height="120" rx="3" fill="#77e7f4"/>
+      <circle cx="56" cy="61" r="26" fill="#77e7f4" fill-opacity="0.08" stroke="#77e7f4" stroke-opacity="0.42"/>
+      <path d="M43 53h26v18H43zM47 49h7M59 49h6M50 62l5-5 5 6 4-4 5 7" fill="none" stroke="#77e7f4" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      <text x="101" y="48" fill="#f4f7fb" font-size="22" font-weight="720">Multimodal evidence</text>
+      <text x="101" y="80" fill="#9aa4b4" font-size="16">Visible screenshots · video keyframes · rendered audio · loaded captions</text>
+      <text x="650" y="34" fill="#77e7f4" font-size="12" font-weight="750" text-anchor="end" letter-spacing="1.4">SHIPPED</text>
+    </g>
+
+    <g transform="translate(832 238)">
+      <rect width="700" height="122" rx="20" fill="url(#card)" stroke="#2c323c"/>
+      <rect x="694" y="1" width="5" height="120" rx="3" fill="#ff8cc8"/>
+      <circle cx="56" cy="61" r="26" fill="#ff8cc8" fill-opacity="0.08" stroke="#ff8cc8" stroke-opacity="0.42"/>
+      <path d="M48 59v-5a8 8 0 0 1 16 0v5M45 59h22v17H45zM56 65v5" fill="none" stroke="#ff8cc8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      <text x="101" y="48" fill="#f4f7fb" font-size="22" font-weight="720">Human authority</text>
+      <text x="101" y="80" fill="#9aa4b4" font-size="16">Exact approval envelopes · one-time nonces · the agent cannot self-approve</text>
+      <text x="650" y="34" fill="#ff8cc8" font-size="12" font-weight="750" text-anchor="end" letter-spacing="1.4">SHIPPED</text>
+    </g>
+
+    <g transform="translate(832 384)">
+      <rect width="700" height="122" rx="20" fill="url(#card)" stroke="#2c323c"/>
+      <rect x="694" y="1" width="5" height="120" rx="3" fill="#ff8cc8"/>
+      <circle cx="56" cy="61" r="26" fill="#ff8cc8" fill-opacity="0.08" stroke="#ff8cc8" stroke-opacity="0.42"/>
+      <circle cx="48" cy="53" r="4" fill="none" stroke="#ff8cc8" stroke-width="2"/><circle cx="64" cy="53" r="4" fill="none" stroke="#ff8cc8" stroke-width="2"/><circle cx="56" cy="69" r="4" fill="none" stroke="#ff8cc8" stroke-width="2"/><path d="M51 55l3 10M61 55l-3 10M52 53h8" stroke="#ff8cc8" stroke-width="2"/>
+      <text x="101" y="48" fill="#f4f7fb" font-size="22" font-weight="720">Multi-page missions</text>
+      <text x="101" y="80" fill="#9aa4b4" font-size="16">Up to 16 bound pages · drift rebind · exact pending-action ownership</text>
+      <text x="650" y="34" fill="#ff8cc8" font-size="12" font-weight="750" text-anchor="end" letter-spacing="1.4">SHIPPED</text>
+    </g>
+
+    <g transform="translate(832 530)">
+      <rect width="700" height="122" rx="20" fill="url(#card)" stroke="#2c323c"/>
+      <rect x="694" y="1" width="5" height="120" rx="3" fill="#ff8cc8"/>
+      <circle cx="56" cy="61" r="26" fill="#ff8cc8" fill-opacity="0.08" stroke="#ff8cc8" stroke-opacity="0.42"/>
+      <path d="M56 46a9 9 0 1 0 0 18 9 9 0 0 0 0-18ZM42 75c3-7 8-10 14-10s11 3 14 10M65 48l6-6M67 42h4v4" fill="none" stroke="#ff8cc8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      <text x="101" y="48" fill="#f4f7fb" font-size="22" font-weight="720">Secure human handoff</text>
+      <text x="101" y="80" fill="#9aa4b4" font-size="16">Login · 2FA · CAPTCHA handback · no credential storage</text>
+      <text x="650" y="34" fill="#ff8cc8" font-size="12" font-weight="750" text-anchor="end" letter-spacing="1.4">SHIPPED</text>
+    </g>
+
+    <g transform="translate(832 676)">
+      <rect width="700" height="122" rx="20" fill="url(#card)" stroke="#2c323c"/>
+      <rect x="694" y="1" width="5" height="120" rx="3" fill="#ffd278"/>
+      <circle cx="56" cy="61" r="26" fill="#ffd278" fill-opacity="0.08" stroke="#ffd278" stroke-opacity="0.42"/>
+      <path d="M43 51h26v20H43zM48 57l5 4-5 4M57 65h7M63 47l5-5M68 42h4v4" fill="none" stroke="#ffd278" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      <text x="101" y="48" fill="#f4f7fb" font-size="22" font-weight="720">Codex/MCP bridge and audit</text>
+      <text x="101" y="80" fill="#9aa4b4" font-size="16">Native Messaging · authenticated named pipe · receipts · SHA-256 chain</text>
+      <text x="650" y="34" fill="#ffd278" font-size="12" font-weight="750" text-anchor="end" letter-spacing="1.4">SHIPPED</text>
+    </g>
+  </g>
+
+  <text x="800" y="858" fill="#697386" font-family="Inter, Segoe UI, sans-serif" font-size="14" text-anchor="middle" letter-spacing="1.2">TOOLBRAID · SAFE CROSS-SITE EXECUTION FOR PEOPLE AND AGENTS</text>
+</svg>

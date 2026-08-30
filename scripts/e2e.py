@@ -63,6 +63,18 @@ def assert_desktop_viewport_stable(page: Any, label: str) -> None:
         raise AssertionError(f"{label} desktop viewport shifted: {metrics}")
 
 
+def capture_product_screenshot(page: Any, filename: str) -> None:
+    page.evaluate("window.scrollTo(0, 0); document.activeElement?.blur()")
+    page.mouse.move(1330, 110)
+    page.wait_for_timeout(250)
+    page.screenshot(
+        path=str(SCREENSHOTS / filename),
+        full_page=True,
+        animations="disabled",
+        caret="hide",
+    )
+
+
 def main() -> int:
     SCREENSHOTS.mkdir(parents=True, exist_ok=True)
     server = subprocess.Popen(
@@ -225,7 +237,7 @@ def main() -> int:
             page.keyboard.press("Escape")
             assert_equal(page.locator('[data-approval-dialog]').is_hidden(), True, "approval view dialog close")
             page.locator('[data-view="topology"]').click()
-            page.screenshot(path=str(SCREENSHOTS / "toolbraid-recovery-approval.png"), full_page=True)
+            capture_product_screenshot(page, "toolbraid-recovery-approval.png")
             page.locator('[data-approval-dock] [data-action="review-approval"]').click()
             if not page.locator('[data-approval-dialog]').is_visible():
                 raise AssertionError("approval dialog did not open")
@@ -313,7 +325,7 @@ def main() -> int:
                 raise AssertionError(f"approval dock does not use the inspector-side space: {dock_layout}")
             if dock_layout["dockLeft"] >= dock_layout["topologyRight"]:
                 raise AssertionError(f"approval dock lost its topology-side span: {dock_layout}")
-            page.screenshot(path=str(SCREENSHOTS / "toolbraid-recovery-completed.png"), full_page=True)
+            capture_product_screenshot(page, "toolbraid-recovery-completed.png")
 
             mobile_context = browser.new_context(
                 viewport={"width": 390, "height": 844},
@@ -343,6 +355,8 @@ def main() -> int:
             mobile_page.screenshot(
                 path=str(SCREENSHOTS / "toolbraid-recovery-mobile.png"),
                 full_page=True,
+                animations="disabled",
+                caret="hide",
             )
             mobile_context.close()
 

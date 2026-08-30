@@ -151,18 +151,9 @@ button:disabled { cursor: not-allowed; }
 .brand-symbol {
   width: 36px;
   height: 36px;
-  overflow: visible;
-  fill: none;
-  stroke: var(--cyan);
-  stroke-width: 2.25;
+  border-radius: 11px;
   filter: drop-shadow(0 0 12px rgb(56 199 255 / 32%));
 }
-.brand-symbol-frame { fill: rgb(56 199 255 / 4%); stroke: rgb(56 199 255 / 22%); stroke-width: 1; }
-.brand-strand { fill: none; stroke-linecap: round; stroke-linejoin: round; }
-.brand-strand-a { stroke: var(--cyan-bright); }
-.brand-strand-b { stroke: var(--purple); }
-.brand-strand-c { stroke: var(--amber); }
-.brand-knot { fill: var(--cyan-bright); stroke: var(--bg); stroke-width: 1.5; }
 
 .brand-lockup > span { display: grid; line-height: 1.05; }
 .brand-lockup strong { font-size: 18px; letter-spacing: -.03em; }
@@ -1484,14 +1475,8 @@ body[data-phase="complete"] .review-action:hover { background: rgb(18 67 92 / 90
 
 .brand-lockup { border-color: var(--border); }
 .brand-symbol {
-  stroke: var(--cyan);
   filter: drop-shadow(0 0 10px rgb(93 231 255 / 18%));
 }
-.brand-symbol-frame { fill: rgb(255 255 255 / 2%); stroke: rgb(255 255 255 / 15%); }
-.brand-strand-a { stroke: var(--cyan-bright); }
-.brand-strand-b { stroke: var(--purple); }
-.brand-strand-c { stroke: var(--amber); }
-.brand-knot { fill: var(--text); stroke: var(--bg); }
 
 .runtime-chip,
 .mission-clock,

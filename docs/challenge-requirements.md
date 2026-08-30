@@ -25,7 +25,7 @@ Native evidence is recorded in [native-e2e-validation.json](native-e2e-validatio
 |---|---|
 | Working live URL accessible in ChatGPT's in-app browser or Chrome 149+ with WebMCP enabled | Complete — [toolbraid-webmcp.vercel.app](https://toolbraid-webmcp.vercel.app) is live across seven anonymous HTTPS origins; native Chrome 151 read-only validation passed |
 | Public source repository with all source/assets/instructions | Release-prepared and synchronized on default branch `main`; full-history secret scan is clean. The owner intentionally retains private visibility until explicit publication approval, so this gate remains open |
-| Open-source license detectable on the repository page and visible in About | MIT `LICENSE` is present and package metadata declares MIT; public GitHub detection and About visibility must be rechecked after publication |
+| Open-source license detectable on the repository page and visible in About | Complete while private — GitHub detects the root MIT `LICENSE`, package metadata declares MIT, and the license is linked at the top of the README. Recheck that it remains visible after publication |
 | English description covering WebMCP fit, UX improvement, human-agent collaboration, and implementation | Complete in the README, Judge Guide, and product definition; the final Devpost form remains pending |
 | Public YouTube demonstration under three minutes, with audio | English 1080p master is locked at 69.700 seconds / 2,091 frames with continuous voice and burned-in captions; final render validation and public YouTube upload remain pending |
 | English video/text/testing instructions | Repository, video materials, and live-URL testing instructions are complete |
