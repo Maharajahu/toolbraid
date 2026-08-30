@@ -35,6 +35,10 @@ function assertSafeOutput(target) {
 function vercelConfig(headers, { liveApi } = {}) {
   return {
     $schema: 'https://openapi.vercel.sh/vercel.json',
+    framework: null,
+    buildCommand: '',
+    installCommand: '',
+    outputDirectory: '.',
     cleanUrls: false,
     trailingSlash: false,
     ...(liveApi === 'live-deploy.mjs'

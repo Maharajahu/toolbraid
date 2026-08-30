@@ -52,9 +52,9 @@ The current proof mission is production recovery:
 
 The judge deployment targets a disposable recovery lab: GitHub commit/incident data and Vercel deployment state are read live, while the two approved mutations perform a real rollback of that sandbox and append a real GitHub issue comment. Local development keeps deterministic fixtures so the engine and safety boundary remain reproducible without credentials. No customer or business production system is in scope.
 
-[![ToolBraid completed production-recovery mission with six provider origins, verified mutations, and a sealed audit trail](docs/screenshots/toolbraid-recovery-completed.png)](docs/screenshots/toolbraid-recovery-completed.png)
+[![ToolBraid live production-recovery walkthrough: native multi-origin discovery, animated execution graph, and hostile metadata quarantine](docs/screenshots/toolbraid-live-mission.gif)](https://toolbraid-webmcp.vercel.app)
 
-*The implemented product after a deterministic recovery mission. Open the image for the full-resolution evidence view.*
+*A real browser capture from the public deployment: ToolBraid discovers six native WebMCP provider origins, animates the execution graph, and quarantines hostile metadata before planning. [Open the live product](https://toolbraid-webmcp.vercel.app) or [inspect the completed mission at full resolution](docs/screenshots/toolbraid-recovery-completed.png).*
 
 The judge-facing interface has five functional views — Walkthrough, Live Workspace, Evidence, Approvals, and Audit — plus a persistent Help drawer. Each view projects the same live mission state rather than presenting decorative panels: provider substitutions, exact approval scope, receipts, and audit proof remain inspectable throughout the run.
 
@@ -287,4 +287,6 @@ See [Start Here](START-HERE.md), [Architecture](docs/architecture.md), [Threat M
 
 ## License
 
-Apache License 2.0. See [LICENSE](LICENSE).
+Copyright 2026 Maharajahu.
+
+Licensed under the Apache License 2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).

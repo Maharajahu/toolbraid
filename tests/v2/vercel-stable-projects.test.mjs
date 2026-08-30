@@ -42,6 +42,13 @@ function headerObject(config) {
   return Object.fromEntries(config.headers[0].headers.map(({ key, value }) => [key, value]));
 }
 
+function assertSelfContainedBuildConfig(config) {
+  assert.equal(config.framework, null);
+  assert.equal(config.buildCommand, '');
+  assert.equal(config.installCommand, '');
+  assert.equal(config.outputDirectory, '.');
+}
+
 test('stable manifest pins all seven project names and production aliases', () => {
   assert.equal(manifest.profile, profile.id);
   assert.deepEqual(Object.keys(manifest.projects), originIds);
@@ -84,6 +91,7 @@ test('stable build emits one self-contained root per Vercel project with scoped 
 
 test('each stable project carries only its exact production security policy', async () => {
   const appConfig = JSON.parse(await readFile(path.join(output, 'app/vercel.json'), 'utf8'));
+  assertSelfContainedBuildConfig(appConfig);
   assert.equal(appConfig.rewrites, undefined);
   assert.deepEqual(
     headerObject(appConfig),
@@ -95,6 +103,7 @@ test('each stable project carries only its exact production security policy', as
       path.join(output, providerId, 'vercel.json'),
       'utf8',
     ));
+    assertSelfContainedBuildConfig(providerConfig);
     assert.equal(providerConfig.rewrites, undefined);
     assert.deepEqual(headerObject(providerConfig), providerHeaders(profile.orchestratorOrigin));
     assert.deepEqual(

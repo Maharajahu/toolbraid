@@ -570,7 +570,7 @@ class DemoDirector:
         self.pause(1.15, 1.75)
 
         self.click(
-            page.get_by_role("button", name="Start mission", exact=True),
+            page.locator('[data-context-action][data-action="start-mission"]'),
             "start-discovery",
             "Start native cross-origin WebMCP discovery.",
         )
@@ -656,17 +656,30 @@ class DemoDirector:
         )
         dialog = page.locator("[data-approval-dialog]")
         dialog.wait_for(state="visible")
-        apply_arguments = page.locator("[data-review-apply-arguments]").inner_text()
-        publish_body = page.locator("[data-review-publish-body]").inner_text()
-        if "recovery-option-checkout-r3" not in apply_arguments:
-            raise AssertionError("The reviewed recovery arguments are missing.")
-        if "release-1842" not in publish_body:
-            raise AssertionError("The evidence-derived customer update is missing.")
+        apply_arguments = (page.locator("[data-review-apply-arguments]").text_content() or "").strip()
+        publish_body = (page.locator("[data-review-publish-body]").text_content() or "").strip()
+        apply_plan = next(
+            node for node in safe_snapshot["plan"]["nodes"]
+            if node["id"] == "apply-recovery-option"
+        )
+        publish_plan = next(
+            node for node in safe_snapshot["plan"]["nodes"]
+            if node["id"] == "publish-status-update"
+        )
+        if json.loads(apply_arguments) != apply_plan["arguments"]:
+            raise AssertionError("The reviewed recovery arguments drifted from the live plan.")
+        if publish_body != publish_plan["arguments"]["body"]:
+            raise AssertionError("The reviewed customer update drifted from the live plan.")
         self.timeline.mark(
             "exact-effects-visible",
             "Separate single-use scopes show exact origins, tools, schemas, arguments, and effects.",
             page,
             self.pointer,
+        )
+        self.click(
+            page.locator('[data-approval-review="apply"] .technical-details summary'),
+            "open-technical-binding",
+            "Reveal the exact live binding and canonical recovery arguments.",
         )
         self.hover(
             page.locator("[data-review-apply-arguments]"),
@@ -1149,10 +1162,11 @@ def main() -> int:
 
             if browser_errors:
                 raise AssertionError("Browser emitted unexpected errors:\n" + "\n".join(browser_errors))
-            if len(expected_provider_errors) != 1:
+            expected_provider_error_count = 1 if args.target == "local" else 0
+            if len(expected_provider_errors) != expected_provider_error_count:
                 raise AssertionError(
-                    "Expected exactly one fail-closed primary provider error, got "
-                    f"{len(expected_provider_errors)}."
+                    "Unexpected fail-closed primary provider error count: "
+                    f"expected {expected_provider_error_count}, got {len(expected_provider_errors)}."
                 )
 
             video_report = normalise_atomically(raw_capture, output)
