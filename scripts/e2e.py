@@ -32,6 +32,7 @@ def choose_port() -> int:
 
 PORT = choose_port()
 BASE_URL = os.environ.get("E2E_BASE_URL", f"http://{HOST}:{PORT}")
+PRODUCT_URL = f"{BASE_URL.rstrip('/')}/live.html"
 CHROMIUM = os.environ.get("E2E_CHROMIUM")
 SCREENSHOTS = ROOT / "docs" / "screenshots"
 
@@ -109,7 +110,7 @@ def main() -> int:
                 if message.type == "error" else None,
             )
 
-            page.goto(BASE_URL, wait_until="networkidle", timeout=30_000)
+            page.goto(PRODUCT_URL, wait_until="networkidle", timeout=30_000)
             page.wait_for_function("window.__TOOLBRAID_V2__", timeout=10_000)
 
             initial = page.evaluate("window.__TOOLBRAID_V2__.getState()")
@@ -191,6 +192,12 @@ def main() -> int:
 
             page.locator('[data-context-action]').click()
             page.wait_for_function("window.__TOOLBRAID_V2__.getState().phase === 'mapping'", timeout=10_000)
+            page.wait_for_function("window.__TOOLBRAID_V2__.getEngineSnapshot().discoveredTools.length === 9", timeout=10_000)
+            page.locator('[data-context-action]').click()
+            page.wait_for_function(
+                "window.__TOOLBRAID_V2__.getEngineSnapshot().normalization?.mappings.length === 7",
+                timeout=10_000,
+            )
             discovered = page.evaluate("window.__TOOLBRAID_V2__.getEngineSnapshot()")
             assert_equal(discovered["mode"], "test", "local runtime mode")
             assert_equal(len(discovered["discoveredTools"]), 9, "discovered tool count")
@@ -212,6 +219,8 @@ def main() -> int:
             assert_equal(page.evaluate("document.activeElement?.getAttribute('aria-pressed')"), "true", "graph selected state")
 
             page.get_by_role("button", name="Run 4 safe reads", exact=True).click()
+            page.wait_for_function("window.__TOOLBRAID_V2__.getState().phase === 'preparing'", timeout=10_000)
+            page.locator('[data-context-action]').click()
             page.wait_for_function("window.__TOOLBRAID_V2__.getState().phase === 'review'", timeout=10_000)
             safe = page.evaluate("window.__TOOLBRAID_V2__.getEngineSnapshot()")
             assert_equal(safe["plan"]["status"], "approval_required", "phase after safe execution")
@@ -339,11 +348,18 @@ def main() -> int:
                 lambda message: browser_errors.append(f"mobile console.{message.type}: {message.text}")
                 if message.type == "error" else None,
             )
-            mobile_page.goto(BASE_URL, wait_until="networkidle", timeout=30_000)
+            mobile_page.goto(PRODUCT_URL, wait_until="networkidle", timeout=30_000)
             mobile_page.wait_for_function("window.__TOOLBRAID_V2__", timeout=10_000)
             mobile_page.evaluate("window.__TOOLBRAID_V2__.start()")
             mobile_page.wait_for_function("window.__TOOLBRAID_V2__.getState().phase === 'mapping'", timeout=10_000)
+            mobile_page.evaluate("window.__TOOLBRAID_V2__.start()")
+            mobile_page.wait_for_function(
+                "window.__TOOLBRAID_V2__.getEngineSnapshot().normalization?.mappings.length === 7",
+                timeout=10_000,
+            )
             mobile_page.evaluate("window.__TOOLBRAID_V2__.runSafeReads()")
+            mobile_page.wait_for_function("window.__TOOLBRAID_V2__.getState().phase === 'preparing'", timeout=10_000)
+            mobile_page.evaluate("window.__TOOLBRAID_V2__.start()")
             mobile_page.wait_for_function("window.__TOOLBRAID_V2__.getState().phase === 'review'", timeout=10_000)
             assert mobile_page.locator('[data-approval-dock] [data-action="review-approval"]').is_visible()
             overflow = mobile_page.evaluate(
@@ -372,10 +388,15 @@ def main() -> int:
                 lambda message: browser_errors.append(f"narrow console.{message.type}: {message.text}")
                 if message.type == "error" else None,
             )
-            narrow_page.goto(BASE_URL, wait_until="networkidle", timeout=30_000)
+            narrow_page.goto(PRODUCT_URL, wait_until="networkidle", timeout=30_000)
             narrow_page.wait_for_function("window.__TOOLBRAID_V2__", timeout=10_000)
             narrow_page.evaluate("window.__TOOLBRAID_V2__.start()")
             narrow_page.wait_for_function("window.__TOOLBRAID_V2__.getState().phase === 'mapping'", timeout=10_000)
+            narrow_page.evaluate("window.__TOOLBRAID_V2__.start()")
+            narrow_page.wait_for_function(
+                "window.__TOOLBRAID_V2__.getEngineSnapshot().normalization?.mappings.length === 7",
+                timeout=10_000,
+            )
             graph_metrics = narrow_page.evaluate(
                 """() => {
                   const viewport = document.querySelector('[data-constellation-viewport]');

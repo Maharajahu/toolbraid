@@ -1,6 +1,6 @@
 # WebMCP Challenge Requirements Status
 
-Verified again on **30 August 2026** against the [official rules](https://webmcp.devpost.com/rules), [challenge page](https://openai.com/webmcp-challenge/), and [Chrome WebMCP guidance](https://developer.chrome.com/docs/ai/webmcp). The submission deadline is **3 September 2026 at 1:00 pm Pacific Time**. The optional Devpost plugin is a helper, not the source of truth.
+Verified again on **2 September 2026** against the [official rules](https://webmcp.devpost.com/rules), [challenge page](https://openai.com/webmcp-challenge/), and [Chrome WebMCP guidance](https://developer.chrome.com/docs/ai/webmcp). The submission deadline is **3 September 2026 at 1:00 pm Pacific Time**. The optional Devpost plugin is a helper, not the source of truth.
 
 ## Engineering gates — passed
 
@@ -19,19 +19,19 @@ Verified again on **30 August 2026** against the [official rules](https://webmcp
 
 Native evidence is recorded in [native-e2e-validation.json](native-e2e-validation.json), and the public read-only gate is recorded in [native-public-readonly-validation.json](native-public-readonly-validation.json). Harness evidence and screenshots are recorded in [e2e-validation.json](e2e-validation.json).
 
-## Mandatory release/submission gates — not yet complete
+## Mandatory release/submission gates
 
 | Official requirement | Current state |
 |---|---|
 | Working live URL accessible in ChatGPT's in-app browser or Chrome 149+ with WebMCP enabled | Complete — [toolbraid-webmcp.vercel.app](https://toolbraid-webmcp.vercel.app) is live across seven anonymous HTTPS origins; native Chrome 151 read-only validation passed |
-| Public source repository with all source/assets/instructions | Release-prepared and synchronized on default branch `main`; full-history secret scan is clean. The owner intentionally retains private visibility until explicit publication approval, so this gate remains open |
-| Open-source license detectable on the repository page and visible in About | Complete while private — the repository has the standard root Apache-2.0 `LICENSE`, package metadata declares `Apache-2.0`, and the license is linked in the README header. Recheck GitHub's detection after publication |
-| English description covering WebMCP fit, UX improvement, human-agent collaboration, and implementation | Complete in the README, Judge Guide, and product definition; the final Devpost form remains pending |
-| Public YouTube demonstration under three minutes, with audio | English 1080p master is locked at 69.700 seconds / 2,091 frames with continuous voice and burned-in captions; final render validation and public YouTube upload remain pending |
+| Public source repository with all source/assets/instructions | Complete — [Maharajahu/toolbraid](https://github.com/Maharajahu/toolbraid) is public, the default branch is `main`, and the full-history secret scan is clean |
+| Open-source license detectable on the repository page and visible in About | Complete — the repository has the standard root Apache-2.0 `LICENSE`, package metadata declares `Apache-2.0`, the license is linked in the README header, and GitHub detects it as Apache-2.0 |
+| English description covering WebMCP fit, UX improvement, human-agent collaboration, and implementation | Complete in the submitted Devpost entry, README, Judge Guide, and product definition |
+| Public YouTube demonstration under three minutes, with audio | Complete — the validated 2:40 4K60 English master with continuous voice-over is public at [youtu.be/IDaho_wf0Ak](https://youtu.be/IDaho_wf0Ak) |
 | English video/text/testing instructions | Repository, video materials, and live-URL testing instructions are complete |
-| No unlicensed trademarks, copyrighted music, or third-party media in the demonstration | The master uses first-party ToolBraid UI/assets, the owner's authorized voice cloned locally with IndexTTS 2.5, and an original deterministic ambient bed. The pinned bilibili Model Use License Agreement is included verbatim; its distribution obligations and required disclaimer are documented in `THIRD_PARTY_NOTICES.md`. Confirm that the final YouTube distribution package satisfies those obligations before marking this gate complete |
+| No unlicensed trademarks, copyrighted music, or third-party media in the demonstration | Complete — the master uses first-party ToolBraid UI/assets, the owner's authorized voice cloned locally with IndexTTS 2.5, and an original deterministic ambient bed. The pinned bilibili Model Use License Agreement is retained verbatim, and the public YouTube description includes the required disclaimer plus the retained-license link. YouTube's completed checks found no issues |
 | Free judge access through the end of judging | Live deployment is anonymously accessible; availability through the end of judging remains an operational monitoring gate |
-| Completed Devpost fields and submitted entry | Pending |
+| Completed Devpost fields and submitted entry | Complete — ToolBraid remains `SUBMITTED`, with the exact live URL, public repository, and final 4K60 video URL saved in the entry |
 
 The rules also require the project to work as depicted, be original/owned by the entrant, and be new during the submission period or meaningfully extended with dated evidence. They permit individual entrants and require age of majority and residency in a supported territory.
 
@@ -41,4 +41,4 @@ The four equally weighted official criteria are WebMCP Leverage, Execution, Pote
 
 ## Readiness verdict
 
-The engineering product, repository contents, and public seven-origin deployment are complete and judge-tested in native Chrome. The competition submission is **not ready to submit** until the repository visibility is made public, the final video is uploaded publicly to YouTube, and the Devpost entry is completed.
+The engineering product, public repository, public 4K60 demonstration, submitted Devpost entry, and seven-origin deployment are complete and judge-tested in native Chrome. All mandatory release gates are complete; availability through judging remains an operational monitoring responsibility.

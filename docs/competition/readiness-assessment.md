@@ -1,8 +1,8 @@
 # ToolBraid Readiness Assessment
 
-**Assessment date:** 30 August 2026
-**Product state:** Native-validated release candidate
-**Submission state:** Not ready to submit
+**Assessment date:** 2 September 2026
+**Product state:** Native-validated judge release
+**Submission state:** Submitted; final media synchronized
 
 ## Passed
 
@@ -18,16 +18,16 @@
 - anonymous seven-origin public Vercel deployment;
 - public native Chrome 151 read-only validation through the human review checkpoint.
 - secure local Codex/MCP bridge with extension-owned approval authority;
-- 137/137 recovery-product tests and 320/320 Universal tests;
+- 147/147 recovery-product tests and 320/320 Universal tests;
 - explicit compatibility evidence across 500 public sites;
-- repository metadata, contribution guidance, security reporting, and GitHub templates prepared for publication.
+- public repository metadata, contribution guidance, security reporting, and GitHub templates;
+- GitHub-detected Apache-2.0 license and anonymous public source access;
+- submitted Devpost entry with the live product and public repository.
+- public 2:40 4K60 YouTube demonstration with continuous voice-over and completed platform checks;
+- final video URL saved in the submitted Devpost entry.
 
-## Remaining before submission
+## Remaining optional quality check
 
-1. Make the synchronized repository public only after explicit owner approval, then verify license/About visibility and an anonymous clean clone.
-2. Complete an assistive-technology pass on the deployed build.
-3. Add the final public YouTube URL for the validated sub-three-minute demo with audio.
-4. Copy the prepared English description, images, live URL, repository URL, and video URL into Devpost.
-5. Complete and submit the Devpost entry before the deadline.
+1. Complete a manual assistive-technology pass as an additional accessibility check.
 
-The public deployment, native Chrome gate, and repository contents are complete. Repository publication, final video publication, accessibility review, and the Devpost submission remain open, so the competition entry cannot honestly be called submission-ready yet.
+The public deployment, native Chrome gate, repository, license, public video, and submitted Devpost entry are synchronized. No mandatory release item remains open; the assistive-technology pass is an additional quality check.

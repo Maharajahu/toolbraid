@@ -1,10 +1,10 @@
 # Start Here
 
-For a fast product overview, open the [live demo](https://toolbraid-webmcp.vercel.app), the [Judge Guide](docs/JUDGING.md), or the [full-resolution completed mission](docs/screenshots/toolbraid-recovery-completed.png).
+For a fast product overview, open the [Living Braid walkthrough](https://toolbraid-webmcp.vercel.app), watch the [4K60 demonstration](https://youtu.be/IDaho_wf0Ak), read the [Judge Guide](docs/JUDGING.md), or inspect the [full-resolution sealed audit](docs/screenshots/toolbraid-sealed-audit-4k.png).
 
 ## Open the live release
 
-Open [toolbraid-webmcp.vercel.app](https://toolbraid-webmcp.vercel.app) in Chrome 149+ with WebMCP enabled. No login is required. The badge must read **Native WebMCP** for a native run.
+Open [toolbraid-webmcp.vercel.app](https://toolbraid-webmcp.vercel.app) for the guided judge walkthrough, then choose **Open live WebMCP** or go directly to [toolbraid-webmcp.vercel.app/live.html](https://toolbraid-webmcp.vercel.app/live.html) in Chrome 149+ with WebMCP enabled. No login is required. The badge must read **Native WebMCP** for a native run.
 
 The public profile reads exact real commit SHAs from GitHub and matching Vercel deployment metadata. Each provider page calls its own same-origin server function, which accesses only the allowlisted GitHub, Vercel, or recovery-lab health API target.
 
@@ -14,7 +14,7 @@ The public profile reads exact real commit SHAs from GitHub and matching Vercel 
 npm run dev
 ```
 
-Open `http://127.0.0.1:4173`. The badge must read **Verified local harness** in an ordinary browser. This deterministic fixture path is a local fallback only; the public Vercel profile uses the live sandbox integrations.
+Open `http://127.0.0.1:4173/live.html`. The badge must read **Verified local harness** in an ordinary browser. This deterministic fixture path is a local fallback only; the public Vercel profile uses the live sandbox integrations.
 
 For the native multi-origin path, use a browser build that implements WebMCP:
 

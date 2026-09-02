@@ -6,6 +6,7 @@
 
 <p align="center">
   <a href="https://toolbraid-webmcp.vercel.app"><img alt="Open live demo" src="https://img.shields.io/badge/LIVE_DEMO-OPEN-5de7ff?style=for-the-badge&amp;logo=vercel&amp;logoColor=111318&amp;labelColor=151820"></a>
+  <a href="https://youtu.be/IDaho_wf0Ak"><img alt="Watch the 4K60 product demo" src="https://img.shields.io/badge/4K60_DEMO-WATCH-ff8cc8?style=for-the-badge&amp;logo=youtube&amp;logoColor=white&amp;labelColor=151820"></a>
   <a href="docs/JUDGING.md"><img alt="Read the judge guide" src="https://img.shields.io/badge/JUDGE_GUIDE-READ-ff8cc8?style=for-the-badge&amp;logo=readme&amp;logoColor=111318&amp;labelColor=151820"></a>
   <a href="#toolbraid-universal"><img alt="Build the Chrome MV3 extension" src="https://img.shields.io/badge/CHROME_MV3-BUILD-ffd278?style=for-the-badge&amp;logo=googlechrome&amp;logoColor=111318&amp;labelColor=151820"></a>
 </p>
@@ -13,6 +14,7 @@
 <p align="center">
   <a href="#capabilities-at-a-glance">Capabilities</a> ·
   <a href="#live-deployment">Demo</a> ·
+  <a href="https://youtu.be/IDaho_wf0Ak">4K video</a> ·
   <a href="#how-toolbraid-works">How it works</a> ·
   <a href="#runtime-topology">Architecture</a> ·
   <a href="#human-authority-boundary">Security</a> ·
@@ -52,11 +54,22 @@ The current proof mission is production recovery:
 
 The judge deployment targets a disposable recovery lab: GitHub commit/incident data and Vercel deployment state are read live, while the two approved mutations perform a real rollback of that sandbox and append a real GitHub issue comment. Local development keeps deterministic fixtures so the engine and safety boundary remain reproducible without credentials. No customer or business production system is in scope.
 
-[![ToolBraid live production-recovery walkthrough: native multi-origin discovery, animated execution graph, and hostile metadata quarantine](docs/screenshots/toolbraid-live-mission.gif)](https://toolbraid-webmcp.vercel.app)
+[![ToolBraid Living Braid guided walkthrough at 1.5x: browser context, evidence, exact approvals, verified effects, and sealed receipts](docs/screenshots/toolbraid-live-mission.gif)](https://youtu.be/IDaho_wf0Ak)
 
-*A real browser capture from the public deployment: ToolBraid discovers six native WebMCP provider origins, animates the execution graph, and quarantines hostile metadata before planning. [Open the live product](https://toolbraid-webmcp.vercel.app) or [inspect the completed mission at full resolution](docs/screenshots/toolbraid-recovery-completed.png).*
+*The 1.5× guided replay uses the same shipped Living Braid interface and clearly labels its sandbox boundary. [Watch the complete 4K60 demonstration](https://youtu.be/IDaho_wf0Ak), [open the guided experience](https://toolbraid-webmcp.vercel.app), or [run the real seven-origin provider workspace](https://toolbraid-webmcp.vercel.app/live.html).*
 
-The judge-facing interface has five functional views — Walkthrough, Live Workspace, Evidence, Approvals, and Audit — plus a persistent Help drawer. Each view projects the same live mission state rather than presenting decorative panels: provider substitutions, exact approval scope, receipts, and audit proof remain inspectable throughout the run.
+<p align="center">
+  <a href="docs/screenshots/toolbraid-living-braid-4k.png"><img src="docs/screenshots/toolbraid-living-braid-4k.png" width="49%" alt="ToolBraid Living Braid correlating browser and provider evidence"></a>
+  <a href="docs/screenshots/toolbraid-live-bridge-4k.png"><img src="docs/screenshots/toolbraid-live-bridge-4k.png" width="49%" alt="ToolBraid Codex MCP Chrome bridge preview"></a>
+</p>
+<p align="center">
+  <a href="docs/screenshots/toolbraid-exact-approval-4k.png"><img src="docs/screenshots/toolbraid-exact-approval-4k.png" width="49%" alt="ToolBraid exact human approval workspace"></a>
+  <a href="docs/screenshots/toolbraid-sealed-audit-4k.png"><img src="docs/screenshots/toolbraid-sealed-audit-4k.png" width="49%" alt="ToolBraid verified receipts and sealed causal audit"></a>
+</p>
+
+**Download the short 4K guided replay:** [toolbraid-living-braid-4k.mp4](docs/screenshots/toolbraid-living-braid-4k.mp4)
+
+The judge-facing Living Braid has five functional views — Walkthrough, Live Workspace, Evidence, Approvals, and Audit — plus a persistent Help drawer. They share one interactive guided-replay state; provider substitutions, exact approval scope, receipts, and audit proof remain inspectable throughout the run. The prominent **Open live WebMCP** control enters the separate production workspace where the real provider registry and execution engine run.
 
 **Judge evidence:** [Live mutation receipt](docs/live-mutation-validation.json) · [Architecture](docs/architecture.md) · [Threat Model](docs/threat-model.md) · [Testing](docs/testing.md) · [Source](https://github.com/Maharajahu/toolbraid)
 
@@ -267,7 +280,7 @@ artifacts/                  bounded compatibility evidence from real public-site
 tests/v2/                   unit, integration, security, and multi-origin contract tests
 tests/universal/            Universal unit, protocol, security, adapter, and build tests
 scripts/                    servers, checks, standalone/Vercel builds, capture, and browser E2E
-video-production/           reproducible English voice-over, mastering, captions, and 1080p compositor ([runbook](video-production/README.md))
+video-production/           reproducible English voice-over, mastering, captions, and 4K60 compositor ([runbook](video-production/README.md))
 docs/                       architecture, threat model, test evidence, and challenge notes
 ```
 
@@ -281,7 +294,7 @@ Approval creation is accepted only from a trusted human DOM activation. A synthe
 
 ## Current scope
 
-The engineering build is a native-validated release candidate. The public seven-origin profile can run entirely against the disposable GitHub/Vercel recovery lab; the local profile remains deterministic for repeatable tests. The repository is release-prepared but intentionally remains private until the owner authorizes publication. Public repository visibility, the public YouTube upload, and the final Devpost entry remain submission gates tracked in [Challenge Requirements](docs/challenge-requirements.md).
+The engineering build is a public, native-validated judge release. The root URL presents the interactive Living Braid judge walkthrough; `/live.html` runs the real seven-origin profile against the disposable GitHub/Vercel recovery lab, while local development remains deterministic for repeatable tests. Release and submission evidence is tracked in [Challenge Requirements](docs/challenge-requirements.md).
 
 See [Start Here](START-HERE.md), [Architecture](docs/architecture.md), [Threat Model](docs/threat-model.md), and [Testing](docs/testing.md).
 

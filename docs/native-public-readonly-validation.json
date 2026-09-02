@@ -1,7 +1,7 @@
 {
   "status": "PASS",
   "browser": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/151.0.0.0 Safari/537.36",
-  "target": "https://toolbraid-webmcp.vercel.app/?mission=production-recovery&mode=guided",
+  "target": "https://toolbraid-webmcp.vercel.app/live.html?mission=production-recovery&mode=guided",
   "runtime": "native",
   "checkpoint": "preparing",
   "providers": 6,

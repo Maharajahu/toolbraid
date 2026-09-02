@@ -28,7 +28,7 @@ async function withServer(handler, callback) {
 test('application origin delegates WebMCP only to the six provider origins', async () => {
   const handler = createAppRequestHandler({ providerOrigins: PROVIDER_ORIGINS });
   await withServer(handler, async (origin) => {
-    const response = await fetch(`${origin}/`);
+    const response = await fetch(`${origin}/live.html`);
     assert.equal(response.status, 200);
     assert.match(response.headers.get('content-type'), /^text\/html/);
     assert.equal(

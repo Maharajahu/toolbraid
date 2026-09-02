@@ -5,10 +5,11 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const required = [
-  'index.html', 'manifest.webmanifest', 'package.json', 'vercel.json', 'README.md', 'LICENSE',
+  'index.html', 'live.html', 'manifest.webmanifest', 'package.json', 'vercel.json', 'README.md', 'LICENSE',
   'THIRD_PARTY_NOTICES.md',
   'src/app/main.js', 'src/app/mission-controller.js', 'src/app/mission-state.js',
   'src/app/constellation.js', 'src/app/icons.js', 'src/app/mission-control.css',
+  'src/app/showcase.js', 'src/app/showcase.css',
   'src/engine/approval.js', 'src/engine/audit.js', 'src/engine/executor.js',
   'src/engine/graph.js', 'src/engine/normalizer.js', 'src/engine/risk.js', 'src/engine/webmcp.js',
   'src/packs/recovery/adapters.js', 'src/packs/recovery/ontology.js', 'src/packs/recovery/plan.js',
@@ -175,10 +176,12 @@ if (/approveApply|approvePublish|approveScope/.test(publicSurface)) {
   failures.push('src/app/main.js: human approval creator leaked into public automation surface');
 }
 
-const html = await readFile(path.join(root, 'index.html'), 'utf8');
-for (const match of html.matchAll(/(?:src|href)="(\.\/[^"?#]+)"/g)) {
-  const target = path.resolve(root, match[1]);
-  try { await stat(target); } catch { failures.push(`index.html: broken local reference ${match[1]}`); }
+for (const htmlName of ['index.html', 'live.html']) {
+  const html = await readFile(path.join(root, htmlName), 'utf8');
+  for (const match of html.matchAll(/(?:src|href)="(\.\/[^"?#]+)"/g)) {
+    const target = path.resolve(root, match[1]);
+    try { await stat(target); } catch { failures.push(`${htmlName}: broken local reference ${match[1]}`); }
+  }
 }
 
 if (failures.length) {

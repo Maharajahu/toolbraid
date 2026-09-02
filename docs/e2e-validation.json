@@ -9,8 +9,8 @@
   "noticeRevision": "notice-r9",
   "audit": {
     "algorithm": "sha256-chain-v1",
-    "entries": 54,
-    "head": "5490995c08e52aefe7962c3521d3034b86eb08ef963e3a18d13985166f2c338d"
+    "entries": 56,
+    "head": "e2a20f306cf46e7bd81e60a3e8166f208390f3d8ebca88b13d4311e507f847f4"
   },
   "screenshots": [
     "docs\\screenshots\\toolbraid-recovery-approval.png",

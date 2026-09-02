@@ -37,6 +37,7 @@ const MIME = Object.freeze({
 const APP_FILES = Object.freeze(new Map([
   ['/', 'index.html'],
   ['/index.html', 'index.html'],
+  ['/live.html', 'live.html'],
   ['/manifest.webmanifest', 'manifest.webmanifest'],
   ['/robots.txt', 'robots.txt'],
   ['/llms.txt', 'llms.txt'],

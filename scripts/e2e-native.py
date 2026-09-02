@@ -19,7 +19,7 @@ PORTS = range(4173, 4180)
 BASE_URL = "http://127.0.0.1:4173"
 PUBLIC_BASE_URL = "https://toolbraid-webmcp.vercel.app"
 TARGET_BASE_URL = os.environ.get("TOOLBRAID_NATIVE_BASE_URL", BASE_URL).rstrip("/")
-TARGET_URL = f"{TARGET_BASE_URL}/?mission=production-recovery&mode=guided"
+TARGET_URL = f"{TARGET_BASE_URL}/live.html?mission=production-recovery&mode=guided"
 READ_ONLY = os.environ.get("TOOLBRAID_NATIVE_READ_ONLY") == "1"
 DEFAULT_CHROME = Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe")
 CHROME = Path(os.environ.get("TOOLBRAID_CHROME", DEFAULT_CHROME))
@@ -99,7 +99,7 @@ def main() -> int:
         )
 
     server = None
-    if TARGET_URL == BASE_URL:
+    if TARGET_BASE_URL == BASE_URL:
         server = subprocess.Popen(
             ["node", "scripts/serve-multi-origin.mjs"],
             cwd=ROOT,

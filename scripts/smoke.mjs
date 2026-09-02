@@ -52,7 +52,15 @@ try {
   assert.equal(rootResponse.headers.get('permissions-policy'), 'tools=(self)');
   assert.equal(rootResponse.headers.get('x-content-type-options'), 'nosniff');
   assert.equal(rootResponse.headers.get('referrer-policy'), 'no-referrer');
-  const html = await rootResponse.text();
+  const showcaseHtml = await rootResponse.text();
+  assert.equal((showcaseHtml.match(/<iframe\b/g) ?? []).length, 0, 'showcase must not embed a second application');
+  assert.match(showcaseHtml, /data-product-panel="topology"/, 'living braid walkthrough must be present');
+  assert.match(showcaseHtml, /Sandbox event replay/, 'guided replay must identify its truth boundary');
+  assert.match(showcaseHtml, /href="\.\/live\.html"/, 'live provider workspace must be directly reachable');
+  assert.match(showcaseHtml, /src\/app\/showcase\.js/, 'showcase entry module must be linked');
+  const liveResponse = await fetch(`${base}/live.html`);
+  assert.equal(liveResponse.status, 200, 'live provider workspace must return HTTP 200');
+  const html = await liveResponse.text();
   assert.equal((html.match(/<iframe\b/g) ?? []).length, 0, 'mission control must not depend on legacy provider frames');
   assert.match(html, /data-constellation/, 'constellation mount must be present');
   assert.match(html, /data-approval-dock/, 'human approval dock must be present');
@@ -60,6 +68,9 @@ try {
   assert.match(html, /data-provider-runtime/, 'isolated native provider mount must be present');
   assert.match(html, /src\/app\/main\.js/, 'mission control entry module must be linked');
   for (const pathname of [
+    '/live.html',
+    '/src/app/showcase.css',
+    '/src/app/showcase.js',
     '/src/app/mission-control.css',
     '/src/app/main.js',
     '/src/app/constellation.js',

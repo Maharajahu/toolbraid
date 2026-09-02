@@ -58,7 +58,7 @@ async function bundle(entryRelative) {
 await rm(output, { recursive: true, force: true });
 await mkdir(output, { recursive: true });
 await mkdir(path.join(output, 'assets'), { recursive: true });
-let html = await readFile(path.join(root, 'index.html'), 'utf8');
+let html = await readFile(path.join(root, 'live.html'), 'utf8');
 const css = await readFile(path.join(root, 'src/app/mission-control.css'), 'utf8');
 const favicon = await readFile(path.join(root, 'assets/favicon.svg'), 'utf8');
 const mainBundle = await bundle('src/app/main.js');

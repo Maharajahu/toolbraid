@@ -2,11 +2,17 @@
 
 **Live demo:** [toolbraid-webmcp.vercel.app](https://toolbraid-webmcp.vercel.app)
 
+**Real provider workspace:** [toolbraid-webmcp.vercel.app/live.html](https://toolbraid-webmcp.vercel.app/live.html)
+
+**4K60 walkthrough:** [youtu.be/IDaho_wf0Ak](https://youtu.be/IDaho_wf0Ak)
+
 ## The proof mission
 
 Restore checkout after the latest deployment and prepare a customer update, while keeping both production and public communication under separate human authority.
 
-[![Completed ToolBraid production-recovery mission with six provider origins, two verified mutations, receipts, and a sealed audit trail](screenshots/toolbraid-recovery-completed.png)](screenshots/toolbraid-recovery-completed.png)
+[![ToolBraid Living Braid correlating browser context and provider evidence](screenshots/toolbraid-living-braid-4k.png)](screenshots/toolbraid-living-braid-4k.png)
+
+The root experience is a deterministic, explicitly labelled guided replay for fast judging. Use **Open live WebMCP** or the real-provider link above to enter the production workspace that discovers and executes the seven-origin native provider flow.
 
 ## System at a glance
 

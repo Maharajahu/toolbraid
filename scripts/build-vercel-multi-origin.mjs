@@ -33,6 +33,7 @@ await mkdir(output, { recursive: true });
 
 for (const relative of [
   'index.html',
+  'live.html',
   'manifest.webmanifest',
   'robots.txt',
   'llms.txt',

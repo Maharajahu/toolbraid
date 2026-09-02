@@ -3,376 +3,618 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#060709">
-  <meta name="description" content="ToolBraid is a browser-native semantic and policy control plane for safe, explainable, human-approved WebMCP execution across sites.">
-  <title>ToolBraid · WebMCP mission control</title>
+  <meta name="theme-color" content="#05070a">
+  <meta name="description" content="ToolBraid turns live WebMCP capabilities into governed, inspectable missions with exact human approval and verified receipts.">
+  <title>ToolBraid · Living Causality Theater</title>
   <link rel="icon" href="./assets/favicon.svg" type="image/svg+xml">
   <link rel="manifest" href="./manifest.webmanifest">
-  <link rel="stylesheet" href="./src/app/mission-control.css">
+  <link rel="stylesheet" href="./src/app/showcase.css">
 </head>
-<body data-phase="idle">
-  <a class="skip-link" href="#mission-canvas">Skip to mission canvas</a>
+<body data-phase="objective">
+  <a class="skip-link" href="#product-main">Skip to ToolBraid workspace</a>
 
-  <div class="app-frame">
-    <header class="command-bar">
-      <a class="brand-lockup" href="./" aria-label="ToolBraid home">
-        <img class="brand-symbol" src="./assets/favicon.svg" alt="">
-        <span><strong>ToolBraid</strong><small>WebMCP control plane</small></span>
+  <div class="app-shell">
+    <header class="topbar">
+      <a class="brand" href="./" aria-label="ToolBraid home">
+        <svg class="brand-mark" width="42" height="42" viewBox="0 0 40 40" aria-hidden="true">
+          <rect width="40" height="40" rx="12"></rect>
+          <path class="strand strand-cyan" d="M8 12.5c0-3 2.4-5.5 5.5-5.5S19 9.5 19 12.5 16.6 18 13.5 18H12c-3.1 0-5.5 2.5-5.5 5.5S8.9 29 12 29h7"></path>
+          <path class="strand strand-pink" d="M32 12.5c0-3-2.4-5.5-5.5-5.5S21 9.5 21 12.5s2.4 5.5 5.5 5.5H28c3.1 0 5.5 2.5 5.5 5.5S31.1 29 28 29h-7"></path>
+          <path class="strand strand-gold" d="M15 33c0-3 2.2-5 5-5s5 2 5 5"></path>
+        </svg>
+        <span><strong>ToolBraid</strong><small>Living causality theater</small></span>
       </a>
 
-      <div class="mission-context" aria-label="Current mission">
-        <span class="mission-context-label">Mission</span>
-        <strong data-current-mission>Production recovery</strong>
-        <span class="mission-context-divider" aria-hidden="true"></span>
-        <span data-phase-label aria-live="polite">Ready for objective</span>
-      </div>
+      <nav class="scenario-switcher" aria-label="Demo mission">
+        <button type="button" class="scenario-button is-active" data-scenario="recovery" aria-pressed="true"><i></i>Production recovery</button>
+        <button type="button" class="scenario-button" data-scenario="incident" aria-pressed="false"><i></i>Incident trace</button>
+        <button type="button" class="scenario-button" data-scenario="attack" aria-pressed="false"><i></i>Authority attack</button>
+      </nav>
 
-      <div class="runtime-cluster" aria-label="Runtime status">
-        <span class="runtime-chip verified"><i></i><span data-runtime-label aria-live="polite">Detecting runtime</span></span>
-        <span class="runtime-chip"><b data-provider-count>0</b> origins</span>
-        <span class="runtime-chip lock"><span class="chip-icon" data-ui-icon="lock" aria-hidden="true"></span> Human authority</span>
-        <span class="mission-clock" data-mission-clock>00:00:00</span>
-      </div>
-
-      <div class="command-actions">
-        <button class="icon-button command-trigger" type="button" data-action="open-command" aria-label="Open command menu">
-          <kbd>⌘K</kbd><span data-ui-icon="search" aria-hidden="true"></span>
+      <div class="truth-cluster" aria-label="Demo truth and live product access">
+        <span class="truth-chip"><i></i>Guided demo</span>
+        <span class="truth-chip truth-chip-muted">Sandbox event replay</span>
+        <span class="truth-chip truth-chip-muted">No live mutation</span>
+        <a class="live-launch" href="./live.html">Open live WebMCP <span aria-hidden="true">↗</span></a>
+        <button class="icon-button" type="button" data-action="reset" aria-label="Reset mission">
+          <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12a8 8 0 1 0 2.3-5.7L4 8.6M4 4v4.6h4.6"></path></svg>
         </button>
-        <button class="icon-button" type="button" data-action="reset" aria-label="Reset mission"><span data-ui-icon="reset" aria-hidden="true"></span></button>
       </div>
     </header>
 
-    <nav class="navigation-rail" aria-label="Product and mission views">
-      <button class="rail-button active" type="button" data-view="topology" aria-label="Judge Walkthrough" aria-current="page">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="2"></circle><circle cx="5" cy="5" r="2"></circle><circle cx="19" cy="5" r="2"></circle><circle cx="5" cy="19" r="2"></circle><circle cx="19" cy="19" r="2"></circle><path d="m10.5 10.5-4-4m7-1 4 4m-7 4-4 4m7 0 4-4"></path></svg>
+    <nav class="product-rail" aria-label="ToolBraid product views">
+      <button type="button" class="is-active" data-product-view="topology" aria-current="page" title="Walkthrough">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><circle cx="4.5" cy="7" r="1.7"></circle><circle cx="19.5" cy="6" r="1.7"></circle><circle cx="18.5" cy="18" r="1.7"></circle><path d="m6 7.8 4 2.8M14.5 10.2l3.3-3M14.4 14l2.8 2.6"></path></svg>
         <span>Walkthrough</span>
       </button>
-      <button class="rail-button" type="button" data-view="live" aria-label="Live Workspace">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="M14 4v16M6.5 8h4M6.5 12h4M6.5 16h2"></path></svg>
-        <span>Live Workspace</span>
+      <button type="button" data-product-view="live" title="Live Workspace">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="15" rx="2"></rect><path d="M3 8h18M7 6h.1M10 6h.1M8 14h3l1.5-3 2.4 6 1.4-3H19"></path></svg>
+        <span>Live</span>
       </button>
-      <button class="rail-button" type="button" data-view="evidence" aria-label="Evidence">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h14v18H5zM8 8h8M8 12h8M8 16h5"></path></svg>
+      <button type="button" data-product-view="evidence" title="Evidence">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4.5h16v15H4zM7 8h6M7 12h10M7 16h7"></path><circle cx="17.5" cy="7.5" r="1.5"></circle></svg>
         <span>Evidence</span>
       </button>
-      <button class="rail-button" type="button" data-view="approvals" aria-label="Approvals">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 11V8a5 5 0 0 1 10 0v3M5 11h14v10H5z"></path></svg>
-        <i data-approval-count hidden>0</i><span>Approvals</span>
+      <button type="button" data-product-view="approvals" title="Approvals">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.8 19 5.5v5.7c0 4.4-2.7 7.8-7 10-4.3-2.2-7-5.6-7-10V5.5L12 2.8Z"></path><path d="m8.5 12 2.1 2.1 4.9-5"></path></svg>
+        <span>Approvals</span>
       </button>
-      <button class="rail-button" type="button" data-view="audit" aria-label="Audit">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12a8 8 0 1 0 2-5.3M4 4v5h5M12 7v5l3 2"></path></svg>
+      <button type="button" data-product-view="audit" title="Audit">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5.2 2.8h9l4.6 4.6v13.8H5.2V2.8ZM14.2 2.8v4.6h4.6"></path><path d="M8.5 12h7M8.5 16h5"></path></svg>
         <span>Audit</span>
       </button>
-      <button class="rail-button rail-bottom" type="button" data-view="help" aria-label="Help">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M9.8 9a2.4 2.4 0 1 1 3.7 2c-1 .6-1.5 1.1-1.5 2M12 17h.01"></path></svg>
+      <button type="button" class="product-rail-help" data-action="open-help" aria-expanded="false" title="Help">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M9.7 9a2.5 2.5 0 0 1 4.8 1c0 2-2.5 2.2-2.5 4M12 17.5h.1"></path></svg>
         <span>Help</span>
       </button>
     </nav>
 
-    <main class="workspace" id="mission-canvas" tabindex="-1">
-      <section class="topology-stage" data-walkthrough-view aria-labelledby="topology-title" tabindex="-1">
-        <div class="stage-grid" aria-hidden="true"></div>
-        <div class="reactive-lens" data-reactive-lens aria-hidden="true"></div>
-        <header class="stage-header">
-          <div>
-            <p class="section-kicker">Live provider topology</p>
-            <h1 id="topology-title">Evidence constellation</h1>
-          </div>
-          <ol class="mission-trajectory" aria-label="Mission progress">
-            <li data-phase-step="discovering"><span data-ui-icon="provider" aria-hidden="true"></span><b>Discover</b><small>Origins</small></li>
-            <li data-phase-step="mapping"><span data-ui-icon="braid" aria-hidden="true"></span><b>Normalize</b><small>Ontology</small></li>
-            <li data-phase-step="reading"><span data-ui-icon="pulse" aria-hidden="true"></span><b>Observe</b><small>Safe reads</small></li>
-            <li data-phase-step="review"><span data-ui-icon="lock" aria-hidden="true"></span><b>Authorize</b><small>Exact scope</small></li>
-            <li data-phase-step="executing"><span data-ui-icon="send" aria-hidden="true"></span><b>Execute</b><small>Approved</small></li>
-          </ol>
-          <div class="stage-tools">
-            <button class="guided-control" type="button" data-action="toggle-guidance" aria-pressed="true">
-              <span data-guided-icon data-ui-icon="play" aria-hidden="true"></span>
-              <span data-guided-label>Guided judge</span>
-            </button>
-            <span class="live-status"><i></i> Live graph</span>
-            <button class="stage-tool" type="button" data-action="zoom-out" aria-label="Zoom out">−</button>
-            <output data-zoom-level aria-live="polite">100%</output>
-            <button class="stage-tool" type="button" data-action="zoom-in" aria-label="Zoom in">+</button>
-            <button class="stage-tool" type="button" data-action="fit-graph" aria-label="Fit graph">⌗</button>
-          </div>
-        </header>
+    <main class="experience" id="product-main" data-product-panel="topology">
+      <section class="mission-strip" aria-labelledby="mission-title">
+        <div class="mission-copy">
+          <p><span data-chapter-index>01</span> · <span data-chapter-name>Objective</span></p>
+          <h1 id="mission-title" data-story-title>Give the web a mission. Keep the final say.</h1>
+          <span data-story-detail>Codex asks ToolBraid to recover production and prepare a public update.</span>
+        </div>
+        <div class="mission-now">
+          <span>Now</span>
+          <strong data-now-label aria-live="polite">Objective ready</strong>
+        </div>
+        <div class="mission-next">
+          <span>Next</span>
+          <strong data-next-label>Bind the Chrome session</strong>
+        </div>
+        <button class="primary-control" type="button" data-action="toggle-play">
+          <svg data-play-icon width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 9 6-9 6V6Z"></path></svg>
+          <span data-play-label>Run guided mission</span>
+        </button>
+      </section>
 
-        <section class="mission-context-strip" data-context-strip aria-labelledby="mission-context-title">
-          <header class="context-strip-title">
-            <p>Judge Walkthrough</p>
-            <h2 id="mission-context-title" data-context-mission>Production Recovery</h2>
-          </header>
-          <dl class="context-strip-status">
-            <div><dt data-context-label="current">What happened</dt><dd data-context-current aria-live="polite">Objective ready</dd></div>
-            <div><dt data-context-label="next">Why it matters</dt><dd data-context-next>Authority stays explicit</dd></div>
-            <div><dt data-context-label="requires">Next</dt><dd data-context-requires>Discover verified provider origins</dd></div>
-          </dl>
-          <button class="context-action" type="button" data-context-action data-action="start-mission">
-            <span data-context-action-label>Start judge walkthrough</span><span aria-hidden="true">→</span>
-          </button>
-          <ol class="judge-guide-track" data-judge-guide aria-label="Guided judge checkpoints">
-            <li data-guide-step="objective"><i>01</i><span>Objective</span></li>
-            <li data-guide-step="discovery"><i>02</i><span>Discovery</span></li>
-            <li data-guide-step="mapping"><i>03</i><span>Mapping</span></li>
-            <li data-guide-step="evidence"><i>04</i><span>Evidence</span></li>
-            <li data-guide-step="security"><i>05</i><span>Security</span></li>
-            <li data-guide-step="approval"><i>06</i><span>Approval</span></li>
-            <li data-guide-step="execution"><i>07</i><span>Execution</span></li>
-            <li data-guide-step="audit"><i>08</i><span>Audit</span></li>
-          </ol>
-        </section>
+      <div class="theater-grid">
+        <section class="stage-panel" aria-label="Interactive ToolBraid causality graph">
+          <div class="stage-toolbar">
+            <div><p>Guided mission topology</p><strong>The Living Braid</strong></div>
+            <div class="legend" aria-label="Flow legend">
+              <span><i class="intent"></i>Intent</span>
+              <span><i class="evidence"></i>Evidence</span>
+              <span><i class="authority"></i>Authority</span>
+              <span><i class="effect"></i>Verified effect</span>
+              <span><i class="threat"></i>Rejected</span>
+            </div>
+            <div class="stage-status"><i></i><span data-runtime-state>Ready</span></div>
+          </div>
 
-        <div class="mission-rail-stack">
-          <article class="mission-brief" data-mission-brief>
-            <div class="mission-brief-head">
-              <span class="brief-icon" data-ui-icon="mission" aria-hidden="true"></span>
-              <div><p data-mission-kicker>Full recovery mission</p><strong data-mission-title>Recover Production</strong></div>
-              <div class="objective-actions">
-                <button type="button" data-action="edit-objective">Edit</button>
-                <button type="button" data-action="save-objective" hidden>Save</button>
-                <button type="button" data-action="cancel-objective" hidden>Cancel</button>
+          <div class="stage-viewport" id="causality-stage" tabindex="-1">
+            <div class="pointer-lens" aria-hidden="true"></div>
+            <svg class="causality-graph" id="causality-graph" width="1200" height="650" viewBox="0 0 1200 650" role="group" aria-labelledby="graph-title graph-description">
+              <title id="graph-title">ToolBraid living causality graph</title>
+              <desc id="graph-description">Codex and an active Chrome page send an objective through ToolBraid. ToolBraid discovers and reads providers, blocks hostile metadata and holds external actions at a human approval boundary before returning verified receipts.</desc>
+              <defs>
+                <pattern id="stage-grid" width="38" height="38" patternUnits="userSpaceOnUse">
+                  <path d="M38 0H0V38" fill="none" stroke="rgba(143,181,211,.07)" stroke-width="1"></path>
+                </pattern>
+                <radialGradient id="core-fill" cx="50%" cy="44%" r="70%">
+                  <stop offset="0" stop-color="#132b38"></stop>
+                  <stop offset=".58" stop-color="#0a151d"></stop>
+                  <stop offset="1" stop-color="#071016"></stop>
+                </radialGradient>
+                <linearGradient id="boundary-gradient" x1="0" x2="1">
+                  <stop offset="0" stop-color="#5ee8ff" stop-opacity="0"></stop>
+                  <stop offset=".42" stop-color="#ffd06a" stop-opacity=".8"></stop>
+                  <stop offset=".58" stop-color="#ffd06a" stop-opacity=".8"></stop>
+                  <stop offset="1" stop-color="#67ef9a" stop-opacity="0"></stop>
+                </linearGradient>
+                <filter id="soft-glow" x="-80%" y="-80%" width="260%" height="260%">
+                  <feGaussianBlur stdDeviation="5" result="blur"></feGaussianBlur>
+                  <feMerge><feMergeNode in="blur"></feMergeNode><feMergeNode in="SourceGraphic"></feMergeNode></feMerge>
+                </filter>
+                <filter id="large-glow" x="-100%" y="-100%" width="300%" height="300%">
+                  <feGaussianBlur stdDeviation="15" result="blur"></feGaussianBlur>
+                  <feMerge><feMergeNode in="blur"></feMergeNode><feMergeNode in="SourceGraphic"></feMergeNode></feMerge>
+                </filter>
+                <marker id="arrow-cyan" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 8 4 0 8Z"></path></marker>
+                <marker id="arrow-gold" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 8 4 0 8Z"></path></marker>
+                <marker id="arrow-green" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 8 4 0 8Z"></path></marker>
+                <marker id="arrow-red" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 8 4 0 8Z"></path></marker>
+              </defs>
+
+              <rect class="graph-grid" width="1200" height="650" fill="url(#stage-grid)"></rect>
+              <circle class="orbit orbit-one" cx="570" cy="325" r="205"></circle>
+              <circle class="orbit orbit-two" cx="570" cy="325" r="150"></circle>
+              <circle class="orbit orbit-three" cx="570" cy="325" r="112"></circle>
+
+              <g class="routes" aria-hidden="true">
+                <path id="route-agent-discover" class="route route-intent" data-route="agent-discover" d="M185 190 C270 130 335 130 405 166" marker-end="url(#arrow-cyan)"></path>
+                <path id="route-chrome-core" class="route route-intent" data-route="chrome-core" d="M185 407 C300 440 420 390 500 338" marker-end="url(#arrow-cyan)"></path>
+                <path id="route-discover-normalize" class="route route-map" data-route="discover-normalize" d="M440 166 C475 132 510 123 548 129" marker-end="url(#arrow-cyan)"></path>
+                <path id="route-normalize-core" class="route route-map" data-route="normalize-core" d="M575 161 C583 205 582 234 574 246" marker-end="url(#arrow-cyan)"></path>
+                <path id="route-core-evidence" class="route route-evidence" data-route="core-evidence" d="M638 280 C675 246 702 220 732 208" marker-end="url(#arrow-cyan)"></path>
+                <path id="route-evidence-github" class="route route-evidence" data-route="evidence-github" d="M773 194 C850 145 929 138 1000 154" marker-end="url(#arrow-cyan)"></path>
+                <path id="route-evidence-vercel" class="route route-evidence" data-route="evidence-vercel" d="M774 216 C875 238 967 284 1044 319" marker-end="url(#arrow-cyan)"></path>
+                <path id="route-evidence-x" class="route route-evidence" data-route="evidence-x" d="M764 232 C844 340 922 425 1006 488" marker-end="url(#arrow-cyan)"></path>
+                <path id="route-provider-core" class="route route-evidence route-return" data-route="provider-core" d="M1010 169 C866 221 747 294 650 319" marker-end="url(#arrow-cyan)"></path>
+                <path id="route-vercel-core" class="route route-evidence route-return" data-route="vercel-core" d="M1041 336 C890 354 763 348 650 330" marker-end="url(#arrow-cyan)"></path>
+                <path id="route-x-core" class="route route-evidence route-return" data-route="x-core" d="M1008 499 C871 459 748 390 641 350" marker-end="url(#arrow-cyan)"></path>
+                <path id="route-threat-normalize" class="route route-threat" data-route="threat-normalize" d="M334 519 C390 414 444 239 548 151" marker-end="url(#arrow-red)"></path>
+                <path id="route-core-prepare" class="route route-authority" data-route="core-prepare" d="M634 366 C673 391 709 401 738 403" marker-end="url(#arrow-gold)"></path>
+                <path id="route-prepare-authority" class="route route-authority" data-route="prepare-authority" d="M744 430 C695 488 638 510 596 516" marker-end="url(#arrow-gold)"></path>
+                <path id="route-authority-github" class="route route-effect" data-route="authority-github" d="M603 534 C751 493 890 295 1010 174" marker-end="url(#arrow-green)"></path>
+                <path id="route-authority-vercel" class="route route-effect" data-route="authority-vercel" d="M604 536 C760 522 923 421 1047 348" marker-end="url(#arrow-green)"></path>
+                <path id="route-authority-x" class="route route-effect" data-route="authority-x" d="M606 537 C743 582 876 550 1007 507" marker-end="url(#arrow-green)"></path>
+                <path id="route-github-audit" class="route route-effect route-return" data-route="github-audit" d="M1008 178 C832 291 649 411 449 437" marker-end="url(#arrow-green)"></path>
+                <path id="route-vercel-audit" class="route route-effect route-return" data-route="vercel-audit" d="M1042 351 C841 419 641 447 450 440" marker-end="url(#arrow-green)"></path>
+                <path id="route-x-audit" class="route route-effect route-return" data-route="x-audit" d="M1005 509 C801 550 617 501 446 450" marker-end="url(#arrow-green)"></path>
+                <path id="route-audit-core" class="route route-effect" data-route="audit-core" d="M449 423 C486 389 505 367 520 352" marker-end="url(#arrow-green)"></path>
+              </g>
+
+              <g class="authority-boundary" aria-hidden="true">
+                <path d="M278 538 H930" stroke="url(#boundary-gradient)"></path>
+                <text x="925" y="558" text-anchor="end">HUMAN AUTHORITY BOUNDARY</text>
+              </g>
+
+              <g class="nodes">
+                <g class="graph-node graph-node-actor" data-node="agent" data-state="idle" tabindex="0" role="button" aria-label="Codex and MCP agent, objective origin">
+                  <rect x="65" y="145" width="120" height="90" rx="24"></rect>
+                  <g class="agent-brand-mark agent-brand-codex" aria-hidden="true">
+                    <circle cx="101" cy="174" r="16"></circle>
+                    <path class="node-icon" d="M101 161.5c4 0 7.2 3.2 7.2 7.2v4.5l-7.2 4.2-3.9-2.3"></path>
+                    <path class="node-icon" d="M101 161.5c4 0 7.2 3.2 7.2 7.2v4.5l-7.2 4.2-3.9-2.3" transform="rotate(60 101 174)"></path>
+                    <path class="node-icon" d="M101 161.5c4 0 7.2 3.2 7.2 7.2v4.5l-7.2 4.2-3.9-2.3" transform="rotate(120 101 174)"></path>
+                    <path class="node-icon" d="M101 161.5c4 0 7.2 3.2 7.2 7.2v4.5l-7.2 4.2-3.9-2.3" transform="rotate(180 101 174)"></path>
+                    <path class="node-icon" d="M101 161.5c4 0 7.2 3.2 7.2 7.2v4.5l-7.2 4.2-3.9-2.3" transform="rotate(240 101 174)"></path>
+                    <path class="node-icon" d="M101 161.5c4 0 7.2 3.2 7.2 7.2v4.5l-7.2 4.2-3.9-2.3" transform="rotate(300 101 174)"></path>
+                  </g>
+                  <path class="agent-bridge-link" d="M118 174h13M125 170l4 4-4 4"></path>
+                  <g class="agent-brand-mark agent-brand-mcp" aria-hidden="true">
+                    <circle cx="149" cy="174" r="16"></circle>
+                    <path class="node-icon" d="m141 180 7-12a5 5 0 0 1 8 5l-6 10a4 4 0 0 1-7-4l6-10M145 166l-3-3M154 185l3 3"></path>
+                  </g>
+                  <text class="node-label" x="125" y="207">Codex ↔ MCP</text>
+                  <text class="node-meta" x="125" y="222">native agent bridge</text>
+                </g>
+                <g class="graph-node graph-node-actor" data-node="chrome" data-state="idle" tabindex="0" role="button" aria-label="Active Chrome page and exact browser session">
+                  <rect x="65" y="365" width="120" height="90" rx="24"></rect>
+                  <g class="chrome-mark" aria-hidden="true">
+                    <path class="chrome-arc chrome-red" d="M125 387a17 17 0 0 1 14.7 8.5H125"></path>
+                    <path class="chrome-arc chrome-yellow" d="M139.7 395.5A17 17 0 0 1 125 421l7.4-12.8"></path>
+                    <path class="chrome-arc chrome-green" d="M125 421a17 17 0 0 1 0-34l7.4 12.8"></path>
+                    <circle class="chrome-center" cx="125" cy="404" r="7.2"></circle>
+                  </g>
+                  <text class="node-label" x="125" y="438">Chrome page</text>
+                  <text class="node-meta" x="125" y="451">exact tab + origin</text>
+                </g>
+
+                <g class="graph-node graph-node-capability" data-node="discover" data-state="idle" tabindex="0" role="button" aria-label="Discover verified WebMCP tools">
+                  <circle cx="410" cy="166" r="36"></circle>
+                  <circle class="node-inner" cx="410" cy="166" r="27"></circle>
+                  <g class="node-icon" transform="translate(393 149) scale(1.42)">
+                    <circle cx="12" cy="12" r="8.5"></circle><circle cx="12" cy="12" r="4.3"></circle><circle cx="12" cy="12" r="1.3"></circle><path d="M12 12l5.8-5.8M12 3.5v2M20.5 12h-2"></path>
+                  </g>
+                  <text class="node-label" x="410" y="216">Discover</text>
+                  <text class="node-meta" x="410" y="230">native tools</text>
+                </g>
+                <g class="graph-node graph-node-capability" data-node="normalize" data-state="idle" tabindex="0" role="button" aria-label="Normalize provider tools into canonical capabilities">
+                  <circle cx="570" cy="130" r="36"></circle>
+                  <circle class="node-inner" cx="570" cy="130" r="27"></circle>
+                  <g class="node-icon" transform="translate(553 113) scale(1.42)">
+                    <path d="M3.2 7.2C6.1 2.8 9.2 2.8 12 7.2l4.7 7.3c1.5 2.4 3 2.5 4.1.3"></path><path d="M3.2 16.8c2.9 4.4 6 4.4 8.8 0l4.7-7.3c1.5-2.4 3-2.5 4.1-.3"></path><path d="M2.5 12c2.2-3.1 4.5-3.1 6.8 0l5.3 7.4"></path><path d="M9.3 12l5.3-7.4c1.7-2.5 3.7-2.5 5.7-.2"></path><circle cx="12" cy="12" r="1.7"></circle>
+                  </g>
+                  <text class="node-label" x="570" y="181">Normalize</text>
+                  <text class="node-meta" x="570" y="195">canonical meaning</text>
+                </g>
+                <g class="graph-node graph-node-capability" data-node="evidence" data-state="idle" tabindex="0" role="button" aria-label="Collect read-only evidence in parallel">
+                  <circle cx="745" cy="205" r="36"></circle>
+                  <circle class="node-inner" cx="745" cy="205" r="27"></circle>
+                  <g class="node-icon" transform="translate(728 188) scale(1.42)">
+                    <circle cx="12" cy="12" r="9"></circle><path d="M2.8 12h4l1.8-4.2 3.2 8.4 2.2-5.1 1.3.9h5.9"></path>
+                  </g>
+                  <text class="node-label" x="745" y="255">Evidence</text>
+                  <text class="node-meta" x="745" y="269">parallel safe reads</text>
+                </g>
+                <g class="graph-node graph-node-capability" data-node="prepare" data-state="idle" tabindex="0" role="button" aria-label="Prepare exact external effects without executing them">
+                  <circle cx="760" cy="405" r="36"></circle>
+                  <circle class="node-inner" cx="760" cy="405" r="27"></circle>
+                  <g class="node-icon" transform="translate(743 388) scale(1.42)">
+                    <path d="M12 2.8 19 5.5v5.7c0 4.4-2.7 7.8-7 10-4.3-2.2-7-5.6-7-10V5.5L12 2.8Z"></path><path d="M8 9h5.2M13.2 9l-2-2M13.2 9l-2 2M16 15h-5.2M10.8 15l2-2M10.8 15l2 2"></path>
+                  </g>
+                  <text class="node-label" x="760" y="455">Prepare</text>
+                  <text class="node-meta" x="760" y="469">exact effects</text>
+                </g>
+                <g class="graph-node graph-node-capability graph-node-authority" data-node="authority" data-state="locked" tabindex="0" role="button" aria-label="Human authority gate, external actions locked">
+                  <circle cx="580" cy="523" r="40"></circle>
+                  <circle class="node-inner" cx="580" cy="523" r="30"></circle>
+                  <path class="node-icon" d="M568 520v-8a12 12 0 0 1 24 0v8M565 520h30v22h-30zM580 528v7"></path>
+                  <text class="node-label" x="580" y="581">Human authority</text>
+                  <text class="node-meta" x="580" y="595">exact approval</text>
+                </g>
+                <g class="graph-node graph-node-capability" data-node="audit" data-state="idle" tabindex="0" role="button" aria-label="Verified receipt and append-only audit seal">
+                  <circle cx="420" cy="435" r="36"></circle>
+                  <circle class="node-inner" cx="420" cy="435" r="27"></circle>
+                  <g class="node-icon" transform="translate(403 418) scale(1.42)">
+                    <path d="M5.2 2.8h9l4.6 4.6v13.8H5.2V2.8Z"></path><path d="M14.2 2.8v4.6h4.6M8.2 11h2M13.5 11h2.3M8.2 15h2"></path><path d="m11.5 16 2.1 2.1 4-4"></path>
+                  </g>
+                  <text class="node-label" x="420" y="485">Audit</text>
+                  <text class="node-meta" x="420" y="499">receipt + seal</text>
+                </g>
+
+                <g class="graph-node graph-node-core" data-node="core" data-state="ready" tabindex="0" role="button" aria-label="ToolBraid mission control core">
+                  <circle class="core-halo core-halo-wide" cx="570" cy="325" r="105"></circle>
+                  <circle class="core-halo" cx="570" cy="325" r="92"></circle>
+                  <circle class="core-surface" cx="570" cy="325" r="76" fill="url(#core-fill)"></circle>
+                  <g class="core-logo" transform="translate(538 275) scale(1.6)">
+                    <path class="strand strand-cyan" d="M8 12.5c0-3 2.4-5.5 5.5-5.5S19 9.5 19 12.5 16.6 18 13.5 18H12c-3.1 0-5.5 2.5-5.5 5.5S8.9 29 12 29h7"></path>
+                    <path class="strand strand-pink" d="M32 12.5c0-3-2.4-5.5-5.5-5.5S21 9.5 21 12.5s2.4 5.5 5.5 5.5H28c3.1 0 5.5 2.5 5.5 5.5S31.1 29 28 29h-7"></path>
+                    <path class="strand strand-gold" d="M15 33c0-3 2.2-5 5-5s5 2 5 5"></path>
+                  </g>
+                  <text class="core-title" x="570" y="356">ToolBraid</text>
+                  <text class="core-subtitle" x="570" y="373">policy · authority · proof</text>
+                </g>
+
+                <g class="graph-node graph-node-provider" data-node="github" data-state="idle" tabindex="0" role="button" aria-label="GitHub provider and repository evidence">
+                  <path class="provider-surface" d="M1035 104 1080 130v52l-45 26-45-26v-52Z"></path>
+                  <g class="node-icon" aria-hidden="true">
+                    <path d="M1019 142v29M1019 151h17a8 8 0 0 0 8-8v-2M1019 162h17a8 8 0 0 1 8 8v2"></path><circle cx="1019" cy="139" r="4"></circle><circle cx="1044" cy="138" r="4"></circle><circle cx="1044" cy="175" r="4"></circle>
+                  </g>
+                  <text class="node-label" x="1035" y="226">GitHub</text>
+                  <text class="node-meta" x="1035" y="241">release evidence</text>
+                </g>
+                <g class="graph-node graph-node-provider" data-node="vercel" data-state="idle" tabindex="0" role="button" aria-label="Vercel deployment provider">
+                  <path class="provider-surface" d="M1080 274 1125 300v52l-45 26-45-26v-52Z"></path>
+                  <path class="node-icon node-icon-fill" d="m1080 306 20 35h-40Z"></path>
+                  <text class="node-label" x="1080" y="398">Vercel</text>
+                  <text class="node-meta" x="1080" y="413">deployment control</text>
+                </g>
+                <g class="graph-node graph-node-provider" data-node="x" data-state="idle" tabindex="0" role="button" aria-label="X post provider and publication surface">
+                  <path class="provider-surface" d="M1035 444 1080 470v52l-45 26-45-26v-52Z"></path>
+                  <path class="node-icon" d="m1020 477 30 38M1051 477l-31 38"></path>
+                  <text class="node-label" x="1035" y="566">X</text>
+                  <text class="node-meta" x="1035" y="581">status publication</text>
+                </g>
+                <g class="graph-node graph-node-threat" data-node="threat" data-state="idle" tabindex="0" role="button" aria-label="Hostile metadata descriptor, quarantined before authority">
+                  <path class="provider-surface" d="m320 498 39 23v45l-39 23-39-23v-45Z"></path>
+                  <g class="node-icon" transform="translate(303 520) scale(1.42)">
+                    <path d="M12 2.8 19 5.5v5.7c0 4.4-2.7 7.8-7 10-4.3-2.2-7-5.6-7-10V5.5L12 2.8Z"></path><path d="m9 9 6 6M15 9l-6 6"></path>
+                  </g>
+                  <text class="node-label" x="320" y="610">Hostile metadata</text>
+                  <text class="node-meta" x="320" y="625">untrusted descriptor</text>
+                </g>
+              </g>
+
+              <g id="packet-layer" class="packet-layer"></g>
+            </svg>
+
+            <section class="approval-dock" data-approval-dock hidden aria-labelledby="approval-title">
+              <div class="approval-dock-copy">
+                <span class="approval-lock" aria-hidden="true">
+                  <svg width="22" height="22" viewBox="0 0 24 24"><path d="M7 10V7a5 5 0 0 1 10 0v3M5 10h14v11H5zM12 14v3"></path></svg>
+                </span>
+                <div><small>Human checkpoint</small><strong id="approval-title">Two exact effects are waiting for you</strong></div>
               </div>
-            </div>
-            <p data-objective-copy>Diagnose checkout after the latest deployment, prepare a safe recovery and a customer update. Do not change production or publish without my approval.</p>
-            <label class="visually-hidden" for="mission-objective-input">Mission objective</label>
-            <textarea id="mission-objective-input" data-objective-input rows="5" maxlength="600" hidden></textarea>
-            <div class="mission-constraints">
-              <span data-constraint="environment">Production</span><span data-constraint="mode">Read first</span><span data-constraint="authority">Exact approval</span>
-            </div>
-          </article>
-
-          <section class="provider-legend" aria-label="Provider status legend">
-            <p>Provider origins</p>
-            <span><i class="healthy"></i>Healthy <b data-healthy-count>0</b></span>
-            <span><i class="degraded"></i>Degraded <b data-degraded-count>0</b></span>
-            <span><i class="quarantined"></i>Quarantined <b data-quarantine-count>0</b></span>
-            <button type="button" data-action="swap-provider">Explain automatic fallback <span>↔</span></button>
-            <div class="provider-swap-status" data-swap-status hidden><span data-ui-icon="check" aria-hidden="true"></span><p><strong>Pulse Monitor substituted</strong><small>Read-only fallback · healthy</small></p></div>
-          </section>
-
-          <section class="parallel-reads" aria-labelledby="parallel-title">
-            <header><div><p data-read-kicker>Parallel evidence</p><h2 id="parallel-title" data-read-title>Read-only batch</h2></div><span data-read-summary aria-live="polite">0 / 4</span></header>
-            <ol data-read-list>
-              <li data-read="health"><i></i><span><strong>Service health</strong><small>Waiting</small></span><time>—</time></li>
-              <li data-read="release"><i></i><span><strong>Release history</strong><small>Waiting</small></span><time>—</time></li>
-              <li data-read="deployment"><i></i><span><strong>Deployment state</strong><small>Waiting</small></span><time>—</time></li>
-              <li data-read="notice"><i></i><span><strong>Status notice</strong><small>Waiting</small></span><time>—</time></li>
-            </ol>
-          </section>
-        </div>
-
-        <div class="constellation-viewport" data-constellation-viewport role="region" aria-label="Interactive provider constellation. On small screens, scroll horizontally to inspect all nodes." tabindex="0">
-          <div class="constellation-placeholder" data-constellation-placeholder>
-            <section class="mission-gallery" data-mission-gallery aria-labelledby="mission-gallery-title">
-              <header>
-                <div><p class="section-kicker">Three real control-plane proofs</p><h2 id="mission-gallery-title">Choose a mission</h2></div>
-                <span><i></i> Same live engine</span>
-              </header>
-              <div class="mission-gallery-grid" data-mission-gallery-grid></div>
-              <footer><span data-ui-icon="lock" aria-hidden="true"></span><p><strong>No simulated success paths</strong><small>Every card runs the real WebMCP registry, policy checks, receipts, and audit chain.</small></p></footer>
+              <button class="approval-card" type="button" data-approve="rollback" aria-pressed="false">
+                <span><small>Vercel · redeploy</small><strong>Restore verified deployment</strong></span><i data-approval-state="rollback">Review</i>
+              </button>
+              <button class="approval-card" type="button" data-approve="publish" aria-pressed="false">
+                <span><small>X · publish_x_post</small><strong>Publish incident update</strong></span><i data-approval-state="publish">Review</i>
+              </button>
+              <button class="execute-button" type="button" data-action="execute" disabled>Execute approved effects <span>→</span></button>
             </section>
+
+            <div class="stage-announcement" data-stage-announcement hidden aria-live="polite"></div>
           </div>
-          <div class="constellation-mount" data-constellation hidden></div>
-        </div>
-
-      </section>
-
-      <section class="approval-dock" data-approval-dock aria-labelledby="approval-gate-title">
-        <div class="approval-gate-copy">
-          <span class="gate-lock" data-ui-icon="lock" aria-hidden="true"></span>
-          <div>
-            <p data-approval-kicker>Human checkpoint</p>
-            <h2 id="approval-gate-title" data-approval-title>Approval required</h2>
-            <small data-approval-detail aria-live="polite">External mutations stay cryptographically bound and locked.</small>
-            <code class="audit-seal" data-audit-hash hidden>Audit seal pending</code>
-          </div>
-        </div>
-        <button class="mutation-card" type="button" data-node-target="apply-recovery" data-action="inspect-mutation">
-          <span class="mutation-icon" data-ui-icon="rollback" aria-hidden="true"></span><span><small data-apply-kicker>Production mutation</small><strong data-apply-title>Apply recovery</strong><em data-apply-state>Locked</em><code class="receipt-id" data-apply-receipt hidden>RCV-1841</code></span><i data-ui-icon="lock" aria-hidden="true"></i>
-        </button>
-        <button class="mutation-card" type="button" data-node-target="publish-update" data-action="inspect-mutation">
-          <span class="mutation-icon" data-ui-icon="send" aria-hidden="true"></span><span><small data-publish-kicker>Customer communication</small><strong data-publish-title>Publish update</strong><em data-publish-state>Locked</em><code class="receipt-id" data-publish-receipt hidden>NTC-R9</code></span><i data-ui-icon="lock" aria-hidden="true"></i>
-        </button>
-        <button class="review-action" type="button" data-action="review-approval" disabled>Review exact effects <span aria-hidden="true">→</span></button>
-      </section>
-
-      <section class="universal-view" data-universal-view aria-labelledby="universal-title" tabindex="-1" hidden>
-        <div class="universal-hero">
-          <p class="section-kicker">Product workflow · extension owned</p>
-          <h1 id="universal-title">Live Universal</h1>
-          <p>Use ToolBraid from the Chrome side panel on the page where the work must happen. This dashboard does not read, mirror or simulate extension session state.</p>
-          <span class="universal-truth"><span data-ui-icon="shield" aria-hidden="true"></span> Live state stays inside the installed extension and the active Chrome tab.</span>
-        </div>
-
-        <ol class="universal-flow" aria-label="ToolBraid live universal workflow">
-          <li><span>01</span><div><strong>Page</strong><small>The active Chrome page supplies the real context.</small></div></li>
-          <li><span>02</span><div><strong>Bound tool</strong><small>The extension selects a verified adapter or a constrained generic page tool.</small></div></li>
-          <li><span>03</span><div><strong>Safe read</strong><small>Evidence is gathered before any external change.</small></div></li>
-          <li><span>04</span><div><strong>Exact approval</strong><small>You review the bound target, tool and arguments.</small></div></li>
-          <li><span>05</span><div><strong>Action</strong><small>Only the approved effect can execute.</small></div></li>
-          <li><span>06</span><div><strong>Outcome proof</strong><small>Verified adapters check declared postconditions; other actions stay explicitly dispatch-unverified.</small></div></li>
-        </ol>
-
-        <section class="universal-entry" data-universal-entry tabindex="-1" aria-labelledby="sidepanel-title">
-          <div>
-            <p class="section-kicker">Continue in Chrome</p>
-            <h2 id="sidepanel-title">Open the ToolBraid side panel</h2>
-            <p>The installed extension owns live tabs, adapters, approvals and postcondition checks. This page can explain that boundary, but cannot open or inspect the extension for you.</p>
-          </div>
-          <details>
-            <summary>Chrome side panel steps</summary>
-            <ol><li>Open the page you want ToolBraid to work with.</li><li>Select ToolBraid from Chrome’s toolbar or side panel picker.</li><li>Start the workflow inside the ToolBraid side panel.</li></ol>
-          </details>
-          <button type="button" data-action="sidepanel-guide">Show side panel steps <span aria-hidden="true">→</span></button>
         </section>
-      </section>
 
-      <section class="approvals-view" data-approvals-view aria-labelledby="approvals-title" tabindex="-1" hidden>
-        <header class="view-header">
-          <div>
-            <p class="section-kicker">Human authority · exact scope</p>
-            <h1 id="approvals-title">Approvals</h1>
-            <p>Review the two external effects that the recovery demo can prepare. Nothing is executable until each exact envelope is approved.</p>
-          </div>
-          <span class="view-state-pill" data-approval-view-status>Waiting for evidence</span>
-        </header>
-        <section class="approval-view-summary" aria-label="Approval summary">
-          <div><span class="summary-glyph" data-ui-icon="lock" aria-hidden="true"></span><p><small>Actionable scopes</small><strong data-approval-view-count>0 of 2 ready</strong></p></div>
-          <div><span class="summary-glyph" data-ui-icon="shield" aria-hidden="true"></span><p><small>Binding</small><strong>Origin · tool · schema · arguments</strong></p></div>
-          <div><span class="summary-glyph" data-ui-icon="pulse" aria-hidden="true"></span><p><small>Lifecycle</small><strong data-approval-view-phase>Evidence first</strong></p></div>
-        </section>
-        <div class="approval-view-grid">
-          <article class="approval-view-card" data-approval-view-card="apply">
-            <div class="approval-view-card-head"><span class="approval-view-icon" data-ui-icon="rollback" aria-hidden="true"></span><div><small>Production mutation</small><h2>Apply recovery</h2></div><b data-approval-view-state="apply">Locked</b></div>
-            <dl><div><dt>Target</dt><dd data-approval-view-target="apply">Awaiting verified evidence</dd></div><div><dt>Effect</dt><dd data-approval-view-effect="apply">No action prepared</dd></div></dl>
-            <button type="button" data-action="review-approval">Open exact review <span aria-hidden="true">→</span></button>
-          </article>
-          <article class="approval-view-card" data-approval-view-card="publish">
-            <div class="approval-view-card-head"><span class="approval-view-icon" data-ui-icon="send" aria-hidden="true"></span><div><small>Customer communication</small><h2>Publish update</h2></div><b data-approval-view-state="publish">Locked</b></div>
-            <dl><div><dt>Target</dt><dd data-approval-view-target="publish">Awaiting verified evidence</dd></div><div><dt>Effect</dt><dd data-approval-view-effect="publish">No action prepared</dd></div></dl>
-            <button type="button" data-action="review-approval">Open exact review <span aria-hidden="true">→</span></button>
-          </article>
-        </div>
-        <section class="approval-view-empty" data-approval-view-empty>
-          <span data-ui-icon="pulse" aria-hidden="true"></span>
-          <div><strong>No actionable approval yet</strong><p>Start the walkthrough, complete the safe evidence batch, and ToolBraid will stop here before any external mutation.</p></div>
-        </section>
-      </section>
-
-      <aside class="evidence-panel" aria-labelledby="evidence-title" tabindex="-1">
-        <header class="panel-header">
-          <div><p class="section-kicker">Context inspector</p><h2 id="evidence-title" data-panel-heading>Evidence</h2></div>
-          <span class="panel-live"><i></i>Live</span>
-        </header>
-        <div class="panel-tabs" role="tablist" aria-label="Inspector sections">
-          <button class="active" id="tab-evidence" type="button" role="tab" aria-selected="true" aria-controls="panel-evidence" tabindex="0" data-panel-tab="evidence">Evidence</button>
-          <button id="tab-mapping" type="button" role="tab" aria-selected="false" aria-controls="panel-mapping" tabindex="-1" data-panel-tab="mapping">Mapping</button>
-          <button id="tab-audit" type="button" role="tab" aria-selected="false" aria-controls="panel-audit" tabindex="-1" data-panel-tab="audit">Audit</button>
-        </div>
-
-        <div class="inspector-body" id="panel-evidence" role="tabpanel" aria-labelledby="tab-evidence" tabindex="0" data-panel-content="evidence">
-          <section class="selected-node" data-selected-node>
-            <div class="selected-node-icon" data-selected-icon aria-hidden="true">◎</div>
-            <div><small data-selected-kind>Mission</small><h3 data-selected-title>Production recovery</h3><p data-selected-description>Select a node to inspect its origin, evidence and execution status.</p></div>
-          </section>
-
-          <section class="confidence-block">
-            <div class="block-title"><span>Semantic confidence</span><strong data-confidence-value>—</strong></div>
-            <progress class="confidence-track" data-confidence-bar max="100" value="0" aria-label="Semantic confidence">0%</progress>
-            <div class="confidence-meta"><span>Canonical match</span><b data-mapped-concepts>0 / 7 capabilities</b></div>
-          </section>
-
-          <section class="origin-identity">
-            <div class="block-title"><span>Origin identity</span><button type="button" data-action="copy-origin">Copy</button></div>
-            <dl>
-              <div><dt>Provider</dt><dd data-origin-provider>Not selected</dd></div>
-              <div><dt>Origin</dt><dd><code data-origin-value>—</code></dd></div>
-              <div><dt>Tool</dt><dd><code data-tool-value>—</code></dd></div>
-              <div><dt>Schema</dt><dd><code data-schema-value>—</code></dd></div>
-            </dl>
-          </section>
-
-          <section class="signal-card clean" data-signal-card>
-              <div><span data-signal-icon data-ui-icon="shield" aria-hidden="true"></span><p><small>Metadata security</small><strong data-signal-status>Awaiting discovery</strong></p></div>
-            <b data-signal-count>0 signals</b>
-          </section>
-
-          <section class="evidence-stack">
-            <div class="block-title"><span>Evidence trace</span><b data-evidence-count>0 items</b></div>
-            <div data-evidence-list>
-              <p class="empty-copy">Evidence will appear as safe reads complete.</p>
+        <aside class="inspector" data-mode="inspect" aria-labelledby="inspector-title">
+          <header class="inspector-header">
+            <div><p data-inspector-kicker>Context inspector</p><h2 id="inspector-title">ToolBraid core</h2></div>
+            <div class="inspector-head-actions"><span class="inspector-status" data-inspector-status><i></i>Ready</span><button class="inspector-close" type="button" data-action="close-inspector" aria-label="Close inspector">×</button></div>
+          </header>
+          <div class="inspector-workspace">
+            <nav class="inspector-mode-rail" aria-label="ToolBraid operational surfaces">
+              <button type="button" class="is-active" data-inspector-mode="inspect" aria-pressed="true" title="Inspect selected node">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"></circle><circle cx="12" cy="12" r="2"></circle><path d="M12 3.5v3M20.5 12h-3M12 20.5v-3M3.5 12h3"></path></svg><span>Inspect</span>
+              </button>
+              <button type="button" data-inspector-mode="context" aria-pressed="false" title="Exact browser context">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="15" rx="2"></rect><path d="M3 8h18M7 6h.1M10 6h.1"></path></svg><span>Context</span>
+              </button>
+              <button type="button" data-inspector-mode="mission" aria-pressed="false" title="Multi-page mission">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.2"></circle><circle cx="12" cy="12" r="3"></circle><path d="M12 1.8v3M12 19.2v3M1.8 12h3M19.2 12h3"></path></svg><span>Mission</span>
+              </button>
+              <button type="button" data-inspector-mode="tools" aria-pressed="false" title="Tools and capability packs">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7.2h14v9.6H5zM8 7.2V4.5h8v2.7M8 19.5h8M12 16.8v2.7"></path><circle cx="8" cy="12" r="1"></circle><path d="M11 12h5"></path></svg><span>Tools</span>
+              </button>
+              <button type="button" data-inspector-mode="media" aria-pressed="false" title="Multimodal evidence">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.8 12h4l1.8-4.2 3.2 8.4 2.2-5.1 1.3.9h5.9"></path><circle cx="12" cy="12" r="9"></circle></svg><span>Media</span>
+              </button>
+              <button type="button" data-inspector-mode="human" aria-pressed="false" title="Secure human handoff">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10" width="14" height="10.5" rx="2.2"></rect><path d="M8 10V7.5a4 4 0 0 1 8 0V10M12 14v3"></path></svg><span>Human</span>
+              </button>
+              <button type="button" data-inspector-mode="proof" aria-pressed="false" title="Receipts and audit proof">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5.2 2.8h9l4.6 4.6v13.8H5.2V2.8ZM14.2 2.8v4.6h4.6"></path><path d="m8.5 14 2.2 2.2 4.8-5"></path></svg><span>Proof</span>
+              </button>
+            </nav>
+            <div class="inspector-pane">
+              <div class="inspector-tabs" role="tablist" aria-label="Inspector view">
+                <button type="button" role="tab" aria-selected="true" data-inspector-tab="summary">Summary</button>
+                <button type="button" role="tab" aria-selected="false" data-inspector-tab="payload">Payload</button>
+                <button type="button" role="tab" aria-selected="false" data-inspector-tab="audit">Audit</button>
+              </div>
+              <div class="inspector-body" data-inspector-body tabindex="0"></div>
+              <footer class="inspector-actions">
+                <button type="button" data-action="follow-packet">Follow next packet <span>↗</span></button>
+                <button type="button" data-action="replay-segment">Replay this segment <span>↺</span></button>
+              </footer>
             </div>
-          </section>
-        </div>
+          </div>
+        </aside>
+      </div>
 
-        <div class="inspector-body" id="panel-mapping" role="tabpanel" aria-labelledby="tab-mapping" tabindex="0" data-panel-content="mapping" hidden>
-          <section class="mapping-summary"><p>Capability pack</p><h3>Production recovery</h3><span>7 canonical capabilities</span></section>
-          <div class="mapping-list" data-mapping-list></div>
+      <section class="timeline" aria-label="Mission replay timeline">
+        <div class="timeline-controls">
+          <button class="timeline-play" type="button" data-action="toggle-play" aria-label="Play mission">
+            <svg width="17" height="17" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 9 6-9 6V6Z"></path></svg>
+          </button>
+          <output data-current-time>00:00</output><span>/</span><output data-total-time>00:52</output>
         </div>
-
-        <div class="inspector-body audit-body" id="panel-audit" role="tabpanel" aria-labelledby="tab-audit" tabindex="0" data-panel-content="audit" hidden>
-          <section class="audit-overview" aria-label="Audit summary">
-            <div><small>Phase summaries</small><strong data-audit-overview>No recorded phases</strong></div>
-            <code data-audit-panel-hash>Unsealed</code>
-          </section>
-          <div class="audit-stream" data-audit-list><p class="empty-copy">The audit stream is empty.</p></div>
+        <div class="timeline-track">
+          <input type="range" min="0" max="52000" value="0" step="50" data-timeline aria-label="Mission time">
+          <div class="timeline-progress" data-timeline-progress></div>
+          <div class="timeline-markers" data-timeline-markers aria-hidden="true"></div>
         </div>
-      </aside>
+        <nav class="chapter-nav" data-chapter-nav aria-label="Mission chapters"></nav>
+        <div class="timeline-rate">
+          <button type="button" data-rate="0.75">.75×</button>
+          <button type="button" data-rate="1">1×</button>
+          <button type="button" data-rate="1.5" class="is-active">1.5×</button>
+        </div>
+      </section>
     </main>
 
-    <footer class="activity-ticker" aria-label="Live mission activity">
-      <div class="ticker-title"><span>Audit</span><i></i><b data-ticker-status>Ready</b></div>
-      <div class="ticker-events" data-ticker-events><span><time>—</time> Mission waiting for human objective</span></div>
-      <button type="button" data-action="open-audit">View full audit <span>↗</span></button>
-    </footer>
+    <main class="product-view live-workspace" data-product-panel="live" hidden tabindex="-1">
+      <header class="product-view-header">
+        <div>
+          <p>Live Workspace · bridge preview</p>
+          <h1>One exact browser context. One accountable bridge.</h1>
+          <span>Inspect the bridge contract here, then open the real seven-origin WebMCP workspace for live provider execution.</span>
+        </div>
+        <div class="view-header-actions">
+          <span class="view-status" data-bridge-badge><i></i>Connected replay</span>
+          <a class="surface-button surface-button-primary" href="./live.html">Open live workspace <span aria-hidden="true">↗</span></a>
+          <button class="surface-button" type="button" data-action="refresh-bridge">Replay handshake</button>
+          <button class="surface-button surface-button-danger" type="button" data-action="toggle-bridge">Replay disconnect</button>
+        </div>
+      </header>
+
+      <div class="workspace-layout">
+        <section class="product-surface bridge-surface" aria-labelledby="bridge-title">
+          <header class="surface-header">
+            <div><p>Authenticated local route</p><h2 id="bridge-title">Codex / MCP bridge</h2></div>
+            <span data-bridge-updated>Handshake 00:00</span>
+          </header>
+          <div class="bridge-lane" data-bridge-lane>
+            <div class="bridge-stop" data-brand="codex"><span data-bridge-mark="codex">01</span><strong>Codex</strong><small>objective caller</small></div>
+            <i aria-hidden="true"></i>
+            <div class="bridge-stop" data-brand="mcp"><span data-bridge-mark="mcp">02</span><strong>MCP transport</strong><small>page-bound tools</small></div>
+            <i aria-hidden="true"></i>
+            <div class="bridge-stop" data-brand="native"><span data-bridge-mark="native">03</span><strong>Native host</strong><small>per-user pipe</small></div>
+            <i aria-hidden="true"></i>
+            <div class="bridge-stop" data-brand="chrome"><span data-bridge-mark="chrome">04</span><strong>Chrome MV3</strong><small>extension authority</small></div>
+            <i aria-hidden="true"></i>
+            <div class="bridge-stop" data-brand="toolbraid"><span data-bridge-mark="toolbraid">05</span><strong>ToolBraid</strong><small>policy + receipts</small></div>
+          </div>
+          <div class="bridge-contract">
+            <div><small>Agent may</small><strong>Discover · read · prepare</strong></div>
+            <div><small>Agent cannot</small><strong>Approve · retain credentials</strong></div>
+            <div><small>Mutation path</small><strong>Side-panel gesture only</strong></div>
+          </div>
+          <div class="bridge-health" aria-label="Bridge replay health">
+            <article><span>Transport</span><strong data-bridge-transport>Native pipe ready</strong><small>Per-user · loopback only</small></article>
+            <article><span>Page grant</span><strong data-bridge-permission>Exact origin granted</strong><small>Separate from provider permission</small></article>
+            <article><span>Session owner</span><strong data-bridge-owner>Replay session bound</strong><small>No credential transfer</small></article>
+            <article><span>Drift policy</span><strong data-bridge-drift>Fail closed</strong><small>Rebind requires trusted UI</small></article>
+          </div>
+        </section>
+
+        <section class="product-surface context-surface" aria-labelledby="context-title">
+          <header class="surface-header">
+            <div><p>Exact browser ownership</p><h2 id="context-title">Current page</h2></div>
+            <span class="surface-pill">SANDBOX</span>
+          </header>
+          <dl class="exact-data" data-live-context></dl>
+          <button class="surface-button surface-button-wide" type="button" data-action="inspect-context">Open Context inspector <span>→</span></button>
+        </section>
+
+        <section class="product-surface owner-surface" aria-labelledby="owner-title">
+          <header class="surface-header">
+            <div><p>Owner autonomy</p><h2 id="owner-title">Control plane</h2></div>
+            <span class="surface-pill surface-pill-green">ACTIVE</span>
+          </header>
+          <ul class="state-list">
+            <li><span>Mode</span><strong>Local owner policy</strong></li>
+            <li><span>Authority</span><strong>Extension-owned</strong></li>
+            <li><span>Model route</span><strong>Selected outside extension</strong></li>
+            <li><span>Credentials</span><strong>Never transferred</strong></li>
+          </ul>
+          <p class="surface-note">This guided preview replays the bridge contract. The linked live workspace runs the native multi-origin provider flow.</p>
+        </section>
+      </div>
+    </main>
+
+    <main class="product-view evidence-view" data-product-panel="evidence" hidden tabindex="-1">
+      <header class="product-view-header">
+        <div>
+          <p>Evidence · bounded and provenance-first</p>
+          <h1>See what the mission knows—and what it does not.</h1>
+          <span>DOM/ARIA, provider reads and optional media remain evidence. None of them can create authority.</span>
+        </div>
+        <div class="view-header-actions">
+          <span class="view-status" data-evidence-badge><i></i>Metadata ready</span>
+          <button class="surface-button" type="button" data-action="analyze-evidence">Analyze replay evidence</button>
+          <button class="surface-button surface-button-danger" type="button" data-action="cancel-evidence" hidden>Cancel</button>
+        </div>
+      </header>
+
+      <div class="evidence-summary" aria-label="Evidence summary">
+        <div><small>Bound records</small><strong data-evidence-total>0</strong><span>current mission time</span></div>
+        <div><small>Provider reads</small><strong data-evidence-reads>0</strong><span>structured replay events</span></div>
+        <div><small>Quarantined</small><strong data-evidence-quarantined>0</strong><span>excluded before mapping</span></div>
+        <div><small>Retained raw bytes</small><strong>0</strong><span>ephemeral handles only</span></div>
+      </div>
+
+      <div class="evidence-layout">
+        <section class="product-surface evidence-catalogue" aria-labelledby="evidence-catalogue-title">
+          <header class="surface-header">
+            <div><p>Selected page</p><h2 id="evidence-catalogue-title">Evidence catalogue</h2></div>
+            <span data-evidence-progress-label>READY</span>
+          </header>
+          <div class="analysis-progress" data-evidence-progress hidden><i></i></div>
+          <div class="evidence-records" data-evidence-records></div>
+        </section>
+
+        <aside class="product-surface provider-settings" aria-labelledby="provider-title">
+          <header class="surface-header">
+            <div><p>Optional analysis</p><h2 id="provider-title">Multimodal provider</h2></div>
+            <span class="surface-pill" data-provider-mode>METADATA ONLY</span>
+          </header>
+          <form data-provider-form>
+            <label>Exact endpoint origin<input type="url" name="endpoint" placeholder="https://provider.example"></label>
+            <label>Vision model<input type="text" name="visionModel" placeholder="vision-model"></label>
+            <label>Audio model<input type="text" name="audioModel" placeholder="audio-model"></label>
+            <label>Session API key<input type="password" name="apiKey" autocomplete="off" placeholder="Never persisted"></label>
+            <p data-provider-note>No endpoint configured. Deterministic metadata remains available.</p>
+            <div class="form-actions">
+              <button class="surface-button" type="button" data-action="metadata-only">Use metadata only</button>
+              <button class="surface-button surface-button-primary" type="submit">Save preview</button>
+            </div>
+          </form>
+          <p class="surface-note">Guided-demo configuration is held only in page memory and sends no network request.</p>
+        </aside>
+      </div>
+    </main>
+
+    <main class="product-view approvals-view" data-product-panel="approvals" hidden tabindex="-1">
+      <header class="product-view-header">
+        <div>
+          <p>Human authority · exact scope</p>
+          <h1>Nothing external moves until every bound field is visible.</h1>
+          <span>Approve or deny each effect separately. Any drift invalidates its one-time authority.</span>
+        </div>
+        <div class="view-header-actions">
+          <span class="view-status view-status-warning" data-approval-view-badge><i></i>Evidence first</span>
+          <button class="surface-button surface-button-primary" type="button" data-action="execute" disabled>Execute approved effects</button>
+        </div>
+      </header>
+
+      <div class="approval-layout">
+        <section class="product-surface approval-queue" aria-labelledby="approval-queue-title">
+          <header class="surface-header">
+            <div><p>Current context</p><h2 id="approval-queue-title">Prepared effects</h2></div>
+            <span data-approval-count>0 / 2 APPROVED</span>
+          </header>
+          <div class="approval-records" data-approval-records></div>
+          <div class="approval-history">
+            <header><strong>Decision history</strong><span>LOCAL REPLAY</span></header>
+            <ol data-approval-history></ol>
+          </div>
+        </section>
+
+        <aside class="product-surface approval-envelope" aria-labelledby="approval-envelope-title">
+          <header class="surface-header">
+            <div><p>Exact execution envelope</p><h2 id="approval-envelope-title" data-envelope-title>Apply recovery</h2></div>
+            <span class="surface-pill" data-envelope-status>LOCKED</span>
+          </header>
+          <dl class="exact-data exact-data-dense" data-approval-envelope></dl>
+          <pre class="envelope-arguments" data-envelope-arguments>{}</pre>
+          <div class="decision-actions">
+            <button class="surface-button surface-button-danger" type="button" data-approval-decision="deny" data-approval-scope="rollback">Deny exact effect</button>
+            <button class="surface-button surface-button-primary" type="button" data-approval-decision="approve" data-approval-scope="rollback">Approve exact effect</button>
+          </div>
+        </aside>
+      </div>
+    </main>
+
+    <main class="product-view audit-view" data-product-panel="audit" hidden tabindex="-1">
+      <header class="product-view-header">
+        <div>
+          <p>Receipts · append-only local integrity</p>
+          <h1>Trace every decision from intent to outcome.</h1>
+          <span>Generic dispatch stays unverified. Only a supported browser-observed postcondition may become verified success.</span>
+        </div>
+        <div class="view-header-actions">
+          <span class="view-status" data-audit-badge><i></i>Chain open</span>
+          <button class="surface-button" type="button" data-action="export-audit">Export redacted JSON</button>
+        </div>
+      </header>
+
+      <div class="audit-layout">
+        <section class="product-surface receipt-surface" aria-labelledby="receipt-title">
+          <header class="surface-header">
+            <div><p>Outcome proof</p><h2 id="receipt-title">Receipts</h2></div>
+            <span data-receipt-count>0 RECORDS</span>
+          </header>
+          <div class="receipt-records" data-receipt-records></div>
+        </section>
+
+        <section class="product-surface audit-chain-surface" aria-labelledby="audit-chain-title">
+          <header class="surface-header">
+            <div><p>SHA-256 integrity chain</p><h2 id="audit-chain-title">Causal audit</h2></div>
+            <code data-audit-head>sha256:pending…</code>
+          </header>
+          <ol class="full-audit-chain" data-full-audit-chain></ol>
+          <button class="surface-button surface-button-wide" type="button" data-action="toggle-audit">Show all retained records</button>
+        </section>
+      </div>
+    </main>
+
+    <div class="drawer-backdrop" data-drawer-backdrop hidden></div>
+    <aside class="help-drawer" data-help-drawer hidden role="dialog" aria-modal="true" aria-labelledby="help-title" tabindex="-1">
+      <header>
+        <div><p>ToolBraid guide</p><h2 id="help-title">Read the control plane</h2></div>
+        <button type="button" data-action="close-help" aria-label="Close help">×</button>
+      </header>
+      <div class="help-content">
+        <section>
+          <h3>Five views, one mission state</h3>
+          <ol>
+            <li><b>Walkthrough</b><span>Replay discovery, evidence, authority and proof on the Living Braid.</span></li>
+            <li><b>Live Workspace</b><span>Inspect the sandbox projection of browser ownership and the Codex/MCP bridge.</span></li>
+            <li><b>Evidence</b><span>See provenance, media boundaries and optional provider configuration.</span></li>
+            <li><b>Approvals</b><span>Review, approve or deny every exact external effect separately.</span></li>
+            <li><b>Audit</b><span>Follow receipts and the ordered append-only chain.</span></li>
+          </ol>
+        </section>
+        <section>
+          <h3>Truth boundary</h3>
+          <p>This guided experience replays deterministic local events and dispatches no mutation. Open Live Workspace for the real native provider flow; credentials and approvals remain outside the agent surface.</p>
+        </section>
+        <section>
+          <h3>Keyboard</h3>
+          <p><kbd>1–5</kbd> switch views · <kbd>Space</kbd> play/pause in Walkthrough · <kbd>Esc</kbd> close Help or the mobile inspector.</p>
+        </section>
+      </div>
+    </aside>
   </div>
 
-  <aside class="help-drawer" data-help-drawer hidden role="dialog" aria-modal="true" aria-labelledby="help-title" tabindex="-1">
-    <header><div><p class="section-kicker">ToolBraid guide</p><h2 id="help-title">Mission controls</h2></div><button class="dialog-close" type="button" data-action="close-help" aria-label="Close help">×</button></header>
-    <p class="help-lead">The dashboard demonstrates the control-plane contract. The Chrome side panel owns live tabs, tools, approvals and receipts.</p>
-    <section><h3>Read the five views</h3><ol><li><strong>Walkthrough</strong><span>Run the recovery journey from discovery to sealed proof.</span></li><li><strong>Live Workspace</strong><span>See exactly how the web dashboard hands live work to the MV3 side panel.</span></li><li><strong>Evidence</strong><span>Inspect origin identity, confidence and read-only evidence.</span></li><li><strong>Approvals</strong><span>Review the exact external scopes before execution.</span></li><li><strong>Audit</strong><span>Follow the append-only event chain and integrity seal.</span></li></ol></section>
-    <section class="help-shortcuts"><h3>Useful controls</h3><p><kbd>⌘K</kbd> command menu · <kbd>G</kbd> guided preview · <kbd>R</kbd> approval review · <kbd>Esc</kbd> close overlays</p></section>
-  </aside>
-
-  <div class="dialog-backdrop" data-dialog-backdrop hidden aria-hidden="true"></div>
-  <section class="approval-dialog" data-approval-dialog hidden role="dialog" aria-modal="true" aria-labelledby="approval-title" aria-describedby="approval-description" tabindex="-1">
-    <header>
-      <div><p class="section-kicker">Human authority · exact scope</p><h2 id="approval-title">Review external mutations</h2></div>
-      <button class="dialog-close" type="button" data-action="close-approval" aria-label="Close approval review">×</button>
-    </header>
-    <p class="dialog-intro" id="approval-description">Each approval is separate, single-use and bound to the exact origin, tool, schema and arguments shown below.</p>
-    <div class="approval-review-grid">
-      <article class="approval-review" data-approval-review="apply">
-        <div class="approval-review-head"><span data-ui-icon="rollback" aria-hidden="true"></span><div><small>Production mutation</small><h3>Apply recovery</h3></div><b data-review-apply-state>Locked</b></div>
-        <section class="change-summary" aria-label="Apply recovery change summary">
-          <div class="change-transition"><div><small>Before</small><strong data-review-apply-before>Awaiting verified deployment state</strong></div><span aria-hidden="true">→</span><div><small>After</small><strong data-review-apply-after>Awaiting prepared recovery target</strong></div></div>
-          <dl class="change-facts"><div><dt>Target</dt><dd data-review-apply-target>Awaiting mapping</dd></div><div><dt>Impact</dt><dd data-review-apply-effect>Awaiting verified evidence</dd></div><div><dt>Reversibility</dt><dd>Reversible through a separate newly approved deployment action.</dd></div><div><dt>Approval expiry</dt><dd data-review-apply-expiry>Timer starts only after approval</dd></div></dl>
-        </section>
-        <details class="technical-details"><summary>Technical binding and raw arguments</summary><dl><div><dt>Origin</dt><dd data-review-apply-origin>Awaiting mapping</dd></div><div><dt>Tool</dt><dd><code data-review-apply-tool>—</code></dd></div></dl><pre data-review-apply-arguments tabindex="-1">{}</pre></details>
-        <button type="button" data-action="approve-apply">Approve apply recovery</button>
-      </article>
-      <article class="approval-review" data-approval-review="publish">
-        <div class="approval-review-head"><span data-ui-icon="send" aria-hidden="true"></span><div><small>Customer communication</small><h3>Publish update</h3></div><b data-review-publish-state>Locked</b></div>
-        <section class="change-summary" aria-label="Publish update change summary">
-          <div class="change-transition"><div><small>Before</small><strong data-review-publish-before>Awaiting current customer notice</strong></div><span aria-hidden="true">→</span><div><small>After</small><strong>Prepared customer update</strong><blockquote data-review-publish-body>Customer-visible content appears after the safe evidence phase.</blockquote></div></div>
-          <dl class="change-facts"><div><dt>Target</dt><dd data-review-publish-target>Awaiting mapping</dd></div><div><dt>Impact</dt><dd data-review-publish-effect>Awaiting verified evidence</dd></div><div><dt>Reversibility</dt><dd>A corrective public update requires a separate new approval.</dd></div><div><dt>Approval expiry</dt><dd data-review-publish-expiry>Timer starts only after approval</dd></div></dl>
-        </section>
-        <details class="technical-details"><summary>Technical binding and raw arguments</summary><dl><div><dt>Origin</dt><dd data-review-publish-origin>Awaiting mapping</dd></div><div><dt>Tool</dt><dd><code data-review-publish-tool>—</code></dd></div></dl><pre data-review-publish-arguments tabindex="-1">{}</pre></details>
-        <button type="button" data-action="approve-publish">Approve publish update</button>
-      </article>
-    </div>
-    <footer><div><span data-ui-icon="lock" aria-hidden="true"></span><p><strong data-approval-summary aria-live="polite">0 of 2 approved</strong><small>Changing any bound field invalidates its approval.</small></p></div><button class="execute-action" type="button" data-action="execute-approved" disabled><span data-execute-label>Execute approved actions</span> <span aria-hidden="true">→</span></button></footer>
-  </section>
-
-  <section class="command-menu" data-command-menu hidden role="dialog" aria-modal="true" aria-labelledby="command-menu-title" tabindex="-1">
-    <h2 class="visually-hidden" id="command-menu-title">Command menu</h2>
-    <label><span data-ui-icon="search" aria-hidden="true"></span><input type="search" data-command-input aria-label="Filter commands" placeholder="Type a command…" autocomplete="off"></label>
-    <div><button type="button" data-action="guided-tour"><span>Run guided judge mode</span><kbd>G</kbd></button><button type="button" data-action="start-mission"><span>Advance selected mission</span><kbd>↵</kbd></button><button type="button" data-action="choose-mission"><span>Choose another mission</span><kbd>M</kbd></button><button type="button" data-action="review-approval"><span>Review approvals</span><kbd>R</kbd></button><button type="button" data-action="reset"><span>Reset mission</span><kbd>⌫</kbd></button></div>
-  </section>
-
-  <div class="toast-region" data-toast-region role="status" aria-live="polite" aria-atomic="true"></div>
-  <div data-provider-runtime hidden aria-hidden="true"></div>
-  <script type="module" src="./src/app/main.js"></script>
+  <div class="toast-region" data-toast-region aria-live="polite" aria-atomic="false"></div>
+  <script type="module" src="./src/app/showcase.js"></script>
 </body>
 </html>
