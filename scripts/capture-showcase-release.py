@@ -167,7 +167,7 @@ def record_demo(browser, url: str, output: Path, temp_root: Path) -> Path:
         viewport={"width": 1920, "height": 1080},
         device_scale_factor=2,
         record_video_dir=video_dir,
-        record_video_size={"width": 3840, "height": 2160},
+        record_video_size={"width": 1920, "height": 1080},
     )
     page = context.new_page()
     ready(page, url)
@@ -215,8 +215,9 @@ def record_demo(browser, url: str, output: Path, temp_root: Path) -> Path:
     video.save_as(raw)
     output.parent.mkdir(parents=True, exist_ok=True)
     command = [
-        str(FFMPEG), "-y", "-hide_banner", "-loglevel", "warning", "-i", str(raw),
-        "-an", "-c:v", "libx264", "-preset", "medium", "-crf", "22", "-pix_fmt", "yuv420p",
+        str(FFMPEG), "-y", "-hide_banner", "-loglevel", "warning", "-i", str(raw), "-ss", "0.10",
+        "-an", "-vf", "scale=3840:2160:flags=lanczos",
+        "-c:v", "libx264", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p",
         "-movflags", "+faststart", str(output),
     ]
     subprocess.run(command, check=True)
@@ -226,9 +227,9 @@ def record_demo(browser, url: str, output: Path, temp_root: Path) -> Path:
 def make_gif(video: Path, output: Path) -> None:
     with tempfile.TemporaryDirectory(prefix="toolbraid-gif-") as directory:
         palette = Path(directory) / "palette.png"
-        filters = "fps=12,scale=1280:-1:flags=lanczos"
-        subprocess.run([str(FFMPEG), "-y", "-hide_banner", "-loglevel", "warning", "-t", "16", "-i", str(video), "-vf", f"{filters},palettegen=max_colors=160:stats_mode=diff", str(palette)], check=True)
-        subprocess.run([str(FFMPEG), "-y", "-hide_banner", "-loglevel", "warning", "-t", "16", "-i", str(video), "-i", str(palette), "-lavfi", f"{filters}[x];[x][1:v]paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle", "-loop", "0", str(output)], check=True)
+        filters = "fps=9,scale=1280:720:flags=lanczos"
+        subprocess.run([str(FFMPEG), "-y", "-hide_banner", "-loglevel", "warning", "-t", "16", "-i", str(video), "-vf", f"{filters},palettegen=max_colors=80:stats_mode=diff", "-frames:v", "1", "-update", "1", str(palette)], check=True)
+        subprocess.run([str(FFMPEG), "-y", "-hide_banner", "-loglevel", "warning", "-t", "16", "-i", str(video), "-i", str(palette), "-lavfi", f"{filters}[x];[x][1:v]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle", "-loop", "0", str(output)], check=True)
 
 
 def main() -> int:
