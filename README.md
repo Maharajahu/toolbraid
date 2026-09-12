@@ -12,6 +12,7 @@
 </p>
 
 <p align="center">
+  <a href="#windows-release-030-rc1">Windows release</a> ·
   <a href="#capabilities-at-a-glance">Capabilities</a> ·
   <a href="#live-deployment">Demo</a> ·
   <a href="https://youtu.be/IDaho_wf0Ak">4K video</a> ·
@@ -30,7 +31,24 @@
   <a href="LICENSE"><img alt="Apache License 2.0" src="https://img.shields.io/badge/license-Apache--2.0-ffd278?style=flat-square&amp;labelColor=242832"></a>
 </p>
 
-ToolBraid turns one human objective spanning several websites into a visible, explainable execution graph. It discovers live WebMCP tools, quarantines hostile metadata, maps incompatible contracts into canonical capabilities, executes safe reads, and stops before each external mutation until the human approves the exact origin, tool, arguments, and effect.
+## Windows release 0.3.0 RC1
+
+Looking for the installable extension and Windows companion? Use the **[official release repository](https://github.com/Maharajahu/toolbraid-releases)** and its **[0.3.0 RC1 downloads](https://github.com/Maharajahu/toolbraid-releases/releases/tag/v0.3.0-rc.1)**. This repository documents the original orchestration prototype; its source archives are not the current Windows installer, and the prototype's behavior below should not be assumed to describe the packaged release.
+
+The packaged release adds **WebMCP-enabled browser tools, optional integrated agent chat, and developer-focused X community workflows**:
+
+- **Compatible websites:** discover and execute site-registered native WebMCP tools when the browser exposes the required API. Ordinary page extraction and MCP tools remain available independently.
+- **Optional ChatGPT chat:** chat beside your page through official Codex App Server using your own ChatGPT account's Codex access and limits, without an API key for this chat. Includes streaming, recent local history, selected-page sharing, Stop and approval before browser mutations. [ChatGPT setup](https://github.com/Maharajahu/toolbraid-releases/blob/main/INSTALL.md#option-a-chatgpt-in-the-toolbraid-panel).
+- **Other subscriptions or local models:** use a compatible external MCP client and its own sign-in/model selector. The guide includes Claude Code and LM Studio examples; these pairings are documentation-based, not end-to-end certified. There is no universal subscription connector or local-model selector in the integrated chat. [External clients](https://github.com/Maharajahu/toolbraid-releases/blob/main/INSTALL.md#option-b-an-external-mcp-client) · [Local models](https://github.com/Maharajahu/toolbraid-releases/blob/main/INSTALL.md#option-c-a-local-model-in-lm-studio).
+- **Stay connected without losing focus:** inspect rendered X mentions/replies with links, ask for a catch-up, draft replies and use optional quiet monitoring while you work. Monitoring does not call a model or send automatic replies/DMs; X coverage is fixture-tested, not certified against every live account.
+
+**Release status:** free Windows x64 pre-release; no AI subscription is included. Edge Add-ons publication is pending, Chrome uses manual ZIP installation, and the Windows launcher is currently unsigned. Checksums are not a publisher signature. External MCP direct control has different approval behavior from integrated chat; read the [release's control and data boundaries](https://github.com/Maharajahu/toolbraid-releases#control-and-data-boundaries) before enabling access.
+
+**Updated 12 September 2026:** [What changed and validation limits](https://github.com/Maharajahu/toolbraid-releases/blob/main/RELEASE-NOTES.md) · [Installation, updates and troubleshooting](https://github.com/Maharajahu/toolbraid-releases/blob/main/INSTALL.md) · [Website](https://toolbraid.pages.dev/) · [Feedback form](https://toolbraid.pages.dev/feedback/).
+
+## Original orchestration prototype
+
+The prototype in this repository turns one human objective spanning several websites into a visible, explainable execution graph. It discovers live WebMCP tools, quarantines hostile metadata, maps incompatible contracts into canonical capabilities, executes safe reads, and stops before each external mutation until the human approves the exact origin, tool, arguments, and effect.
 
 ## Capabilities at a glance
 
