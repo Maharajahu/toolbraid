@@ -44,7 +44,7 @@ The packaged release adds **WebMCP-enabled browser tools, optional integrated ag
 
 **Release status:** free Windows x64 pre-release; no AI subscription is included. Edge Add-ons publication is pending, Chrome uses manual ZIP installation, and the Windows launcher is currently unsigned. Checksums are not a publisher signature. External MCP direct control has different approval behavior from integrated chat; read the [release's control and data boundaries](https://github.com/Maharajahu/toolbraid-releases#control-and-data-boundaries) before enabling access.
 
-**Updated 12 September 2026:** [What changed and validation limits](https://github.com/Maharajahu/toolbraid-releases/blob/main/RELEASE-NOTES.md) · [Installation, updates and troubleshooting](https://github.com/Maharajahu/toolbraid-releases/blob/main/INSTALL.md) · [Website](https://toolbraid.pages.dev/) · [Feedback form](https://toolbraid.pages.dev/feedback/).
+**Updated 12 September 2026:** [What changed and validation limits](https://github.com/Maharajahu/toolbraid-releases/blob/main/RELEASE-NOTES.md) · [High-resolution extension screenshots](https://github.com/Maharajahu/toolbraid-releases#see-the-interface) · [Installation, updates and troubleshooting](https://github.com/Maharajahu/toolbraid-releases/blob/main/INSTALL.md) · [Website](https://toolbraid.pages.dev/) · [Feedback form](https://toolbraid.pages.dev/feedback/).
 
 ## Original orchestration prototype
 
