@@ -12,7 +12,7 @@
 </p>
 
 <p align="center">
-  <a href="#windows-release-030-rc1">Windows release</a> ·
+  <a href="#windows-release-031-rc1">Windows release</a> ·
   <a href="#capabilities-at-a-glance">Capabilities</a> ·
   <a href="#live-deployment">Demo</a> ·
   <a href="https://youtu.be/IDaho_wf0Ak">4K video</a> ·
@@ -31,9 +31,9 @@
   <a href="LICENSE"><img alt="Apache License 2.0" src="https://img.shields.io/badge/license-Apache--2.0-ffd278?style=flat-square&amp;labelColor=242832"></a>
 </p>
 
-## Windows release 0.3.0 RC1
+## Windows release 0.3.1 RC1
 
-Looking for the installable extension and Windows companion? Use the **[official release repository](https://github.com/Maharajahu/toolbraid-releases)** and its **[0.3.0 RC1 downloads](https://github.com/Maharajahu/toolbraid-releases/releases/tag/v0.3.0-rc.1)**. This repository documents the original orchestration prototype; its source archives are not the current Windows installer, and the prototype's behavior below should not be assumed to describe the packaged release.
+Looking for the installable extension and Windows companion? Use the **[official release repository](https://github.com/Maharajahu/toolbraid-releases)** and its **[0.3.1 RC1 downloads](https://github.com/Maharajahu/toolbraid-releases/releases/tag/v0.3.1-rc.1)**. This repository documents the original orchestration prototype; its source archives are not the current Windows installer, and the prototype's behavior below should not be assumed to describe the packaged release.
 
 The packaged release adds **WebMCP-enabled browser tools, optional integrated agent chat, and developer-focused X community workflows**:
 
@@ -44,7 +44,13 @@ The packaged release adds **WebMCP-enabled browser tools, optional integrated ag
 
 **Release status:** free Windows x64 pre-release; no AI subscription is included. Edge Add-ons publication is pending, Chrome uses manual ZIP installation, and the Windows launcher is currently unsigned. Checksums are not a publisher signature. External MCP direct control has different approval behavior from integrated chat; read the [release's control and data boundaries](https://github.com/Maharajahu/toolbraid-releases#control-and-data-boundaries) before enabling access.
 
-**Updated 12 September 2026:** [What changed and validation limits](https://github.com/Maharajahu/toolbraid-releases/blob/main/RELEASE-NOTES.md) · [High-resolution extension screenshots](https://github.com/Maharajahu/toolbraid-releases#see-the-interface) · [Installation, updates and troubleshooting](https://github.com/Maharajahu/toolbraid-releases/blob/main/INSTALL.md) · [Website](https://toolbraid.pages.dev/) · [Feedback form](https://toolbraid.pages.dev/feedback/).
+**Updated 13 September 2026:** the extension now includes a minimalist **Buy me a coffee** link and **GitHub icon**, with optional support and no paid feature, embedded payment form or new permission. [What changed and validation limits](https://github.com/Maharajahu/toolbraid-releases/blob/main/RELEASE-NOTES.md) · [High-resolution extension screenshots](https://github.com/Maharajahu/toolbraid-releases#see-the-interface) · [Installation, updates and troubleshooting](https://github.com/Maharajahu/toolbraid-releases/blob/main/INSTALL.md) · [Website](https://toolbraid.pages.dev/) · [Feedback form](https://toolbraid.pages.dev/feedback/).
+
+[![Watch the real Windows release demo](https://raw.githubusercontent.com/Maharajahu/toolbraid-releases/main/assets/toolbraid-demo-poster.jpg)](https://toolbraid.pages.dev/#demo)
+
+[**Watch the real Windows demo**](https://toolbraid.pages.dev/#demo) · [Download the 4K export](https://github.com/Maharajahu/toolbraid-releases/releases/download/v0.3.1-rc.1/ToolBraid-Windows-real-demo-4K.mp4). Real model responses on the live website and a public X conversation; a draft without posting; GitHub navigation after approval. No audio. Edited Windows capture, not a UI mockup; 4K is an upscaled/reframed export of the 0.3.0 interface. **The built-in chat is optional: you can work directly in your existing Codex session via MCP.**
+
+**Microsoft Store companion — in certification:** ToolBraid Companion 0.3.1.0 was submitted on 13 September 2026; Partner Center confirmed **In certification**, with free publication after approval. The Windows app provides Connect/Disconnect, MCP configuration and **Check connection**. Diagnostics report runtime/MCP/extension/page status without browser actions, model requests or private page details. It is separate from Edge Add-ons and is not a new feature of the ZIP installer. There is no approved Store download yet; Store-installed lifecycle testing is not claimed. Chat remains optional, including direct use in an existing Codex session. [Store setup and signing limits](https://github.com/Maharajahu/toolbraid-releases/blob/main/INSTALL.md#microsoft-store-companion--in-preparation).
 
 ## Original orchestration prototype
 
