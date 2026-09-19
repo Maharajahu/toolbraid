@@ -33,14 +33,7 @@
 
 ## Windows release 0.3.1 RC1
 
-### Latest update · 19 September 2026
-
-- **Windows file picker:** standard Open dialogs can be completed through the companion.
-- **Media uploads:** attachment verification survives cleared or removed upload fields, without duplicate selection events.
-- **X replies:** playing-video countdowns no longer interrupt an otherwise unchanged prepared reply.
-- **Token-efficiency video:** a new 15-second 1080p video on the website and both GitHub READMEs, with the measurement and its limitations.
-
-Version **0.3.1** and tag **v0.3.1-rc.1** are unchanged. The public-source suite passed **587 tests**, with **5 opt-in checks skipped** and **0 failures**; a live Edge draft/video attachment was confirmed and cleared without posting. The refreshed Edge ZIP has not been resubmitted; Microsoft's existing review is unchanged. [Complete update and validation record](https://github.com/Maharajahu/ToolBraid-Companion/blob/main/RELEASE-NOTES.md#latest-update--19-september-2026) · [Website updates](https://toolbraid.pages.dev/updates/#2026-09-19).
+**Updated 19 September 2026:** more reliable file uploads and X replies in Companion. [What's new](https://github.com/Maharajahu/ToolBraid-Companion/blob/main/RELEASE-NOTES.md#latest-update--19-september-2026) · [Token-efficiency video and measurement](#token-efficient-context-with-companion).
 
 Looking for the installable extension and Windows companion? Use the **[official release repository](https://github.com/Maharajahu/ToolBraid-Companion)** and its **[0.3.1 RC1 downloads](https://github.com/Maharajahu/ToolBraid-Companion/releases/tag/v0.3.1-rc.1)**. This repository documents the original orchestration prototype; its source archives are not the current Windows installer, and the prototype's behavior below should not be assumed to describe the packaged release.
 
@@ -59,7 +52,7 @@ The packaged release adds **WebMCP-enabled browser tools, optional integrated ag
 
 [**Watch the real Windows demo**](https://toolbraid.pages.dev/#demo) · [Download the 4K export](https://github.com/Maharajahu/ToolBraid-Companion/releases/download/v0.3.1-rc.1/ToolBraid-Windows-real-demo-4K.mp4). Real model responses on the live website and a public X conversation; a draft without posting; GitHub navigation after approval. No audio. Edited Windows capture, not a UI mockup; 4K is an upscaled/reframed export of the 0.3.0 interface. **The built-in chat is optional: you can work directly in your existing Codex session via MCP.**
 
-**Microsoft Store companion — in certification:** ToolBraid Companion 0.3.1.0 was submitted on 13 September 2026; Partner Center confirmed **In certification**, with free publication after approval. The Windows app provides Connect/Disconnect, MCP configuration and **Check connection**. Diagnostics report runtime/MCP/extension/page status without browser actions, model requests or private page details. It is separate from Edge Add-ons and is not a new feature of the ZIP installer. There is no approved Store download yet; Store-installed lifecycle testing is not claimed. Chat remains optional, including direct use in an existing Codex session. [Store setup and signing limits](https://github.com/Maharajahu/ToolBraid-Companion/blob/main/INSTALL.md#microsoft-store-companion--in-preparation).
+**Availability:** manual Windows and browser-extension downloads are available. The ZIP companion is unsigned; no Microsoft Store or Edge Add-ons download is listed. [Installation and signing details](https://github.com/Maharajahu/ToolBraid-Companion/blob/main/INSTALL.md#microsoft-store-companion).
 
 ### Token-efficient context with Companion
 
