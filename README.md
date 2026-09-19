@@ -54,6 +54,12 @@ The packaged release adds **WebMCP-enabled browser tools, optional integrated ag
 
 **Microsoft Store companion — in certification:** ToolBraid Companion 0.3.1.0 was submitted on 13 September 2026; Partner Center confirmed **In certification**, with free publication after approval. The Windows app provides Connect/Disconnect, MCP configuration and **Check connection**. Diagnostics report runtime/MCP/extension/page status without browser actions, model requests or private page details. It is separate from Edge Add-ons and is not a new feature of the ZIP installer. There is no approved Store download yet; Store-installed lifecycle testing is not claimed. Chat remains optional, including direct use in an existing Codex session. [Store setup and signing limits](https://github.com/Maharajahu/ToolBraid-Companion/blob/main/INSTALL.md#microsoft-store-companion--in-preparation).
 
+### Token-efficient context with Companion
+
+https://github.com/user-attachments/assets/418616cf-2b0f-4198-a9f6-327bfb9d27d3
+
+The same seven public X posts: **821 returned-context tokens with ToolBraid Companion versus 5,094 in a full browser DOM snapshot**. Custom browser extraction returned 661 tokens. One measured sample, not total agent usage or a universal claim. **15 seconds · 1080p · Sound effects, no voice.** [Measurement and limitations](https://github.com/Maharajahu/ToolBraid-Companion/blob/main/docs/token-efficiency.md) · [Website player](https://toolbraid.pages.dev/#token-efficiency).
+
 ## Original orchestration prototype
 
 The prototype in this repository turns one human objective spanning several websites into a visible, explainable execution graph. It discovers live WebMCP tools, quarantines hostile metadata, maps incompatible contracts into canonical capabilities, executes safe reads, and stops before each external mutation until the human approves the exact origin, tool, arguments, and effect.
