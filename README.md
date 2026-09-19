@@ -33,7 +33,14 @@
 
 ## Windows release 0.3.1 RC1
 
-**Updated 19 September 2026:** the [ToolBraid Companion source and downloads](https://github.com/Maharajahu/ToolBraid-Companion) now include Windows file-picker support, verified media attachments when a page clears its upload input, and a fix for reply actions interrupted by X video countdowns. Version **0.3.1** and tag **v0.3.1-rc.1** are unchanged. The public-source suite passed **587 tests**, with **5 opt-in checks skipped** and **0 failures**; a live Edge draft/video attachment was confirmed and cleared without posting. The refreshed **Edge submission ZIP** is included, but replacing a previously submitted Store package requires a higher version, so this same-version refresh has not been resubmitted. [Complete changes and validation limits](https://github.com/Maharajahu/ToolBraid-Companion/blob/main/RELEASE-NOTES.md#media-upload-and-reply-fixes--19-september-2026) · [Website updates](https://toolbraid.pages.dev/updates/).
+### Latest update · 19 September 2026
+
+- **Windows file picker:** standard Open dialogs can be completed through the companion.
+- **Media uploads:** attachment verification survives cleared or removed upload fields, without duplicate selection events.
+- **X replies:** playing-video countdowns no longer interrupt an otherwise unchanged prepared reply.
+- **Token-efficiency video:** a new 15-second 1080p video on the website and both GitHub READMEs, with the measurement and its limitations.
+
+Version **0.3.1** and tag **v0.3.1-rc.1** are unchanged. The public-source suite passed **587 tests**, with **5 opt-in checks skipped** and **0 failures**; a live Edge draft/video attachment was confirmed and cleared without posting. The refreshed Edge ZIP has not been resubmitted; Microsoft's existing review is unchanged. [Complete update and validation record](https://github.com/Maharajahu/ToolBraid-Companion/blob/main/RELEASE-NOTES.md#latest-update--19-september-2026) · [Website updates](https://toolbraid.pages.dev/updates/#2026-09-19).
 
 Looking for the installable extension and Windows companion? Use the **[official release repository](https://github.com/Maharajahu/ToolBraid-Companion)** and its **[0.3.1 RC1 downloads](https://github.com/Maharajahu/ToolBraid-Companion/releases/tag/v0.3.1-rc.1)**. This repository documents the original orchestration prototype; its source archives are not the current Windows installer, and the prototype's behavior below should not be assumed to describe the packaged release.
 
