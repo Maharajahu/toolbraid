@@ -24,6 +24,11 @@
 </p>
 
 <p align="center">
+  <a href="https://x.com/ToolBraidComp"><img src="https://img.shields.io/badge/Follow-%40ToolBraidComp-111111?logo=x&amp;logoColor=white" alt="Follow @ToolBraidComp on X"></a>
+  <a href="https://buymeacoffee.com/dumitrescup"><img src="https://img.shields.io/badge/Buy_me_a_coffee-FFDD00?logo=buymeacoffee&amp;logoColor=000000" alt="Buy me a coffee — optional support"></a>
+</p>
+
+<p align="center">
   <img alt="Native WebMCP" src="https://img.shields.io/badge/WebMCP-native-5de7ff?style=flat-square&amp;labelColor=242832">
   <img alt="Universal browser layer" src="https://img.shields.io/badge/Universal-browser_layer-ff8cc8?style=flat-square&amp;labelColor=242832">
   <img alt="Node.js 20 or newer" src="https://img.shields.io/badge/Node.js-20%2B-89e9a5?style=flat-square&amp;logo=nodedotjs&amp;logoColor=white&amp;labelColor=242832">
